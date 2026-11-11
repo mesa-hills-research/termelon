@@ -5,7 +5,7 @@
 //! | Module | Holds |
 //! |---|---|
 //! | [`style`] | [`Color`], [`Modifier`], [`UnderlineStyle`] and [`Style`] |
-//! | [`layout`] | [`Position`], [`Size`] and [`Rect`] |
+//! | [`layout`] | [`Position`], [`Size`], [`Rect`], and [`Layout`] by [`Constraint`]s |
 //! | [`event`] | [`Event`] and the key and mouse types in it |
 //! | [`caps`] | [`Capabilities`], what the terminal supports |
 //!
@@ -19,5 +19,5 @@ pub mod style;
 
 pub use caps::{Capabilities, WidthProfile};
 pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
-pub use layout::{Position, Rect, Size};
+pub use layout::{Alignment, Constraint, Layout, Position, Rect, Size};
 pub use style::{Color, Modifier, Style, UnderlineStyle};
