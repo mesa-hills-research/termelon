@@ -147,6 +147,9 @@ proptest! {
         }
         term.feed(&bytes[middle..]).unwrap();
         check(&term)?;
+        let styled = term.styled();
+        prop_assert!(styled.ends_with('\n'));
+        let _ = term.to_html();
     }
 
     #[test]

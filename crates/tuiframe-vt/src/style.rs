@@ -69,6 +69,45 @@ const NAMED: [Color; 16] = [
     Color::White,
 ];
 
+const NAMES: [&str; 16] = [
+    "black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "gray",
+    "dark-gray",
+    "light-red",
+    "light-green",
+    "light-yellow",
+    "light-blue",
+    "light-magenta",
+    "light-cyan",
+    "white",
+];
+
+/// xterm's default palette for the first sixteen colours.
+const PALETTE16: [(u8, u8, u8); 16] = [
+    (0x00, 0x00, 0x00),
+    (0xcd, 0x00, 0x00),
+    (0x00, 0xcd, 0x00),
+    (0xcd, 0xcd, 0x00),
+    (0x00, 0x00, 0xee),
+    (0xcd, 0x00, 0xcd),
+    (0x00, 0xcd, 0xcd),
+    (0xe5, 0xe5, 0xe5),
+    (0x7f, 0x7f, 0x7f),
+    (0xff, 0x00, 0x00),
+    (0x00, 0xff, 0x00),
+    (0xff, 0xff, 0x00),
+    (0x5c, 0x5c, 0xff),
+    (0xff, 0x00, 0xff),
+    (0x00, 0xff, 0xff),
+    (0xff, 0xff, 0xff),
+];
+
 impl Color {
     /// The named colour for a palette index from 0 to 15.
     pub fn named(index: u8) -> Option<Color> {
@@ -81,6 +120,48 @@ impl Color {
             .iter()
             .position(|&c| c == self)
             .and_then(|i| u8::try_from(i).ok())
+    }
+
+    /// How the styled-text format writes the colour, or `None` for the default.
+    pub(crate) fn styled_name(self) -> Option<String> {
+        match self {
+            Color::Default => None,
+            Color::Indexed(n) => Some(format!("idx:{n}")),
+            Color::Rgb(r, g, b) => Some(format!("#{r:02x}{g:02x}{b:02x}")),
+            named => named
+                .named_index()
+                .map(|i| NAMES[usize::from(i)].to_owned()),
+        }
+    }
+
+    /// The colour as RGB in xterm's default palette, or `None` for the default.
+    pub(crate) fn rgb(self) -> Option<(u8, u8, u8)> {
+        match self {
+            Color::Default => None,
+            Color::Rgb(r, g, b) => Some((r, g, b)),
+            Color::Indexed(n) => Some(palette256(n)),
+            named => named.named_index().map(palette256),
+        }
+    }
+}
+
+/// xterm's default 256-colour palette.
+fn palette256(n: u8) -> (u8, u8, u8) {
+    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    match n {
+        0..=15 => PALETTE16[usize::from(n)],
+        16..=231 => {
+            let i = n - 16;
+            (
+                LEVELS[usize::from(i / 36)],
+                LEVELS[usize::from((i / 6) % 6)],
+                LEVELS[usize::from(i % 6)],
+            )
+        }
+        _ => {
+            let level = 8 + (n - 232) * 10;
+            (level, level, level)
+        }
     }
 }
 
@@ -149,6 +230,48 @@ impl Style {
     pub fn is_default(&self) -> bool {
         *self == Style::default()
     }
+
+    /// The attributes as the styled-text format writes them, in its order, empty for the default
+    /// style.
+    pub(crate) fn styled_attrs(&self) -> Vec<String> {
+        let mut attrs = Vec::new();
+        for (key, color) in [
+            ("fg", self.fg),
+            ("bg", self.bg),
+            ("ul", self.underline_color),
+        ] {
+            if let Some(name) = color.styled_name() {
+                attrs.push(format!("{key}={name}"));
+            }
+        }
+        match self.underline {
+            Underline::None => {}
+            Underline::Single => attrs.push("underline".to_owned()),
+            Underline::Double => attrs.push("underline=double".to_owned()),
+            Underline::Curly => attrs.push("underline=curly".to_owned()),
+            Underline::Dotted => attrs.push("underline=dotted".to_owned()),
+            Underline::Dashed => attrs.push("underline=dashed".to_owned()),
+        }
+        for (on, name) in [
+            (self.bold, "bold"),
+            (self.dim, "dim"),
+            (self.italic, "italic"),
+            (self.blink, "blink"),
+            (self.rapid_blink, "rapid-blink"),
+            (self.reverse, "reverse"),
+            (self.hidden, "hidden"),
+            (self.strike, "strike"),
+            (self.overline, "overline"),
+        ] {
+            if on {
+                attrs.push(name.to_owned());
+            }
+        }
+        if let Some(link) = &self.link {
+            attrs.push(format!("link={}", link.url));
+        }
+        attrs
+    }
 }
 
 #[cfg(test)]
@@ -162,5 +285,27 @@ mod tests {
         }
         assert_eq!(Color::named(16), None);
         assert_eq!(Color::Indexed(1).named_index(), None);
+    }
+
+    #[test]
+    fn palette_matches_xterm() {
+        assert_eq!(palette256(9), (0xff, 0, 0));
+        assert_eq!(palette256(16), (0, 0, 0));
+        assert_eq!(palette256(196), (255, 0, 0));
+        assert_eq!(palette256(231), (255, 255, 255));
+        assert_eq!(palette256(232), (8, 8, 8));
+        assert_eq!(palette256(255), (238, 238, 238));
+    }
+
+    #[test]
+    fn styled_names() {
+        assert_eq!(Color::DarkGray.styled_name().as_deref(), Some("dark-gray"));
+        assert_eq!(Color::Gray.styled_name().as_deref(), Some("gray"));
+        assert_eq!(Color::Indexed(8).styled_name().as_deref(), Some("idx:8"));
+        assert_eq!(
+            Color::Rgb(0x7f, 0x8e, 0xa3).styled_name().as_deref(),
+            Some("#7f8ea3")
+        );
+        assert_eq!(Color::Default.styled_name(), None);
     }
 }

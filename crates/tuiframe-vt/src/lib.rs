@@ -47,6 +47,39 @@
 //! profile's [`WidthRules`]. A character that continues the cluster before it joins that cell,
 //! which is measured again, so a cluster written one scalar at a time ends up as if written whole.
 //! While a program has mode 2027 set, clusters are measured as if `joins_emoji` were on.
+//!
+//! # The styled-text format, version 1
+//!
+//! [`Emulator::styled`] writes the screen in a line format that reads well in a diff, and other
+//! tools write the same format, so the two can be compared as text.
+//!
+//! ```text
+//! size 80 24
+//! cursor 2 23 visible bar
+//! text 0 "  ⣷ Working…"
+//! style 0 2 3 fg=#7f8ea3
+//! style 0 4 13 fg=#d8dee9 bold
+//! text 1 ""
+//! ```
+//!
+//! - `size` gives the columns and rows.
+//! - `cursor` gives the cursor's column and row, then `visible` and its shape (`block`,
+//!   `underline`, `bar` or `default`), or `hidden` with no shape.
+//! - Each row has one `text` line, in row order, with its text as a JSON string. Continuation cells
+//!   are left out and trailing spaces trimmed. The escapes are those of `serde_json`, which escapes
+//!   `"`, `\` and the C0 controls and leaves everything else as UTF-8.
+//! - After each row's `text` line come its `style` lines, one per run of cells that write the same
+//!   attributes: the row, the start column and the end column (exclusive), counted in cells, then the
+//!   attributes. A run whose cells are all in the default style writes no line. A run can go past the
+//!   trimmed text, as a coloured background does.
+//! - The attributes come in this order: `fg=`, `bg=`, `ul=` (the underline colour), `underline` or
+//!   `underline=double|curly|dotted|dashed`, `bold`, `dim`, `italic`, `blink`, `rapid-blink`,
+//!   `reverse`, `hidden`, `strike`, `overline`, `link=<url>`. A colour is `#rrggbb`, `idx:N`, or one of
+//!   `black red green yellow blue magenta cyan gray dark-gray light-red light-green light-yellow
+//!   light-blue light-magenta light-cyan white`, ratatui's names for palette 0 to 15.
+//! - Cells whose attributes write the same are one run, so two links to one address with different
+//!   ids are one run.
+//! - Every line ends with `\n`, the last one too.
 
 mod emulator;
 mod event;
