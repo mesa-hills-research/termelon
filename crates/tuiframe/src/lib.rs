@@ -24,6 +24,14 @@ pub mod layout;
 )]
 mod output;
 pub mod style;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "used by `Terminal`, which comes with the terminal API"
+    )
+)]
+mod sys;
 
 pub use caps::{Capabilities, WidthProfile};
 pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
