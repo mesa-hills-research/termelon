@@ -20,6 +20,8 @@ crossterm = { version = "0.29", default-features = false }
 # Counts allocations. A counting allocator is `unsafe impl GlobalAlloc`, and unsafe code lives only in
 # the files AGENTS.md lists, so the crate that holds it is a dependency.
 stats_alloc = "0.1.10"
+# The stack under test, its buffer and its encoder, which the feature makes reachable here.
+tuiframe = { workspace = true, features = ["unstable-encoder"] }
 
 [lints]
 workspace = true

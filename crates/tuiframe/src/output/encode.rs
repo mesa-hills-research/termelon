@@ -140,7 +140,7 @@ impl Encoder {
 
     /// Turns on looking for rows that moved, which the terminal then scrolls itself.
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "unstable-encoder")),
         expect(
             dead_code,
             reason = "scroll detection stays off until the terminal matrix passes it"

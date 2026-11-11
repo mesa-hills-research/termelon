@@ -96,6 +96,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "stats_alloc",
+ "tuiframe",
  "unicode-segmentation",
  "unicode-width",
 ]
