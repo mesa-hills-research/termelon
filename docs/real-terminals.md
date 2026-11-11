@@ -2,8 +2,15 @@
 
 `tools/harness` starts a real terminal running `tools/probe`, waits until the probe's scene shows,
 reads the screen back, and compares it cell by cell with the screen `tuiframe-vt` computes for the
-bytes the probe wrote. Text and colours always count. Attributes and the cursor count where the
-terminal's readback reports them.
+probe's frame. Text and colours always count. Attributes and the cursor count where the terminal's
+readback reports them.
+
+The probe opens the terminal with the framework, which asks what it supports and measures its
+widths, checks that it has the size the harness asked for, and draws the scene as a frame ending
+with a marker on the last row. Before drawing, it saves the bytes that show the frame on a cleared
+screen, leaving out what the framework leaves out for that terminal (underline styles, underline
+colours, links and cursor shapes it lacks). Once the screen is read back, the harness presses `q`,
+and the probe writes a report of the capabilities it found and the events it received.
 
 ```sh
 cargo build -p harness -p probe
@@ -13,7 +20,7 @@ target/debug/harness run tmux --probe target/debug/probe --out harness-out
 
 `smoke` starts the terminal with `echo` and reads it back, which tells a broken setup from a
 failure of the program under test. `run` runs every scene the probe lists (or those named with
-`--scene`) at 80 by 24 (or `--size`). For each scene it writes the bytes the probe wrote, a JSON
+`--scene`) at 80 by 24 (or `--size`). For each scene it writes the probe's bytes and report, a JSON
 report with each difference, both screens in the styled-text format, an HTML page with the two side
 by side, and a screenshot where there's a display. It exits with 1 when a screen differs.
 

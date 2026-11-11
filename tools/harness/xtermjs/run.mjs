@@ -19,7 +19,9 @@ const [cols, rows] = [Number(process.argv[2]), Number(process.argv[3])];
 const [cwd, program, ...args] = process.argv.slice(4);
 
 const term = new headless.Terminal({ cols, rows, scrollback: 0, allowProposedApi: true });
-const child = pty.spawn(program, args, { name: "xterm-256color", cols, rows, cwd, env: process.env, encoding: null });
+// VS Code's terminal says it has true colour, as programs can't ask xterm.js.
+const env = { ...process.env, COLORTERM: "truecolor" };
+const child = pty.spawn(program, args, { name: "xterm-256color", cols, rows, cwd, env, encoding: null });
 child.onData((data) => term.write(data));
 term.onData((data) => child.write(data));
 term.onBinary((data) => child.write(Buffer.from(data, "binary")));

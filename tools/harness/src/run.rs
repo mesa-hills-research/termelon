@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tuiframe_vt::{Emulator, Profile};
+use tuiframe_vt::{Emulator, Key, Mods, Profile};
 
 use crate::compare::{Mismatch, compare};
 use crate::driver::{Driver, Error, Launch, Readback};
@@ -50,12 +50,15 @@ pub struct Outcome {
 /// Runs a probe's scene in a terminal and compares the screen with what `tuiframe-vt` computes
 /// under `profile` for the bytes the probe recorded.
 ///
-/// The probe runs as `probe --scene NAME --record FILE`, writes the scene and then the marker,
-/// saves every byte it wrote to the file, and waits until it's stopped.
+/// The probe runs as `probe --scene NAME --record FILE --report FILE --size COLSxROWS`. It saves
+/// the bytes that show its frame, draws the scene with its marker, and holds the screen until `q`,
+/// then writes its report. The harness presses `q` after reading the screen back, as bytes where the
+/// terminal takes them and as a key otherwise, so the report has the capabilities the probe found.
 ///
 /// # Errors
 ///
-/// When the terminal doesn't start, the marker doesn't show, or the recording can't be read.
+/// When the terminal doesn't start, the marker doesn't show (with the probe's own error, if it
+/// wrote one), or the recording can't be read.
 pub fn run_scene(
     driver: &mut dyn Driver,
     probe: &Path,
@@ -64,23 +67,46 @@ pub fn run_scene(
     profile: Profile,
     out: &Path,
 ) -> Result<Outcome, Error> {
-    let record = out.join(format!("{}-{scene}.bytes", driver.name()));
+    let stem = format!("{}-{scene}", driver.name());
+    let record = out.join(format!("{stem}.bytes"));
+    let probe_report = out.join(format!("{stem}.probe.json"));
     let _ = std::fs::remove_file(&record);
-    let probe = probe.display().to_string();
-    let target = record.display().to_string();
-    driver.start(&Launch::new(
-        cols,
-        rows,
-        &[&probe, "--scene", scene, "--record", &target],
-    ))?;
+    let _ = std::fs::remove_file(&probe_report);
+    let (probe, target, report_path, size) = (
+        probe.display().to_string(),
+        record.display().to_string(),
+        probe_report.display().to_string(),
+        format!("{cols}x{rows}"),
+    );
+    let args = [
+        probe.as_str(),
+        "--scene",
+        scene,
+        "--record",
+        &target,
+        "--report",
+        &report_path,
+        "--size",
+        &size,
+    ];
+    driver.start(&Launch::new(cols, rows, &args))?;
     let result = driver.wait_for(&marker(scene), SCENE_TIMEOUT);
-    let screenshot = out.join(format!("{}-{scene}.png", driver.name()));
+    let screenshot = out.join(format!("{stem}.png"));
     let screenshot = match driver.screenshot(&screenshot) {
         Ok(true) => Some(screenshot),
         _ => None,
     };
+    let quit = driver
+        .send_bytes(b"q")
+        .or_else(|_| driver.send_keys(&[(Key::Char('q'), Mods::NONE)]));
+    if quit.is_ok() {
+        wait_for_file(&probe_report, Duration::from_secs(3));
+    }
     driver.stop()?;
-    let readback = result?;
+    let readback = result.map_err(|error| match probe_error(&probe_report) {
+        Some(probe) => Error::Parse(format!("{error}, and the probe said {probe}")),
+        None => error,
+    })?;
     let bytes = std::fs::read(&record).map_err(|error| Error::Io(target.clone(), error))?;
     let mut expected = Emulator::with_profile(profile, cols, rows);
     expected
@@ -93,6 +119,20 @@ pub fn run_scene(
         mismatches,
         screenshot,
     })
+}
+
+fn wait_for_file(path: &Path, timeout: Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    while !path.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The error a probe's report gives, if it has one.
+fn probe_error(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let json = Json::parse(&text).ok()?;
+    json.get("error").and_then(Json::as_str).map(str::to_owned)
 }
 
 /// The report of a scene, as JSON.
