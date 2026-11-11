@@ -1,0 +1,13 @@
+[package]
+name = "probe"
+description = "Runs inside a real terminal, measures it and draws test scenes, then writes a report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

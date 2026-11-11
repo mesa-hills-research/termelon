@@ -1,0 +1,33 @@
+[package]
+name = "tuiframe"
+description = "A terminal UI framework in pure Rust, from raw mode and input to diffed, synchronized frames"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["terminal", "tui", "ui", "console", "cli"]
+categories = ["command-line-interface"]
+
+[features]
+# The `Stream` trait on `Events`, for programs that want it.
+stream = ["dep:futures-core"]
+
+[dependencies]
+unicode-width.workspace = true
+unicode-segmentation.workspace = true
+futures-core = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+signal-hook.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

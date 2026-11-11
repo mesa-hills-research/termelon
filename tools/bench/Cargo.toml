@@ -1,0 +1,13 @@
+[package]
+name = "bench"
+description = "Workloads that compare the framework's output layer with ratatui and crossterm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+# Tests state their expectations with unwrap, expect and panics, and may print.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-print-in-tests = true
+# Only the writer thread writes to the terminal. Its one call that duplicates standard output's
+# descriptor carries an #[expect] with its reason.
+disallowed-methods = [
+    { path = "std::io::stdout", reason = "the terminal is written only by the writer thread" },
+    { path = "std::io::stderr", reason = "the terminal is written only by the writer thread" },
+]

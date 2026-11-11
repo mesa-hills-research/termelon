@@ -1,0 +1,81 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/tuiframe",
+    "crates/tuiframe-vt",
+    "tools/probe",
+    "tools/harness",
+    "tools/bench",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mesa-hills-research/tuiframe"
+
+[workspace.dependencies]
+tuiframe = { path = "crates/tuiframe", version = "0.1.0" }
+tuiframe-vt = { path = "crates/tuiframe-vt", version = "0.1.0" }
+unicode-width = "0.2.2"
+unicode-segmentation = "1.12.0"
+rustix = { version = "1.1", default-features = false, features = ["std", "termios", "event", "stdio", "process", "pty", "fs"] }
+signal-hook = { version = "0.3.18", default-features = false }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
+futures-core = "0.3.31"
+proptest = { version = "1.6", default-features = false, features = ["std"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"                      # allowed only in sys/macos.rs and sys/windows/console.rs
+unsafe_op_in_unsafe_fn = "deny"           # every unsafe operation in its own block with its reason
+missing_docs = "warn"                     # a public library documents every public item
+missing_debug_implementations = "warn"    # public types print in test failures
+unreachable_pub = "warn"                  # pub means part of the API, everything else is pub(crate)
+unused_qualifications = "warn"            # keeps paths short and consistent
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"           # docs links must resolve
+private_intra_doc_links = "warn"          # public docs shouldn't point at private items
+
+[workspace.lints.clippy]
+# Unsafe and its documentation
+undocumented_unsafe_blocks = "deny"       # every unsafe block has a SAFETY comment
+multiple_unsafe_ops_per_block = "deny"    # one operation per block, so each comment covers one thing
+unnecessary_safety_comment = "warn"       # no SAFETY comments on safe code
+unnecessary_safety_doc = "warn"           # no Safety sections on safe functions
+# Docs
+missing_errors_doc = "warn"               # every fallible public function says when it fails
+missing_panics_doc = "warn"               # and when it panics
+doc_markdown = "warn"                     # identifiers in docs are in backticks
+# The pedantic group, with the exceptions below
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "warn"         # kept on purpose, since coordinates are u16 and silent truncation is the classic layout bug
+cast_sign_loss = "warn"                   # same
+cast_possible_wrap = "warn"               # same
+module_name_repetitions = "allow"         # types are re-exported at the crate root, where the module name isn't seen
+must_use_candidate = "allow"              # #[must_use] goes on builders and constructors by hand, not every getter
+similar_names = "allow"                   # x and y, fg and bg, row and col are clearest as they are
+struct_excessive_bools = "allow"          # Capabilities and Options are sets of independent switches
+fn_params_excessive_bools = "allow"       # same, for a few internal constructors
+too_many_lines = "allow"                  # the tokenizer and key tables are long single matches, clearer whole
+match_same_arms = "allow"                 # key tables list parallel arms that happen to agree, and merging them hides the table
+missing_fields_in_debug = "allow"         # Debug for buffers shows a summary, not 30,000 cells
+# Restriction lints chosen for a library that owns a terminal
+print_stdout = "deny"                     # all output goes through the writer
+print_stderr = "deny"                     # same
+dbg_macro = "deny"                        # same
+unwrap_used = "deny"                      # a terminal library never panics on input or the system's errors
+expect_used = "deny"                      # same, outside tests (clippy.toml allows both in tests)
+panic = "deny"                            # same
+todo = "deny"                             # nothing unfinished ships
+unimplemented = "deny"                    # same
+exit = "deny"                             # a library never ends the process
+mem_forget = "deny"                       # restore guards must run
+infinite_loop = "deny"                    # loops end on close, error or timeout
+# Considered and left off
+# indexing_slicing, since the buffer indexes rows it has already bounds-checked, and property tests and fuzzing look for panics
+# arithmetic_side_effects, too noisy for coordinate math, which goes through saturating helpers instead
+# std_instead_of_core, since the crate needs std for threads and the terminal, so no_std buys nothing
+# missing_inline_in_public_items, since rustc inlines small functions across crates without it
