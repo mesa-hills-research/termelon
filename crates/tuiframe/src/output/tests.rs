@@ -1,7 +1,7 @@
 //! The diff and the encoder against `tuiframe-vt`, and the bytes of small frames.
 
 use proptest::prelude::*;
-use tuiframe_vt::{Emulator, Event, Profile, Underline, WidthRules};
+use tuiframe_vt::{Emulator, Event, Profile, Quirk, Underline, WidthRules};
 
 use super::encode::Encoder;
 use super::{CompletedFrame, Cursor, CursorShape, FrameStats};
@@ -145,11 +145,11 @@ fn byte_goldens() {
             "␛[?2026h␛[?25l␛[H␛[0ma界b␛[?2026l",
         ),
         (
-            "an uncertain width is followed by an absolute move",
+            "an uncertain width is written over spaces and followed by an absolute move",
             blank.clone(),
             text(AREA, &[(0, 0, "a❤\u{fe0f}b", Style::new())]),
             None,
-            "␛[?2026h␛[?25l␛[H␛[0ma❤\u{fe0f}␛[3Gb␛[?2026l",
+            "␛[?2026h␛[?25l␛[H␛[0ma ␛[2G❤\u{fe0f}␛[3Gb␛[?2026l",
         ),
         (
             "a link closes at the end of its run",
@@ -232,6 +232,29 @@ fn a_frame_without_a_cursor_hides_it() {
     let hidden = packet(&mut encoder, &other, &frame, None, &caps);
     assert!(hidden.starts_with("␛[?2026h␛[?25l"), "{hidden}");
     assert!(!hidden.contains("?25h"), "{hidden}");
+}
+
+#[test]
+fn no_shape_is_sent_until_a_frame_asks_for_one() {
+    let caps = Capabilities {
+        cursor_shape: Support::Unknown,
+        ..full_caps()
+    };
+    let frame = Buffer::empty(AREA);
+    let mut encoder = primed(&frame, &caps);
+    let plain = Some(Cursor::at(Position::new(0, 0)));
+    encoder.redraw();
+    let got = packet(&mut encoder, &frame, &frame, plain, &caps);
+    assert!(!got.contains(" q"), "{got}");
+    let underline = Some(Cursor {
+        shape: CursorShape::Underline,
+        ..Cursor::at(Position::new(0, 0))
+    });
+    assert_eq!(
+        packet(&mut encoder, &frame, &frame, underline, &caps),
+        "␛[4 q"
+    );
+    assert_eq!(packet(&mut encoder, &frame, &frame, plain, &caps), "␛[0 q");
 }
 
 #[test]
@@ -489,16 +512,21 @@ fn a_full_redraw_clears_and_writes_what_isnt_blank() {
     encoder.redraw();
     let cursor = Some(Cursor::at(Position::new(1, 0)));
     let got = packet(&mut encoder, &frame, &frame, cursor, &caps);
-    assert!(
-        got.ends_with("␛[1;2H␛[?25h␛[?2026l"),
-        "the default shape isn't sent: {got}"
-    );
-    // Once a frame asked for one, a redraw sends the shape again.
+    assert!(got.ends_with("␛[1;2H␛[?25h␛[?2026l"), "{got}");
     let bar = Some(Cursor {
         shape: CursorShape::Bar,
         ..Cursor::at(Position::new(1, 0))
     });
-    packet(&mut encoder, &frame, &frame, bar, &caps);
+    let got = packet(&mut encoder, &frame, &frame, bar, &caps);
+    assert_eq!(got, "␛[6 q");
+    encoder.redraw();
+    let got = packet(&mut encoder, &frame, &frame, bar, &caps);
+    assert!(
+        got.ends_with("␛[1;2H␛[6 q␛[?25h␛[?2026l"),
+        "a shape asked for is sent again: {got}"
+    );
+    // A redraw sends a shape asked for before again, the default too.
+    let cursor = Some(Cursor::at(Position::new(1, 0)));
     encoder.redraw();
     let got = packet(&mut encoder, &frame, &frame, cursor, &caps);
     assert!(
@@ -544,6 +572,30 @@ fn partial_frames_touch_only_their_regions() {
 }
 
 #[test]
+fn partial_frames_take_in_wide_characters_across_their_edges() {
+    let caps = full_caps();
+    let area = Rect::new(0, 0, 10, 1);
+    let before = text(area, &[(0, 0, "a界b界cdef", Style::new())]);
+    let mut after = before.clone();
+    let region = Rect::new(2, 0, 3, 1);
+    after.set_clip(&[region]);
+    after.set_string(2, 0, "x", Style::new());
+    after.set_string(4, 0, "界", Style::new());
+    after.clear_clip();
+    assert_eq!(after.symbol((1, 0)), " ");
+    let mut term = emulator(WidthProfile::default(), area, true);
+    let mut encoder = Encoder::new();
+    feed(
+        &mut term,
+        &packet(&mut encoder, &Buffer::empty(area), &before, None, &caps),
+    );
+    let mut out = Vec::new();
+    encoder.encode_regions(&before, &after, &[region], None, &caps, &mut out);
+    feed(&mut term, &show(&out));
+    check_screen(&term, &after, None, &caps).unwrap();
+}
+
+#[test]
 fn stats_count_cells_and_bytes() {
     let caps = full_caps();
     let next = text(AREA, &[(0, 0, "a界", Style::new())]);
@@ -583,7 +635,7 @@ fn streaming_one_row_up_writes_one_row_of_text() {
     let got = packet(&mut encoder, &before, &after, None, &caps);
     assert_eq!(
         got,
-        "␛[?2026h␛[1;12r␛[S␛[r␛[12Hline 12 of a long reply␛[?2026l"
+        "␛[?2026h␛[1;12r␛[M␛[r␛[12Hline 12 of a long reply␛[?2026l"
     );
     feed(&mut term, &got);
     check_screen(&term, &after, None, &caps).unwrap();
@@ -625,7 +677,8 @@ fn the_cursor_is_never_visible_on_a_cell_being_drawn() {
 
 // The emulator checks.
 
-fn emulator(profile: WidthProfile, area: Rect, bce: bool) -> Emulator {
+/// xterm measuring by `profile`, with hyperlinks, and BCE as `bce` says.
+fn xterm(profile: WidthProfile, bce: bool) -> Profile {
     let mut vt = Profile::xterm();
     vt.hyperlinks = true;
     vt.bce = bce;
@@ -634,6 +687,15 @@ fn emulator(profile: WidthProfile, area: Rect, bce: bool) -> Emulator {
         vs16_widens: profile.vs16_widens,
         ambiguous_wide: profile.ambiguous_wide,
     };
+    vt
+}
+
+fn emulator(profile: WidthProfile, area: Rect, bce: bool) -> Emulator {
+    emulator_for(xterm(profile, bce), area)
+}
+
+/// An emulator playing `vt` over `area`, with autowrap off as the terminal opens it.
+fn emulator_for(vt: Profile, area: Rect) -> Emulator {
     let mut term = Emulator::with_profile(vt, area.right(), area.bottom());
     feed(&mut term, "␛[?7l");
     term
@@ -704,8 +766,38 @@ fn check_cells(
             let theirs = term.cell(x, y).ok_or("the emulator lacks a cell")?;
             let at = || format!("({x}, {y}) of\n{:?}\n{:?}", term.rows(), buffer);
             if ours.width() == 0 {
+                let mut lead = x;
+                while lead > area.left() && buffer.cell((lead, y)).is_some_and(|c| c.width() == 0) {
+                    lead -= 1;
+                }
+                let leader = buffer.cell((lead, y)).ok_or("a leader is missing")?;
+                let room = usize::from(area.right() - lead);
+                if leader.has_uncertain_width()
+                    && usize::from(crate::text::widest(leader.symbol(), buffer.width_profile()))
+                        > room
+                {
+                    continue;
+                }
                 if !theirs.is_continuation() {
                     return Err(format!("not a continuation cell at {}", at()));
+                }
+                continue;
+            }
+            // An uncertain cluster that a wider measure wouldn't fit before the right edge is
+            // written as spaces.
+            let room = usize::from(area.right() - x);
+            if ours.has_uncertain_width()
+                && usize::from(crate::text::widest(ours.symbol(), buffer.width_profile())) > room
+            {
+                for k in 0..ours.width() {
+                    let blank = term.cell(x + k, y).is_some_and(|c| c.text() == " ");
+                    if !blank {
+                        return Err(format!(
+                            "{:?} near the edge isn't blank at {}",
+                            ours.symbol(),
+                            at()
+                        ));
+                    }
                 }
                 continue;
             }
@@ -918,6 +1010,8 @@ struct Frame {
     shift: i8,
     cursor: Option<(u16, u16, u8, bool)>,
     redraw: bool,
+    /// The regions of a partial frame, drawn under a clip over the last frame.
+    regions: Option<Vec<Rect>>,
 }
 
 const W: u16 = 12;
@@ -947,12 +1041,14 @@ fn frame() -> impl Strategy<Value = Frame> {
         prop_oneof![6 => Just(0i8), 1 => -2i8..3],
         prop::option::of((0..W + 2, 0..H + 2, 0..4u8, any::<bool>())),
         prop::bool::weighted(0.1),
+        prop::option::weighted(0.3, prop::collection::vec(rect(), 1..3)),
     )
-        .prop_map(|(ops, shift, cursor, redraw)| Frame {
+        .prop_map(|(ops, shift, cursor, redraw, regions)| Frame {
             ops,
             shift,
             cursor,
             redraw,
+            regions,
         })
 }
 
@@ -1003,7 +1099,10 @@ const URLS: [&str; 3] = [
 fn draw(frame: &Frame, last: &Buffer, profile: WidthProfile) -> Buffer {
     let area = last.area();
     let mut next = Buffer::with_width_profile(area, profile);
-    if frame.shift != 0 {
+    if let Some(regions) = &frame.regions {
+        next = last.clone();
+        next.set_clip(regions);
+    } else if frame.shift != 0 {
         for y in area.top()..area.bottom() {
             let from = i32::from(y) + i32::from(frame.shift);
             let Ok(from) = u16::try_from(from) else {
@@ -1069,6 +1168,209 @@ fn frame_cursor(frame: &Frame) -> Option<Cursor> {
     })
 }
 
+/// Draws `frames` one after another and checks the emulator against each, as the property test
+/// does.
+fn run_frames(
+    profile: WidthProfile,
+    caps: &Capabilities,
+    bce: bool,
+    scroll: bool,
+    frames: &[Frame],
+) -> Result<(), String> {
+    run_frames_on(xterm(profile, bce), profile, caps, scroll, frames)
+}
+
+/// [`run_frames`] on the terminal `vt` plays, with buffers that measure by `profile`.
+fn run_frames_on(
+    vt: Profile,
+    profile: WidthProfile,
+    caps: &Capabilities,
+    scroll: bool,
+    frames: &[Frame],
+) -> Result<(), String> {
+    let area = Rect::new(0, 0, W, H);
+    let mut term = emulator_for(vt, area);
+    let mut encoder = Encoder::new();
+    encoder.set_scroll_detection(scroll);
+    let mut prev = Buffer::with_width_profile(area, profile);
+    for (i, frame) in frames.iter().enumerate() {
+        let mut next = draw(frame, &prev, profile);
+        let cursor = frame_cursor(frame);
+        if frame.redraw {
+            encoder.redraw();
+        }
+        let mut out = Vec::new();
+        match &frame.regions {
+            Some(regions) => {
+                encoder.encode_regions(&prev, &next, regions, cursor.as_ref(), caps, &mut out)
+            }
+            None => encoder.encode(&prev, &next, cursor.as_ref(), caps, &mut out),
+        };
+        next.clear_clip();
+        term.take_events();
+        term.feed(&out)
+            .map_err(|e| format!("frame {i}: the emulator refused {:?}: {e:?}", show(&out)))?;
+        let visible = term.events().iter().any(|e| {
+            matches!(
+                e,
+                Event::Drawn {
+                    cursor_visible: true,
+                    ..
+                }
+            )
+        });
+        if visible {
+            return Err(format!(
+                "frame {i}: drew with the cursor showing: {}",
+                show(&out)
+            ));
+        }
+        check_screen(&term, &next, cursor, caps)
+            .map_err(|e| format!("frame {i}: {e}\nbytes {}", show(&out)))?;
+        prev = next;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_partial_frame_over_wide_characters_at_its_edge() {
+    let line = |x, spans: &[(&str, usize)]| Op::Line {
+        x,
+        y: 0,
+        spans: spans.iter().map(|&(s, i)| (s.to_owned(), i)).collect(),
+    };
+    let frame = Frame {
+        ops: vec![
+            line(1, &[("ᄀ", 0), ("ｗｉｄｅ", 3)]),
+            line(2, &[(" ᄀ🫨", 0), ("word", 0)]),
+        ],
+        shift: 0,
+        cursor: None,
+        redraw: false,
+        regions: Some(vec![Rect::new(1, 0, 3, 1)]),
+    };
+    let profile = WidthProfile {
+        ambiguous_wide: true,
+        ..WidthProfile::default()
+    };
+    run_frames(profile, &full_caps(), false, false, &[frame]).unwrap();
+}
+
+#[test]
+fn a_partial_frame_writes_what_a_wide_character_spilled_past_its_region() {
+    let line = |x, spans: &[(&str, usize)]| Op::Line {
+        x,
+        y: 1,
+        spans: spans.iter().map(|&(s, i)| (s.to_owned(), i)).collect(),
+    };
+    // The 👍 starts in the region and ends past it, and the "3" then breaks it, which leaves a
+    // space in its background outside the region, in neither frame a wide character.
+    let frame = Frame {
+        ops: vec![
+            line(5, &[("worde\u{301}👍", 3), ("a", 0)]),
+            line(2, &[("a👍🏽", 0), ("a", 0), ("❤\u{fe0f}\u{1b}[31m", 0)]),
+        ],
+        shift: 0,
+        cursor: None,
+        redraw: false,
+        regions: Some(vec![Rect::new(7, 0, 4, 2)]),
+    };
+    run_frames(
+        WidthProfile::default(),
+        &full_caps(),
+        false,
+        false,
+        &[frame],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_partial_frame_that_breaks_a_wide_character_inside_it() {
+    let line = |x, spans: &[(&str, usize)]| Op::Line {
+        x,
+        y: 3,
+        spans: spans.iter().map(|&(s, i)| (s.to_owned(), i)).collect(),
+    };
+    let frame = Frame {
+        ops: vec![line(1, &[(" 👍", 3)]), line(2, &[("word", 0)])],
+        shift: 0,
+        cursor: None,
+        redraw: false,
+        regions: Some(vec![Rect::new(1, 1, 3, 3)]),
+    };
+    let profile = WidthProfile {
+        joins_emoji: true,
+        ..WidthProfile::default()
+    };
+    let next = draw(
+        &frame,
+        &Buffer::with_width_profile(Rect::new(0, 0, W, H), profile),
+        profile,
+    );
+    let bgs: Vec<_> = (0..6).map(|x| next.cell((x, 3)).unwrap().bg()).collect();
+    assert_eq!(
+        bgs,
+        [
+            Color::Reset,
+            Color::Blue,
+            Color::Blue,
+            Color::Blue,
+            Color::Reset,
+            Color::Reset
+        ]
+    );
+    run_frames(profile, &full_caps(), false, false, &[frame]).unwrap();
+}
+
+/// The clusters of `buffer` that a terminal measuring by `rules` gives another width, as their
+/// rows and the columns of their own cells.
+fn disagreements(buffer: &Buffer, rules: WidthRules) -> Vec<(u16, u16, u16)> {
+    let area = buffer.area();
+    let mut spans = Vec::new();
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            let Some(cell) = buffer.cell((x, y)) else {
+                continue;
+            };
+            let mine = cell.width();
+            if mine > 0 && mine != u16::from(rules.width(cell.symbol())) {
+                spans.push((y, x, x + mine));
+            }
+        }
+    }
+    spans
+}
+
+/// Whether the screen matches the buffer outside the cells of the clusters in `spans`, and shows
+/// in those cells only blanks or the cluster itself, never text left from before.
+fn check_damage(
+    term: &Emulator,
+    buffer: &Buffer,
+    caps: &Capabilities,
+    spans: &[(u16, u16, u16)],
+) -> Result<(), String> {
+    let within = |x: u16, y: u16| spans.iter().find(|&&(sy, a, b)| sy == y && a <= x && x < b);
+    check_cells(term, buffer, caps, |x, y| within(x, y).is_some())?;
+    for y in 0..buffer.area().height {
+        for x in 0..buffer.area().width {
+            let Some(&(_, start, _)) = within(x, y) else {
+                continue;
+            };
+            let theirs = term.cell(x, y).ok_or("the emulator lacks a cell")?;
+            let cluster = buffer.symbol((start, y));
+            let text = theirs.text();
+            if !(text == " " || theirs.is_continuation() || text == cluster) {
+                return Err(format!(
+                    "{text:?} at ({x}, {y}) is in the cells of {cluster:?}, which hold only blanks or it\n{:?}",
+                    term.rows()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 proptest! {
     /// For random sequences of random frames, the emulator's screen after the encoder's bytes
     /// equals the last buffer, cell for cell, and its cursor equals the frame's.
@@ -1080,34 +1382,38 @@ proptest! {
         scroll in any::<bool>(),
         frames in prop::collection::vec(frame(), 1..6),
     ) {
-        let area = Rect::new(0, 0, W, H);
-        let mut term = emulator(profile, area, bce);
-        let mut encoder = Encoder::new();
-        encoder.set_scroll_detection(scroll);
-        let mut prev = Buffer::with_width_profile(area, profile);
-        for (i, frame) in frames.iter().enumerate() {
-            let next = draw(frame, &prev, profile);
-            let cursor = frame_cursor(frame);
-            if frame.redraw {
-                encoder.redraw();
+        if let Err(e) = run_frames(profile, &caps, bce, scroll, &frames) {
+            prop_assert!(false, "{}", e);
+        }
+    }
+
+    /// The same on kitty with each quirk a terminal may have, with the capabilities a probe of
+    /// that terminal would report, and scroll detection off where it can't scroll a region.
+    #[test]
+    fn the_terminal_shows_every_frame_whatever_its_quirks(
+        frames in prop::collection::vec(frame(), 1..5),
+    ) {
+        for quirk in Quirk::ALL {
+            let vt = Profile::kitty().with_quirk(quirk);
+            let profile = WidthProfile {
+                joins_emoji: vt.width.joins_emoji,
+                vs16_widens: vt.width.vs16_widens,
+                ambiguous_wide: vt.width.ambiguous_wide,
+            };
+            let caps = Capabilities {
+                synchronized_output: if quirk == Quirk::NoSync { Support::No } else { Support::Yes },
+                ..full_caps()
+            };
+            let scroll = quirk != Quirk::NoInsertDeleteLines;
+            if let Err(e) = run_frames_on(vt, profile, &caps, scroll, &frames) {
+                prop_assert!(false, "with {:?}, {}", quirk, e);
             }
-            let mut out = Vec::new();
-            encoder.encode(&prev, &next, cursor.as_ref(), &caps, &mut out);
-            term.take_events();
-            if let Err(e) = term.feed(&out) {
-                prop_assert!(false, "frame {}: the emulator refused {:?}: {:?}", i, show(&out), e);
-            }
-            let visible = term.events().iter().any(|e| matches!(e, Event::Drawn { cursor_visible: true, .. }));
-            prop_assert!(!visible, "frame {}: drew with the cursor showing: {}", i, show(&out));
-            if let Err(e) = check_screen(&term, &next, cursor, &caps) {
-                prop_assert!(false, "frame {}: {}\nbytes {}", i, e, show(&out));
-            }
-            prev = next;
         }
     }
 
     /// With the emulator measuring emoji sequences by other rules than the buffer, a cluster they
-    /// disagree on misdraws only the cells either of them gives it.
+    /// disagree on misdraws only its own cells, which show blanks rather than text from before,
+    /// and the same after a frame that changes that cluster's cell alone.
     #[test]
     fn a_width_disagreement_misdraws_only_its_cluster(
         ours in width_profile(),
@@ -1134,29 +1440,20 @@ proptest! {
         encoder.encode(&filler, &next, None, &caps, &mut out);
         term.feed(&out).unwrap();
         let rules = WidthRules { joins_emoji: theirs.joins_emoji, vs16_widens: theirs.vs16_widens, ambiguous_wide: theirs.ambiguous_wide };
-        let mut spans = Vec::new();
-        for y in 0..H {
-            for x in 0..W {
-                let cell = next.cell((x, y)).unwrap();
-                let (mine, other) = (cell.width(), u16::from(rules.width(cell.symbol())));
-                if mine > 0 && mine != other {
-                    // A terminal places a cluster too wide for the room left against the right
-                    // edge, over the cells before it, and the wide character it cuts goes too.
-                    let mut from = if x + other > W { (W - other).min(x) } else { x };
-                    let mut to = (x + mine.max(other)).min(W);
-                    while from > 0 && next.cell((from, y)).is_some_and(|c| c.width() == 0) {
-                        from -= 1;
-                    }
-                    while to < W && next.cell((to, y)).is_some_and(|c| c.width() == 0) {
-                        to += 1;
-                    }
-                    spans.push((y, from, to));
-                }
-            }
-        }
-        let skip = |x: u16, y: u16| spans.iter().any(|&(sy, a, b)| sy == y && a <= x && x < b);
-        if let Err(e) = check_cells(&term, &next, &caps, skip) {
+        let spans = disagreements(&next, rules);
+        if let Err(e) = check_damage(&term, &next, &caps, &spans) {
             prop_assert!(false, "{}\nspans {:?}\nbytes {}", e, spans, show(&out));
+        }
+        // A frame that changes only one such cluster's cell.
+        if let Some(&(y, x, _)) = spans.first() {
+            let mut restyled = next.clone();
+            restyled.set_style(Rect::new(x, y, 1, 1), Style::new().add_modifier(Modifier::BOLD));
+            out.clear();
+            encoder.encode(&next, &restyled, None, &caps, &mut out);
+            term.feed(&out).unwrap();
+            if let Err(e) = check_damage(&term, &restyled, &caps, &spans) {
+                prop_assert!(false, "after the cluster changed alone, {}\nspans {:?}\nbytes {}", e, spans, show(&out));
+            }
         }
     }
 }
