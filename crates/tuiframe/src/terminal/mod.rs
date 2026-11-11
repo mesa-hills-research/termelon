@@ -78,8 +78,9 @@ pub struct Options {
     pub keyboard: KeyboardRequest,
     /// Saves the window's title on xterm's title stack and puts it back at close. On by default.
     pub save_title: bool,
-    /// How long the startup probe waits for a terminal that doesn't answer. 300 ms by default.
-    pub probe_timeout: Duration,
+    /// How long the startup probe waits for a terminal that doesn't answer. By default 500 ms,
+    /// or 1.5 s over ssh (`SSH_CONNECTION` or `SSH_TTY` set), where a round trip takes longer.
+    pub probe_timeout: Option<Duration>,
     /// Measures how the terminal draws emoji sequences and East Asian ambiguous characters, which
     /// costs a second round trip at open. Off by default.
     pub width_probes: bool,
@@ -98,7 +99,7 @@ impl Default for Options {
             focus_events: true,
             keyboard: KeyboardRequest::Disambiguate,
             save_title: true,
-            probe_timeout: Duration::from_millis(300),
+            probe_timeout: None,
             width_probes: false,
             escape_timeout: Duration::ZERO,
             capabilities: None,
@@ -132,8 +133,6 @@ builders! {
     keyboard: KeyboardRequest,
     /// Sets [`save_title`](Options::save_title).
     save_title: bool,
-    /// Sets [`probe_timeout`](Options::probe_timeout).
-    probe_timeout: Duration,
     /// Sets [`width_probes`](Options::width_probes).
     width_probes: bool,
     /// Sets [`escape_timeout`](Options::escape_timeout).
@@ -141,6 +140,13 @@ builders! {
 }
 
 impl Options {
+    /// Sets [`probe_timeout`](Options::probe_timeout).
+    #[must_use]
+    pub fn probe_timeout(mut self, timeout: Duration) -> Self {
+        self.probe_timeout = Some(timeout);
+        self
+    }
+
     /// Sets [`capabilities`](Options::capabilities), which skips the probe.
     #[must_use]
     pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
@@ -217,6 +223,12 @@ mod unix {
     use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
     use crate::sys::unix::{Signals, Tty, window_size};
 
+    /// How long the probe waits for a terminal that doesn't answer, by default.
+    const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+
+    /// The same over ssh, where a round trip takes longer.
+    const SSH_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
     /// The terminal while a program has it.
     ///
     /// Opening it puts the terminal in raw mode, asks what it supports, enters the alternate
@@ -288,6 +300,11 @@ mod unix {
             )?;
             let overrides = env.var("TUIFRAME_CAPS");
             let hints = caps::env::hints(env);
+            let probe_timeout = options.probe_timeout.unwrap_or(if hints.ssh {
+                SSH_PROBE_TIMEOUT
+            } else {
+                PROBE_TIMEOUT
+            });
             // (The alternate screen first, so what a terminal prints of a query it can't parse lands
             // on a screen the first frame clears. The Linux console has none.)
             let early = Enabled {
@@ -301,7 +318,7 @@ mod unix {
                 caps.clone()
             } else {
                 let queries = probe::queries(hints.linux_console);
-                let replies = ask(&screen, &queries, 0, options.probe_timeout)?;
+                let replies = ask(&screen, &queries, 0, probe_timeout)?;
                 let answers = probe::answers(&replies);
                 caps::detect(&answers, &hints, overrides.as_deref())
             };
@@ -318,15 +335,10 @@ mod unix {
             // (So the first frame isn't held behind the setup.)
             let _ = screen
                 .writer()
-                .wait(screen.writer().ticket(), options.probe_timeout);
+                .wait(screen.writer().ticket(), probe_timeout);
             if options.width_probes && options.capabilities.is_none() && !hints.linux_console {
                 let samples = probe::WIDTH_SAMPLES.len();
-                let replies = ask(
-                    &screen,
-                    &probe::width_queries(),
-                    samples,
-                    options.probe_timeout,
-                )?;
+                let replies = ask(&screen, &probe::width_queries(), samples, probe_timeout)?;
                 if let Some(profile) = probe::width_profile(&replies) {
                     caps.width_profile = profile;
                     if let Some(overrides) = &overrides {

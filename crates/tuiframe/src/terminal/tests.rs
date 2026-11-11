@@ -333,7 +333,7 @@ fn linux_console_end_to_end() {
 fn a_silent_terminal_times_the_probe_out() {
     let (mut played, signals) = Played::new(Profile::silent());
     let options = Options {
-        probe_timeout: Duration::from_millis(200),
+        probe_timeout: Some(Duration::from_millis(200)),
         ..Options::default()
     };
     let started = Instant::now();
@@ -341,7 +341,13 @@ fn a_silent_terminal_times_the_probe_out() {
     let took = started.elapsed();
     assert!(took >= Duration::from_millis(200), "{took:?}");
     assert!(took < Duration::from_secs(2), "{took:?}");
-    assert_eq!(terminal.capabilities(), &Capabilities::default());
+    assert_eq!(
+        terminal.capabilities(),
+        &Capabilities {
+            probe: crate::caps::Probe::TimedOut,
+            ..Capabilities::default()
+        }
+    );
     played.send(
         b"\x1b[?62;c\x1b[?2026;2$y\x1b[?0u\x1bP>|kitty(0.32.2)\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\",
     );

@@ -114,6 +114,20 @@ pub enum GlyphSupport {
     Limited,
 }
 
+/// How the startup probe went.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Probe {
+    /// It didn't run, as the program gave the capabilities.
+    #[default]
+    NotRun,
+    /// The terminal answered DA1, so every answer that was coming came.
+    Complete,
+    /// The terminal didn't answer DA1 in time, so what it supports comes from the environment and
+    /// the table alone.
+    TimedOut,
+}
+
 /// The terminal's name and version, from its XTVERSION or DA2 answer or its environment.
 #[non_exhaustive]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
@@ -168,6 +182,8 @@ impl Rgb {
 #[non_exhaustive]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Capabilities {
+    /// How the startup probe went.
+    pub probe: Probe,
     /// The terminal's name and version.
     pub terminal: TerminalId,
     /// The multiplexer the program runs in, if any.
@@ -229,7 +245,14 @@ pub(crate) fn detect(
     hints: &env::Hints,
     overrides: Option<&str>,
 ) -> Capabilities {
-    let mut caps = Capabilities::default();
+    let mut caps = Capabilities {
+        probe: if answers.complete {
+            Probe::Complete
+        } else {
+            Probe::TimedOut
+        },
+        ..Capabilities::default()
+    };
     // (A reply names what answered, which a leaked variable can't.)
     let replied = answers.terminal.is_some() || answers.multiplexer.is_some();
     caps.multiplexer = if replied {
@@ -444,7 +467,14 @@ mod tests {
         assert_eq!(no_color.colors, ColorDepth::None);
 
         let silent = detect_with(tuiframe_vt::Profile::silent(), &[]);
-        assert_eq!(silent, Capabilities::default());
+        assert_eq!(
+            silent,
+            Capabilities {
+                probe: Probe::TimedOut,
+                ..Capabilities::default()
+            }
+        );
+        assert_eq!(console.probe, Probe::Complete);
 
         let hints = env::hints(&env::Vars(&[("TERM", "xterm-kitty")]));
         let caps = detect(

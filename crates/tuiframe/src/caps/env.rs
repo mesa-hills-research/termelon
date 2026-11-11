@@ -51,6 +51,8 @@ pub(crate) struct Hints {
     pub(crate) no_color: bool,
     /// `TERM` is the Linux console's, outside any multiplexer.
     pub(crate) linux_console: bool,
+    /// The program runs over ssh.
+    pub(crate) ssh: bool,
 }
 
 /// What `env` says about the terminal.
@@ -75,6 +77,7 @@ pub(crate) fn hints(env: &dyn Environment) -> Hints {
         multiplexer,
         colors,
         no_color: env.var("NO_COLOR").is_some(),
+        ssh: env.var("SSH_CONNECTION").is_some() || env.var("SSH_TTY").is_some(),
     }
 }
 
@@ -202,5 +205,7 @@ mod tests {
         assert!(no_color.no_color);
         assert_eq!(no_color.colors, Some(ColorDepth::TrueColor));
         assert!(!hints_of(&[("NO_COLOR", "")]).no_color);
+        assert!(hints_of(&[("SSH_TTY", "/dev/pts/3")]).ssh);
+        assert!(!hints_of(&[("TERM", "xterm")]).ssh);
     }
 }
