@@ -13,12 +13,13 @@
 //! screens in the styled-text format and an HTML page per scene into the output directory. Then
 //! it holds what the terminal answered the probe against the terminal version's expected report,
 //! in `tools/harness/expected` by default, and names each change. `--update` writes the report
-//! as it is now.
+//! as it is now, and the output directory's `expected` has it either way.
 //!
 //! `keys` presses the scripted keys and mouse events in each mode (every mode, by default), holds
 //! what the terminal sent against what `termelon-vt` says it sends, and names each change since
 //! the input fixture of the terminal's version, in `crates/termelon/tests/fixtures/input` by
-//! default. `--update` writes the fixtures as they are now.
+//! default. `--update` writes the fixtures as they are now, and the output directory's
+//! `fixtures` has them either way.
 //!
 //! Both exit with 1 when something differs or a step fails, and with 2 on a bad command line.
 
@@ -197,6 +198,10 @@ fn run_command(options: &RunOptions) -> Result<bool, String> {
     if let Some(answers) = answers {
         let path = expected::path(&options.kept, &options.terminal, &version);
         let found = answers.to_text();
+        write_copy(
+            &expected::path(&out.join("expected"), &options.terminal, &version),
+            &found,
+        );
         let changes = |kept: &str| match Json::parse(kept) {
             Ok(before) => expected::changes(&before, &answers),
             Err(error) => vec![format!("the expected report isn't JSON: {error}")],
@@ -271,6 +276,10 @@ fn keys_command(options: &RunOptions) -> Result<bool, String> {
         }
         let path = input::fixture_path(&options.kept, &options.terminal, &version, mode);
         let found = recording.fixture(&options.terminal, &version);
+        write_copy(
+            &input::fixture_path(&out.join("fixtures"), &options.terminal, &version, mode),
+            &found,
+        );
         let changes = |kept: &str| match input::parse_fixture(kept) {
             Ok(fixture) => input::changes(&fixture, &recording),
             Err(error) => vec![format!("the fixture doesn't read: {error}")],
@@ -278,6 +287,18 @@ fn keys_command(options: &RunOptions) -> Result<bool, String> {
         all_match &= check_kept(&path, &found, options.update, mode, changes);
     }
     Ok(all_match)
+}
+
+/// Writes what a run found into the output directory too, where `--update` would put it under
+/// `expected` or `fixtures`, so a run's output has the files a new version needs.
+fn write_copy(path: &Path, found: &str) {
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(path, found));
+    if let Err(error) = written {
+        complain(&format!("couldn't write {}: {error}", path.display()));
+    }
 }
 
 /// Holds what a run found against what an earlier run kept at `path`, and names each change, or
