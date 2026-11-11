@@ -48,6 +48,13 @@
 //! which is measured again, so a cluster written one scalar at a time ends up as if written whole.
 //! While a program has mode 2027 set, clusters are measured as if `joins_emoji` were on.
 //!
+//! # Quirks
+//!
+//! [`Profile::with_quirk`] turns on a behaviour some terminals have and a program shouldn't rely on
+//! either way, such as ignoring `CSI ? 7 l` or leaving half of an overwritten wide character on the
+//! screen. A test that draws under each of [`Quirk::ALL`] checks that its output shows right
+//! whatever the terminal does there.
+//!
 //! # Where terminals differ
 //!
 //! The emulator follows xterm where terminals disagree. Its tests replay random streams through
@@ -124,6 +131,6 @@ pub use emulator::{Cursor, CursorShape, Emulator};
 pub use event::{ClipboardWrite, Event, FeedError, Pos, UnknownSequence};
 pub use grid::Cell;
 pub use input::{Key, KeyKind, Mods, Mouse, MouseButton, MouseKind};
-pub use profile::{KeyEncoding, Profile};
+pub use profile::{KeyEncoding, Profile, Quirk, Quirks};
 pub use style::{Color, Hyperlink, Style, Underline};
 pub use width::WidthRules;

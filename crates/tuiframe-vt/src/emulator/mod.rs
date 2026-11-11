@@ -570,7 +570,7 @@ impl Emulator {
         }
         if at.x + u16::from(width) <= self.cols {
             let pen = self.pen.clone();
-            self.grid_mut().put(at.x, at.y, &text, width, &pen);
+            self.grid_mut().put(at.x, at.y, &text, width, &pen, false);
             self.event(Event::Drawn {
                 at,
                 width,
@@ -642,8 +642,8 @@ impl Emulator {
             }
         }
         let (x, y) = (self.x, self.y);
-        let pen = self.pen.clone();
-        self.grid_mut().put(x, y, text, width, &pen);
+        let (pen, keep_halves) = (self.pen.clone(), self.profile.quirks.keeps_wide_halves);
+        self.grid_mut().put(x, y, text, width, &pen, keep_halves);
         self.event(Event::Drawn {
             at: Pos::new(x, y),
             width,
