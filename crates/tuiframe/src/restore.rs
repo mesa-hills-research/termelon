@@ -144,7 +144,8 @@ impl Enabled {
         if self.hyperlinks {
             out.extend_from_slice(b"\x1b]8;;\x1b\\");
         }
-        out.extend_from_slice(b"\x1b[?7h");
+        // (Autowrap back on, then the whole screen as the scroll region, before leaving.)
+        out.extend_from_slice(b"\x1b[?7h\x1b[r");
         if self.alternate_screen {
             out.extend_from_slice(b"\x1b[?1049l");
         }
@@ -222,8 +223,8 @@ impl RestoreHandle {
 
     /// Gives the terminal back now, without waiting for the writer, for a program about to end.
     ///
-    /// It writes CAN, which cancels an escape sequence that a write left half done, then the
-    /// reset, from a thread of its own, waits at most `timeout` for them, and puts the terminal's
+    /// It writes CAN and ST, which end an escape sequence or a string that a write left half done,
+    /// then the reset, from a thread of its own, waits at most `timeout` for them, and puts the terminal's
     /// modes back as the program found them. Returns whether the reset reached the terminal, from
     /// this call or an earlier one. Once the terminal was given back, it writes nothing more.
     pub fn restore_now(&self, timeout: Duration) -> bool {
@@ -686,12 +687,15 @@ mod tests {
         assert_eq!(
             String::from_utf8(enabled.reset()).unwrap(),
             "\x1b[?2026l\x1b[<1u\x1b[>4;0m\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
-             \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[?1049l\x1b[0 q\x1b[?25h\
+             \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[r\x1b[?1049l\x1b[0 q\x1b[?25h\
              \x1b[23;0t"
         );
         let nothing = Enabled::default();
         assert_eq!(nothing.setup(), b"\x1b[?25l\x1b[?7l");
-        assert_eq!(nothing.reset(), b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[?25h");
+        assert_eq!(
+            nothing.reset(),
+            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[r\x1b[?25h"
+        );
         let motion = Enabled {
             mouse: MouseMode::AnyMotion,
             ..Enabled::default()
@@ -709,7 +713,7 @@ mod tests {
         assert_eq!(console.setup(), b"\x1b[?25l\x1b[?7l\x1b[H\x1b[2J");
         assert_eq!(
             console.reset(),
-            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[H\x1b[2J\x1b[?25h"
+            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[r\x1b[H\x1b[2J\x1b[?25h"
         );
         assert_eq!(
             mouse_switch(MouseMode::ButtonsAndDrags, MouseMode::AnyMotion),
@@ -753,7 +757,7 @@ mod tests {
             assert!(thread.join().unwrap());
         }
         assert!(handle.restore_now(LONG));
-        assert_eq!(direct.taken(), b"\x18[reset]");
+        assert_eq!(direct.taken(), b"\x18\x1b\\[reset]");
         assert_eq!(*lock(&restored), 1);
         assert!(handle.is_given_back());
         // The writer writes nothing more.
@@ -788,7 +792,7 @@ mod tests {
         writer.send(b"[frame]".to_vec()).unwrap();
         assert!(writer.wait_idle(LONG));
         assert!(handle.give_back(&writer, b"", LONG));
-        assert_eq!(direct.taken(), b"\x18[reset]");
+        assert_eq!(direct.taken(), b"\x18\x1b\\[reset]");
         assert_eq!(*lock(&restored), 1);
     }
 
