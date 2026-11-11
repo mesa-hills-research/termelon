@@ -647,21 +647,23 @@ mod platform {
         }
 
         /// Copies `text` to the clipboard with OSC 52, where the terminal is known to take it, and
-        /// does nothing elsewhere. Inside tmux, the copy reaches the outer terminal only with
-        /// tmux's `set-clipboard` on.
+        /// does nothing elsewhere. Returns whether the copy went out, so a program says it copied
+        /// only then. Inside tmux, the copy reaches the outer terminal only with tmux's
+        /// `set-clipboard` on, which can't be seen from inside.
         ///
         /// # Errors
         ///
         /// [`Error::Io`] once the terminal stopped taking output.
-        pub fn copy_to_clipboard(&mut self, text: &str) -> Result<()> {
+        pub fn copy_to_clipboard(&mut self, text: &str) -> Result<bool> {
             if self.caps.clipboard_write != Support::Yes {
-                return Ok(());
+                return Ok(false);
             }
             let encoded = base64(text.as_bytes());
             self.hold(
                 Hold::Copy,
                 format!("\x1b]52;c;{encoded}\x1b\\").into_bytes(),
-            )
+            )?;
+            Ok(true)
         }
 
         /// Switches the mouse reports to `mode`. A terminal known to have no mouse reports gets

@@ -372,7 +372,7 @@ fn out_of_band_commands_reach_the_terminal() {
     let (played, signals) = Played::new(Profile::kitty());
     let mut terminal = open(&played, signals, &[], &Options::default());
     terminal.set_title("proj \u{7}· arko").unwrap();
-    terminal.copy_to_clipboard("copied ✓").unwrap();
+    assert!(terminal.copy_to_clipboard("copied ✓").unwrap());
     terminal.set_mouse(MouseMode::AnyMotion).unwrap();
     terminal.bell().unwrap();
     played.until("rung", |emulator| {
@@ -412,7 +412,7 @@ fn strings_go_only_where_they_are_known() {
     };
     let mut terminal = open(&played, signals, &[], &options);
     terminal.set_title("not sent").unwrap();
-    terminal.copy_to_clipboard("not sent").unwrap();
+    assert!(!terminal.copy_to_clipboard("not sent").unwrap());
     terminal.bell().unwrap();
     played.until("rung", |emulator| {
         emulator
@@ -901,8 +901,8 @@ fn out_of_band_commands_wait_for_a_busy_terminal() {
         terminal.set_title(title).unwrap();
         terminal.bell().unwrap();
     }
-    terminal.copy_to_clipboard("old").unwrap();
-    terminal.copy_to_clipboard("new").unwrap();
+    assert!(terminal.copy_to_clipboard("old").unwrap());
+    assert!(terminal.copy_to_clipboard("new").unwrap());
     let mut shown = vec![0; filled];
     read.read_exact(&mut shown).unwrap();
     assert!(block_on(terminal.written(), LONG));
