@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 use termelon_vt::{Key, Mods, WidthRules};
 
 use crate::driver::{
-    Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, describe, work_dir,
+    Attributes, Colors, Driver, Error, Launch, POLL_INTERVAL, Readback, Reports, WorkDir, describe,
+    work_dir,
 };
 use crate::drivers::console::{
     self, CREATE_NO_WINDOW, attach, chord, clean_environment, helper_program, kill_tree,
@@ -40,7 +41,7 @@ const EXPORT_CHORD: [u16; 3] = [0x11, 0x10, 0x78];
 
 /// How long the program may take to start in the new window, and the export to be written.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
-const EXPORT_TIMEOUT: Duration = Duration::from_secs(3);
+const EXPORT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Windows Terminal, a window per program.
 #[derive(Debug)]
@@ -195,6 +196,12 @@ pub fn parse_export(text: &str, cols: u16, rows: u16) -> Result<Readback, Error>
     })
 }
 
+/// The release a portable build's folder is named for, `terminal-1.25.2733.0`.
+pub fn portable_version(exe: &Path) -> Option<String> {
+    let folder = exe.parent()?.file_name()?.to_str()?;
+    folder.strip_prefix("terminal-").map(str::to_owned)
+}
+
 /// Waits until `path` exists and has stopped growing, at most `timeout`, and reads it.
 fn read_when_written(path: &Path, timeout: Duration) -> Option<String> {
     let deadline = Instant::now() + timeout;
@@ -240,8 +247,12 @@ impl Driver for WindowsTerminal {
 
     fn version(&self) -> Result<String, Error> {
         require_windows()?;
+        // (A portable build's folder is named for its release, as `terminal-1.25.2733.0`.)
+        if let Some(version) = portable().as_deref().and_then(portable_version) {
+            return Ok(version);
+        }
         let script = if portable().is_some() {
-            format!("(Get-Item $env:{PORTABLE}).VersionInfo.ProductVersion")
+            format!("(Get-Item $env:{PORTABLE}).VersionInfo.FileVersion")
         } else {
             "(Get-AppxPackage Microsoft.WindowsTerminal).Version".to_owned()
         };
@@ -332,6 +343,26 @@ impl Driver for WindowsTerminal {
         console::screenshot(path)
     }
 
+    /// Reads the screen back until a row holds `marker`, as every driver does, but reads again
+    /// after a failed export until `timeout` passes, since a new window takes the export's key
+    /// only once it has settled.
+    fn wait_for(&mut self, marker: &str, timeout: Duration) -> Result<Readback, Error> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.read() {
+                Ok(readback) if readback.contains(marker) => return Ok(readback),
+                Ok(readback) if Instant::now() >= deadline => {
+                    return Err(Error::Timeout {
+                        marker: marker.to_owned(),
+                        screen: readback.rows(),
+                    });
+                }
+                Err(error) if Instant::now() >= deadline => return Err(error),
+                _ => std::thread::sleep(POLL_INTERVAL),
+            }
+        }
+    }
+
     fn stop(&mut self) -> Result<(), Error> {
         self.size = None;
         if let Some(helper) = self.helper.take() {
@@ -388,6 +419,16 @@ mod tests {
         assert_eq!(
             chord(Key::F(9), Mods::CTRL | Mods::SHIFT).as_deref(),
             Some(&EXPORT_CHORD[..])
+        );
+    }
+
+    #[test]
+    fn a_portable_build_s_folder_names_its_release() {
+        let exe = Path::new("D:/tools/terminal-1.25.2733.0/WindowsTerminal.exe");
+        assert_eq!(portable_version(exe).as_deref(), Some("1.25.2733.0"));
+        assert_eq!(
+            portable_version(Path::new("D:/wt/WindowsTerminal.exe")),
+            None
         );
     }
 

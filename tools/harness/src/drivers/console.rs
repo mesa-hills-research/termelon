@@ -176,10 +176,12 @@ pub fn parse_read(reply: &Json, cols: u16, rows: u16) -> Result<Readback, Error>
     }
     Ok(Readback {
         screen,
+        // (The console API says the cursor shows on the alternate screen whatever the program
+        // set, so the cursor isn't compared.)
         reports: Reports {
             colors: Colors::None,
             attributes: Attributes::NONE,
-            cursor: true,
+            cursor: false,
             wide_text: true,
             trims_rows: false,
         },
@@ -288,10 +290,23 @@ pub fn screenshot(path: &Path) -> Result<bool, Error> {
     let mut command = Command::new("powershell.exe");
     command
         .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
-        .env("HARNESS_SCREENSHOT", path);
+        .env("HARNESS_SCREENSHOT", plain_path(path));
     set_flags(&mut command, CREATE_NO_WINDOW);
     run(&mut command)?;
     Ok(true)
+}
+
+/// A path without the `\\?\` prefix that `canonicalize` gives on Windows, which .NET Framework
+/// doesn't take.
+pub fn plain_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(local) = text.strip_prefix(r"\\?\") {
+        local.to_owned()
+    } else {
+        text
+    }
 }
 
 /// What a program prints, as text, with its first line trimmed.
@@ -362,6 +377,16 @@ mod tests {
             Some(vec![0x11, 0x10, 0x78])
         );
         assert_eq!(chord(Key::Char('é'), Mods::NONE), None);
+    }
+
+    #[test]
+    fn paths_lose_the_verbatim_prefix() {
+        assert_eq!(plain_path(Path::new(r"\\?\D:\out\a.png")), r"D:\out\a.png");
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\host\share\a.png")),
+            r"\\host\share\a.png"
+        );
+        assert_eq!(plain_path(Path::new("out/a.png")), "out/a.png");
     }
 
     #[test]
