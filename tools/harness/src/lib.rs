@@ -13,6 +13,9 @@
 //! |---|---|---|---|
 //! | tmux | `new-session -d -x -y` on a server of its own | `send-keys` | `capture-pane -p -e -N`, and the cursor from `display-message` |
 //! | GNU screen | screen attached in a tmux pane of the size | the pane's `send-keys`, bytes with `stuff` | `hardcopy`, text only |
+//! | kitty | `--listen-on` with remote control, under X | `kitten @ send-key`, bytes with `send-text` | `kitten @ get-text --ansi --add-cursor` |
+//! | xterm | `-geometry` and a bitmap font, under X | xdotool | the `CSI 10 i` XHTML dump |
+//! | WezTerm | `start --always-new-process`, under X | xdotool, bytes with `cli send-text` | `cli get-text --escapes` and `cli list` |
 
 pub mod compare;
 pub mod driver;
