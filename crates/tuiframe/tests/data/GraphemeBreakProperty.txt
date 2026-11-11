@@ -1,0 +1,24 @@
+# GraphemeBreakProperty-17.0.0.txt
+# Date: 2025-06-30, 06:20:23 GMT
+# © 2025 Unicode®, Inc.
+# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
+# For terms of use and license, see https://www.unicode.org/terms_of_use.html
+#
+# Trimmed to the Prepend lines. The full file is
+# https://www.unicode.org/Public/17.0.0/ucd/auxiliary/GraphemeBreakProperty.txt
+
+0600..0605;Prepend
+06DD;Prepend
+070F;Prepend
+0890..0891;Prepend
+08E2;Prepend
+0D4E;Prepend
+110BD;Prepend
+110CD;Prepend
+111C2..111C3;Prepend
+113D1;Prepend
+1193F;Prepend
+11941;Prepend
+11A84..11A89;Prepend
+11D46;Prepend
+11F02;Prepend

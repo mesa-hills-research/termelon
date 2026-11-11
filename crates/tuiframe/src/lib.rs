@@ -4,6 +4,7 @@
 //!
 //! | Module | Holds |
 //! |---|---|
+//! | [`text`] | [`Span`], [`Line`] and [`Text`], and the measure of text in cells |
 //! | [`style`] | [`Color`], [`Modifier`], [`UnderlineStyle`] and [`Style`] |
 //! | [`layout`] | [`Position`], [`Size`], [`Rect`], and [`Layout`] by [`Constraint`]s |
 //! | [`event`] | [`Event`] and the key and mouse types in it |
@@ -16,8 +17,10 @@ pub mod event;
 mod flags;
 pub mod layout;
 pub mod style;
+pub mod text;
 
 pub use caps::{Capabilities, WidthProfile};
 pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 pub use layout::{Alignment, Constraint, Layout, Position, Rect, Size};
 pub use style::{Color, Modifier, Style, UnderlineStyle};
+pub use text::{Line, Span, Text};

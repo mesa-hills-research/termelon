@@ -86,9 +86,12 @@ which is that a wide character always has all its continuation cells and none is
 leader.
 
 A cluster's width is decided once, when it's written, by the buffer's `WidthProfile`. Cells whose
-width terminals disagree on (emoji sequences, East Asian ambiguous characters) are marked, and after
-writing one the encoder positions the next run absolutely, so a terminal that measures differently
-misdraws that cell alone.
+width terminals disagree on (emoji sequences, and emoji newer than many terminals' width tables) are
+marked, and after writing one the encoder positions the next run absolutely, so a terminal that
+measures differently misdraws that cell alone. East Asian ambiguous characters follow the profile
+without a mark. They include box drawing and the Greek and Cyrillic alphabets, which every measured
+terminal draws narrow unless it's set for East Asian text, and a resync after each would make them
+several times longer to write.
 
 ## Output
 
