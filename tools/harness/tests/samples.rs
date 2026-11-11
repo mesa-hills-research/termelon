@@ -299,6 +299,14 @@ fn foot_keys_and_binding() {
         ]
     );
     assert_eq!(foot::wtype_args(Key::Up, Mods::NONE).unwrap(), ["-k", "Up"]);
+    assert_eq!(
+        foot::wtype_args(Key::Char('a'), Mods::SHIFT).unwrap(),
+        ["-M", "shift", "-k", "A", "-m", "shift"]
+    );
+    assert_eq!(
+        foot::wtype_args(Key::Tab, Mods::SHIFT).unwrap(),
+        ["-M", "shift", "-k", "ISO_Left_Tab", "-m", "shift"]
+    );
     let config = foot::config(Path::new("/tmp/f/screen.txt"));
     assert!(
         config.contains("pipe-visible=[sh -c \"cat > '/tmp/f/screen.txt'\"] Control+Shift+F12")

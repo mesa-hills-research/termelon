@@ -74,7 +74,15 @@ pub fn start_command(launch: &Launch, config_file: &Path) -> Command {
 
 /// The `wtype` arguments that press a key with its modifiers.
 pub fn wtype_args(key: Key, mods: Mods) -> Option<Vec<String>> {
-    let name = keys::x_keysym(key)?;
+    // wtype's keymap has one level per key, so a key with Shift goes as the keysym a keyboard's
+    // second level gives, as it reaches foot from a real keyboard.
+    let name = match key {
+        Key::Char(c) if mods.contains(Mods::SHIFT) && c.is_alphabetic() => {
+            keys::x_keysym(Key::Char(c.to_uppercase().next().unwrap_or(c)))?
+        }
+        Key::Tab if mods.contains(Mods::SHIFT) => "ISO_Left_Tab".to_owned(),
+        _ => keys::x_keysym(key)?,
+    };
     let held: Vec<&str> = keys::modifier_names(mods)
         .into_iter()
         .map(|m| if m == "super" { "logo" } else { m })
