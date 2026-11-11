@@ -3,6 +3,7 @@
 use crate::buffer::Buffer;
 use crate::layout::{Position, Rect};
 use crate::output::Cursor;
+use crate::widgets::Widget;
 
 /// One frame being drawn, over a buffer the size of the terminal. A full frame that sets no cursor
 /// hides it, and a partial one keeps the last frame's.
@@ -25,6 +26,11 @@ impl<'a> Frame<'a> {
     /// The cells, to draw into.
     pub fn buffer_mut(&mut self) -> &mut Buffer {
         self.buffer
+    }
+
+    /// Draws `widget` into `area`.
+    pub fn render_widget<W: Widget>(&mut self, widget: W, area: Rect) {
+        widget.render(area, self.buffer);
     }
 
     /// Where the cursor goes and how it looks, or `None` to hide it.
@@ -69,7 +75,9 @@ mod tests {
         frame
             .buffer_mut()
             .set_string(0, 0, "hi", crate::style::Style::new());
+        frame.render_widget("yo", Rect::new(5, 2, 3, 1));
         assert_eq!(frame.into_cursor(), Some(bar));
         assert_eq!(buffer.symbol((1, 0)), "i");
+        assert_eq!(buffer.symbol((6, 2)), "o");
     }
 }
