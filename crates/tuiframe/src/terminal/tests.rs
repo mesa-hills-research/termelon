@@ -815,3 +815,21 @@ fn what_a_terminal_prints_of_the_probe_stays_off_the_main_screen() {
         emulator.rows()
     );
 }
+
+/// A lone ESC waits 20 ms for more, or 100 ms where the kitty protocol is on, then it's Esc.
+#[test]
+fn a_lone_escape_waits_longer_under_the_kitty_protocol() {
+    for (profile, wait) in [(Profile::xterm(), 20), (Profile::kitty(), 100)] {
+        let (mut played, signals) = Played::new(profile);
+        let terminal = open(&played, signals, &[], &Options::default());
+        let typed = Instant::now();
+        played.send(b"\x1b");
+        assert_eq!(next(&terminal), key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            typed.elapsed() >= Duration::from_millis(wait),
+            "{:?}",
+            typed.elapsed()
+        );
+        terminal.close().unwrap();
+    }
+}

@@ -330,6 +330,8 @@ struct Requests {
     /// Queries whose answers are outstanding, and their cancelling, for the decoder to learn of
     /// before it decodes more.
     asks: Vec<Ask>,
+    /// A new escape timeout.
+    escape_timeout: Option<Duration>,
 }
 
 impl Control {
@@ -394,6 +396,12 @@ impl Reader {
     /// reads next. Calling it before the query is written is enough.
     pub(crate) fn expect(&self, query: Query) {
         lock(&self.control.state).asks.push(Ask::Expect(query));
+    }
+
+    /// Makes a kept sequence wait `timeout` for the rest from now on.
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+        lock(&self.control.state).escape_timeout = Some(timeout);
+        self.wake();
     }
 
     /// Tells the decoder to forget the queries whose answers are outstanding, for a probe that
@@ -592,6 +600,9 @@ impl<D: Decode> Loop<D> {
     fn obey(&mut self) -> bool {
         let control = self.ended.control.clone();
         let mut requests = lock(&control.state);
+        if let Some(timeout) = requests.escape_timeout.take() {
+            self.escape_timeout = timeout;
+        }
         if !requests.park {
             return !requests.stop;
         }

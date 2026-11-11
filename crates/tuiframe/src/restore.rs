@@ -523,6 +523,13 @@ pub(crate) mod screen {
             }
         }
 
+        /// Makes a lone ESC wait `timeout` for a following byte from now on.
+        pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+            if let Some(reader) = &self.reader {
+                reader.set_escape_timeout(timeout);
+            }
+        }
+
         /// Tells the decoder to forget the queries whose answers are outstanding.
         pub(crate) fn cancel_expected(&self) {
             if let Some(reader) = &self.reader {

@@ -84,9 +84,10 @@ pub struct Options {
     /// Measures how the terminal draws emoji sequences and East Asian ambiguous characters, which
     /// costs a second round trip at open. Off by default.
     pub width_probes: bool,
-    /// How long a lone ESC waits for a following byte before it's the Esc key. Zero by default,
-    /// which makes it Esc once nothing more is ready.
-    pub escape_timeout: Duration,
+    /// How long a lone ESC waits for a following byte before it's the Esc key. By default 20 ms,
+    /// or 100 ms where the kitty keyboard protocol is on, since the Esc key then sends a sequence
+    /// of its own and a lone ESC is most likely the start of one that came split.
+    pub escape_timeout: Option<Duration>,
     /// Skips the probe and uses these, for tests and setups the probe gets wrong.
     pub capabilities: Option<Capabilities>,
 }
@@ -101,7 +102,7 @@ impl Default for Options {
             save_title: true,
             probe_timeout: None,
             width_probes: false,
-            escape_timeout: Duration::ZERO,
+            escape_timeout: None,
             capabilities: None,
         }
     }
@@ -135,11 +136,16 @@ builders! {
     save_title: bool,
     /// Sets [`width_probes`](Options::width_probes).
     width_probes: bool,
-    /// Sets [`escape_timeout`](Options::escape_timeout).
-    escape_timeout: Duration,
 }
 
 impl Options {
+    /// Sets [`escape_timeout`](Options::escape_timeout).
+    #[must_use]
+    pub fn escape_timeout(mut self, timeout: Duration) -> Self {
+        self.escape_timeout = Some(timeout);
+        self
+    }
+
     /// Sets [`probe_timeout`](Options::probe_timeout).
     #[must_use]
     pub fn probe_timeout(mut self, timeout: Duration) -> Self {
@@ -229,6 +235,12 @@ mod unix {
     /// The same over ssh, where a round trip takes longer.
     const SSH_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
+    /// How long a lone ESC waits for more before it's Esc, by default.
+    const ESCAPE_TIMEOUT: Duration = Duration::from_millis(20);
+
+    /// The same where the kitty keyboard protocol is on, under which the Esc key sends a sequence.
+    const KITTY_ESCAPE_TIMEOUT: Duration = Duration::from_millis(100);
+
     /// The terminal while a program has it.
     ///
     /// Opening it puts the terminal in raw mode, asks what it supports, enters the alternate
@@ -295,7 +307,8 @@ mod unix {
                         ..DecoderOptions::default()
                     })
                 },
-                options.escape_timeout,
+                // (The probe's replies may come split, so its lone ESC waits longer.)
+                options.escape_timeout.unwrap_or(KITTY_ESCAPE_TIMEOUT),
                 signals,
             )?;
             let overrides = env.var("TUIFRAME_CAPS");
@@ -328,6 +341,13 @@ mod unix {
                 enabled.clear = false;
             }
             screen.set_enabled(&enabled);
+            screen.set_escape_timeout(options.escape_timeout.unwrap_or(
+                if enabled.keyboard.is_some() {
+                    KITTY_ESCAPE_TIMEOUT
+                } else {
+                    ESCAPE_TIMEOUT
+                },
+            ));
             screen
                 .writer()
                 .send(enabled.setup_after(&early))
