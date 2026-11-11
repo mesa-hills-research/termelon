@@ -11,6 +11,9 @@
 //! | [`event`] | [`Event`] and the key and mouse types in it |
 //! | [`caps`] | [`Capabilities`], what the terminal supports |
 //!
+//! A frame's cursor is a [`Cursor`], and a frame the terminal took is a [`CompletedFrame`] with
+//! its [`FrameStats`].
+//!
 //! The types used most are also at the crate's root.
 
 pub mod buffer;
@@ -18,6 +21,14 @@ pub mod caps;
 pub mod event;
 mod flags;
 pub mod layout;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "used by `Terminal`, which comes with the terminal API"
+    )
+)]
+mod output;
 pub mod style;
 pub mod text;
 
@@ -25,5 +36,6 @@ pub use buffer::Buffer;
 pub use caps::{Capabilities, WidthProfile};
 pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 pub use layout::{Alignment, Constraint, Layout, Position, Rect, Size};
+pub use output::{CompletedFrame, Cursor, CursorShape, FrameStats};
 pub use style::{Color, Modifier, Style, UnderlineStyle};
 pub use text::{Line, Span, Text};

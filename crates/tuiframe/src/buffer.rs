@@ -880,6 +880,59 @@ impl Buffer {
     }
 }
 
+/// Reading for the diff and the encoder.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the encoder reads cells through these, and `Terminal` runs the encoder"
+    )
+)]
+impl Buffer {
+    /// Modifiers that show on a space.
+    const VISIBLE_ON_BLANK: Modifier = Modifier::REVERSED
+        .union(Modifier::UNDERLINED)
+        .union(Modifier::SLOW_BLINK)
+        .union(Modifier::RAPID_BLINK)
+        .union(Modifier::CROSSED_OUT)
+        .union(Modifier::OVERLINED);
+
+    /// The cells of row `y` of the area, counted from its top.
+    pub(crate) fn row(&self, y: usize) -> &[Cell] {
+        let width = usize::from(self.area.width);
+        self.cells.get(y * width..(y + 1) * width).unwrap_or(&[])
+    }
+
+    /// Whether row `y` of the area, counted from its top, may hold a cluster or an extra, so that
+    /// its cells must be compared by what they show.
+    pub(crate) fn is_rich_row(&self, y: usize) -> bool {
+        self.rich_rows.get(y).copied().unwrap_or(false)
+    }
+
+    /// Which link `cell`, a cell of this buffer, belongs to, as a number that's the same for
+    /// cells of this buffer with the same link, and 0 for none.
+    pub(crate) fn link_index(&self, cell: &Cell) -> u32 {
+        self.extras.get(cell.extras).link
+    }
+
+    /// Whether `cell`, a cell of this buffer, shows as a blank cell does, as a space on the default
+    /// background with no modifier that shows on a space and no link.
+    pub(crate) fn looks_blank(&self, cell: &Cell) -> bool {
+        cell.symbol == Cell::SPACE_SYMBOL
+            && cell.bg == PackedColor::RESET
+            && !cell.modifier().intersects(Self::VISIBLE_ON_BLANK)
+            && (cell.extras == 0 || self.link_index(cell) == 0)
+    }
+
+    /// Whether two cells of this buffer have the same colours, attributes and extras.
+    pub(crate) fn same_style(a: &Cell, b: &Cell) -> bool {
+        let mut attrs = (a.attrs, b.attrs);
+        attrs.0.set_uncertain(false);
+        attrs.1.set_uncertain(false);
+        a.fg == b.fg && a.bg == b.bg && attrs.0 == attrs.1 && a.extras == b.extras
+    }
+}
+
 impl PartialEq for Buffer {
     /// Two buffers are equal when they cover the same area and every cell shows the same, whatever
     /// their tables hold.
