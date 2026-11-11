@@ -380,8 +380,9 @@ mod unix {
                 return Ok(Drawn::FullFrameDue);
             }
             self.screen.draw_here();
-            // (The back buffer keeps the cells as they were, and the next full frame resets it.)
-            self.back.clone_from(&self.front);
+            // (The back buffer keeps the regions' rows as they were, and the next full frame resets
+            // it.)
+            self.back.copy_rows_from(&self.front, regions);
             self.front.set_clip(regions);
             let mut frame = Frame::new(&mut self.front, self.cursor);
             render(&mut frame);
