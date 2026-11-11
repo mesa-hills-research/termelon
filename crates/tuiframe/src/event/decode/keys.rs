@@ -228,16 +228,9 @@ fn kitty(csi: &Csi) -> Option<KeyEvent> {
         Some(key) => key,
         None => shifted(character_key(code, modifiers)?, modifiers, params.sub(0, 1)),
     };
-    let mut event = KeyEvent::new_with_kind(key, modifiers, kind);
-    let text: String = params
-        .group(2)
-        .iter()
-        .filter_map(|&cp| cp.and_then(char::from_u32))
-        .collect();
-    if !text.is_empty() {
-        event.text = Some(text.into_boxed_str());
-    }
-    Some(event)
+    // (Flag 16's associated text, the third parameter, isn't kept, so a key compares equal
+    // whatever flags the terminal had.)
+    Some(KeyEvent::new_with_kind(key, modifiers, kind))
 }
 
 /// The capital of `ch` when it has exactly one.

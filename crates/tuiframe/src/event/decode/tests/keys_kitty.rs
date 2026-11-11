@@ -8,12 +8,6 @@ const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 const ALT: KeyModifiers = KeyModifiers::ALT;
 
-fn with_text(code: KeyCode, modifiers: KeyModifiers, text: &str) -> Decoded {
-    let mut key = KeyEvent::new(code, modifiers);
-    key.text = Some(text.into());
-    Decoded::Event(Event::Key(key))
-}
-
 #[test]
 fn disambiguate_escape_codes() {
     check_table(&[
@@ -170,25 +164,14 @@ fn report_all_keys_as_escape_codes() {
     ]);
 }
 
+/// The associated text isn't kept, so a key is the same whether the terminal sent it or not.
 #[test]
 fn report_associated_text() {
     check_table(&[
-        (
-            b"\x1b[97;;97u",
-            vec![with_text(KeyCode::Char('a'), NONE, "a")],
-        ),
-        (
-            b"\x1b[97;2;65u",
-            vec![with_text(KeyCode::Char('A'), SHIFT, "A")],
-        ),
-        (
-            b"\x1b[97:65;2;65u",
-            vec![with_text(KeyCode::Char('A'), SHIFT, "A")],
-        ),
-        (
-            b"\x1b[101;;101:769u",
-            vec![with_text(KeyCode::Char('e'), NONE, "e\u{301}")],
-        ),
+        (b"\x1b[97;;97u", vec![ch('a')]),
+        (b"\x1b[97;2;65u", vec![key(KeyCode::Char('A'), SHIFT)]),
+        (b"\x1b[97:65;2;65u", vec![key(KeyCode::Char('A'), SHIFT)]),
+        (b"\x1b[101;;101:769u", vec![ch('e')]),
         (b"\x1b[13;1;u", vec![key(KeyCode::Enter, NONE)]),
     ]);
 }

@@ -28,7 +28,7 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-# The emulator that tests read the encoder's output with.
+# The emulator, which reads the encoder's output and encodes keys, mouse and pastes for the decoder.
 tuiframe-vt.workspace = true
 
 [lints]
