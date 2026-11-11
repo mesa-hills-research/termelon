@@ -148,6 +148,17 @@ struct State {
     failed: Option<Failure>,
     /// The tasks waiting in [`Writer::written`].
     wakers: Vec<Waker>,
+    /// Out-of-band commands that go with the next packet the writer takes, one of each kind.
+    held: Vec<(Hold, Vec<u8>)>,
+}
+
+/// An out-of-band command that waits for the next packet, where a later one of its kind replaces
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Hold {
+    Title,
+    Copy,
+    Bell,
 }
 
 impl State {
@@ -159,7 +170,8 @@ impl State {
     /// Whether what was sent waits to be written, or is being written (the terminal hasn't taken
     /// it yet).
     fn busy(&self) -> bool {
-        self.failed.is_none() && (self.writing > 0 || !self.pending.is_empty())
+        self.failed.is_none()
+            && (self.writing > 0 || !self.pending.is_empty() || !self.held.is_empty())
     }
 
     /// Keeps `buffer`, emptied, for [`Writer::spare_buffer`], when it's bigger than the one kept.
@@ -273,6 +285,7 @@ impl Writer {
                 taken_over: false,
                 failed: None,
                 wakers: Vec::new(),
+                held: Vec::new(),
             }),
             changed: Condvar::new(),
             record: Arc::new(Record {
@@ -355,6 +368,25 @@ impl Writer {
         Ok(())
     }
 
+    /// Holds `command` for the next packet the writer takes, which is at once while it's idle. A
+    /// later command of the same kind replaces it. Dropped after [`close`](Self::close), and fails
+    /// once the writer failed.
+    pub(crate) fn hold(&self, kind: Hold, command: Vec<u8>) -> Result<(), Failure> {
+        {
+            let mut state = lock(&self.shared.state);
+            if let Some(failure) = state.failed {
+                return Err(failure);
+            }
+            if state.phase != Phase::Open || state.taken_over {
+                return Ok(());
+            }
+            state.held.retain(|(held, _)| *held != kind);
+            state.held.push((kind, command));
+        }
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
     /// A written packet's buffer, emptied, or a new one, so a frame reuses it rather than
     /// allocating.
     pub(crate) fn spare_buffer(&self) -> Vec<u8> {
@@ -395,6 +427,13 @@ impl Writer {
                 state.pending.clear();
                 state.queue(&reset);
                 state.phase = Phase::Closing(state.queued);
+                // (A copy and a bell still go out, after the reset. A title would undo the one the
+                // reset put back.)
+                for (kind, command) in std::mem::take(&mut state.held) {
+                    if kind != Hold::Title {
+                        state.queue(&command);
+                    }
+                }
             }
             state.queue(tail);
             let ticket = Ticket {
@@ -640,8 +679,12 @@ fn write_all(shared: &Weak<Shared>, mut out: impl Write) {
         };
         let bytes = {
             let mut state = lock(&shared.state);
-            if state.pending.is_empty() || state.failed.is_some() || state.taken_over {
+            if (state.pending.is_empty() && state.held.is_empty())
+                || state.failed.is_some()
+                || state.taken_over
+            {
                 state.pending.clear();
+                state.held.clear();
                 // (Let go of the writer meanwhile, so the last handle dropped ends the thread.)
                 let state = shared
                     .changed
@@ -651,7 +694,11 @@ fn write_all(shared: &Weak<Shared>, mut out: impl Write) {
                 drop(state);
                 continue;
             }
-            let bytes = std::mem::take(&mut state.pending);
+            let mut bytes = std::mem::take(&mut state.pending);
+            for (_, command) in std::mem::take(&mut state.held) {
+                state.queued += command.len() as u64;
+                bytes.extend_from_slice(&command);
+            }
             state.writing = bytes.len();
             state.started = Some(Instant::now());
             bytes
@@ -1257,6 +1304,45 @@ pub(crate) mod tests {
         assert_eq!(first.join().unwrap(), Direct::Written);
         assert_eq!(direct, Direct::TimedOut);
         assert!(waited < Duration::from_millis(400), "it waited {waited:?}");
+    }
+
+    /// Out-of-band commands held while the terminal is busy go with the next packet the writer
+    /// takes, the last of each kind, and at close a copy and a bell follow the reset.
+    #[test]
+    fn held_commands_go_with_the_next_packet() {
+        let gate = Gate::default();
+        let writer = Writer::spawn(gate.clone(), b"[reset]".to_vec()).unwrap();
+        writer.hold(Hold::Bell, b"[bell]".to_vec()).unwrap();
+        assert!(writer.wait_idle(LONG));
+        assert_eq!(gate.taken(), b"[bell]");
+        gate.hold(true);
+        writer.send(b"[frame 1]".to_vec()).unwrap();
+        until_writing(&writer);
+        for title in ["[a]", "[b]"] {
+            writer.hold(Hold::Title, title.as_bytes().to_vec()).unwrap();
+            writer.hold(Hold::Bell, b"[bell]".to_vec()).unwrap();
+        }
+        writer.send(b"[frame 2]".to_vec()).unwrap();
+        assert!(!writer.is_idle());
+        gate.hold(false);
+        assert!(writer.wait_idle(LONG));
+        assert_eq!(
+            String::from_utf8(gate.taken()).unwrap(),
+            "[bell][frame 1][frame 2][b][bell]"
+        );
+        gate.hold(true);
+        writer.send(b"[frame 3]".to_vec()).unwrap();
+        until_writing(&writer);
+        writer.hold(Hold::Title, b"[title]".to_vec()).unwrap();
+        writer.hold(Hold::Copy, b"[copy]".to_vec()).unwrap();
+        let (ticket, _) = writer.close(b"[tail]");
+        gate.hold(false);
+        assert_eq!(writer.wait(ticket, LONG), Finish::Written);
+        assert!(
+            String::from_utf8(gate.taken())
+                .unwrap()
+                .ends_with("[frame 3][reset][copy][tail]")
+        );
     }
 
     /// An end that takes over stops the writer within the chunk it's writing, so the reset doesn't

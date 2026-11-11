@@ -868,3 +868,50 @@ fn frames_read_the_size_from_the_terminal() {
         terminal.close().unwrap();
     }
 }
+
+/// While the terminal is busy, titles, copies and bells wait for the next packet, where the last
+/// title and copy win and the bells ring once.
+#[test]
+fn out_of_band_commands_wait_for_a_busy_terminal() {
+    use crate::output::writer::tests::{block_on, full_pipe};
+    let pty = Pty::open(Size::new(80, 24));
+    let (mut read, write, filled) = full_pipe();
+    let tty = Tty {
+        input: pty.slave.try_clone().unwrap(),
+        output: write.into(),
+    };
+    let (signals, _resize, _resume) = Signals::unregistered().unwrap();
+    let caps = Capabilities {
+        title: Support::Yes,
+        clipboard_write: Support::Yes,
+        ..Capabilities::default()
+    };
+    let options = Options::default()
+        .capabilities(caps)
+        .probe_timeout(Duration::from_millis(50));
+    let mut terminal = Terminal::open_on(tty, options, &Vars(&[]), signals).unwrap();
+    for title in ["first", "second", "third"] {
+        terminal.set_title(title).unwrap();
+        terminal.bell().unwrap();
+    }
+    terminal.copy_to_clipboard("old").unwrap();
+    terminal.copy_to_clipboard("new").unwrap();
+    let mut shown = vec![0; filled];
+    read.read_exact(&mut shown).unwrap();
+    assert!(block_on(terminal.written(), LONG));
+    assert!(matches!(terminal.draw(|_| {}), Ok(Drawn::Written(_))));
+    assert!(block_on(terminal.written(), LONG));
+    terminal.close().unwrap();
+    drop(pty);
+    let mut rest = Vec::new();
+    let _ = read.read_to_end(&mut rest);
+    let rest = String::from_utf8_lossy(&rest).into_owned();
+    assert!(rest.contains("\x1b]0;third\x1b\\"), "{rest:?}");
+    assert!(
+        !rest.contains("first") && !rest.contains("second"),
+        "{rest:?}"
+    );
+    assert!(rest.contains(&format!("\x1b]52;c;{}\x1b\\", super::base64(b"new"))));
+    assert!(!rest.contains(&super::base64(b"old")));
+    assert_eq!(rest.matches('\x07').count(), 1, "{rest:?}");
+}

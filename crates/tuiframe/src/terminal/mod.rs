@@ -226,6 +226,7 @@ mod unix {
     use crate::layout::Rect;
     use crate::layout::Size;
     use crate::output::encode::Encoder;
+    use crate::output::writer::Hold;
     use crate::output::{CompletedFrame, Cursor, CursorShape};
     use crate::restore::screen::Screen;
     use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
@@ -539,7 +540,9 @@ mod unix {
         }
 
         /// Sets the window's title with OSC 0, where the terminal is known to take it, and does
-        /// nothing elsewhere. Control characters in `title` are left out.
+        /// nothing elsewhere. Control characters in `title` are left out. Like the bell and a
+        /// copy, it goes with the next packet the terminal takes, at once while it's idle, and a
+        /// later title replaces one still waiting.
         ///
         /// # Errors
         ///
@@ -549,16 +552,16 @@ mod unix {
                 return Ok(());
             }
             let title: String = title.chars().filter(|c| !c.is_control()).collect();
-            self.send(format!("\x1b]0;{title}\x1b\\").into_bytes())
+            self.hold(Hold::Title, format!("\x1b]0;{title}\x1b\\").into_bytes())
         }
 
-        /// Rings the bell.
+        /// Rings the bell, once however many times it's rung while the terminal is busy.
         ///
         /// # Errors
         ///
         /// [`Error::Io`] once the terminal stopped taking output.
         pub fn bell(&mut self) -> Result<()> {
-            self.send(vec![0x07])
+            self.hold(Hold::Bell, vec![0x07])
         }
 
         /// Copies `text` to the clipboard with OSC 52, where the terminal is known to take it, and
@@ -573,7 +576,10 @@ mod unix {
                 return Ok(());
             }
             let encoded = base64(text.as_bytes());
-            self.send(format!("\x1b]52;c;{encoded}\x1b\\").into_bytes())
+            self.hold(
+                Hold::Copy,
+                format!("\x1b]52;c;{encoded}\x1b\\").into_bytes(),
+            )
         }
 
         /// Switches the mouse reports to `mode`. A terminal known to have no mouse reports gets
@@ -674,6 +680,13 @@ mod unix {
                 Some(failure) => Err(Error::Io(failure.into())),
                 None => Ok(()),
             }
+        }
+
+        fn hold(&self, kind: Hold, command: Vec<u8>) -> Result<()> {
+            self.screen
+                .writer()
+                .hold(kind, command)
+                .map_err(|failure| Error::Io(failure.into()))
         }
 
         fn send(&self, packet: Vec<u8>) -> Result<()> {
