@@ -75,6 +75,21 @@ struct Shared {
     record: Arc<Record>,
     /// The writer's thread, once it runs.
     thread: OnceLock<ThreadId>,
+    /// What to call once the writer fails.
+    on_failure: Mutex<Option<Notify>>,
+}
+
+/// Told that the writer failed.
+type Notify = Arc<dyn Fn() + Send + Sync>;
+
+impl Shared {
+    /// Tells whoever asked that the writer failed. Called with no lock held.
+    fn notify_failure(&self) {
+        let notify = lock(&self.on_failure).clone();
+        if let Some(notify) = notify {
+            notify();
+        }
+    }
 }
 
 /// The reset and what became of it, outside the writer's lock. Restore handles keep it after the
@@ -262,6 +277,7 @@ impl Writer {
                 direct: AtomicU8::new(NOT_STARTED),
             }),
             thread: OnceLock::new(),
+            on_failure: Mutex::new(None),
         });
         let watched = Arc::downgrade(&shared);
         spawn(Box::new(move || {
@@ -285,6 +301,15 @@ impl Writer {
     /// When the write going on started, if one does.
     pub(crate) fn busy_since(&self) -> Option<Instant> {
         lock(&self.shared.state).started
+    }
+
+    /// Calls `notify` once the writer fails, or now if it has. It may be called more than once.
+    pub(crate) fn on_failure(&self, notify: impl Fn() + Send + Sync + 'static) {
+        let notify: Notify = Arc::new(notify);
+        *lock(&self.shared.on_failure) = Some(notify.clone());
+        if self.failure().is_some() {
+            notify();
+        }
     }
 
     /// The writer's thread, once it runs.
@@ -582,16 +607,20 @@ impl Drop for Ended {
         let Some(shared) = self.0.upgrade() else {
             return;
         };
-        let wakers = {
+        let (wakers, failed) = {
             let mut state = lock(&shared.state);
+            let failed = state.failed.is_none();
             state.failed.get_or_insert(Failure::Died);
             state.writing = 0;
             state.started = None;
             state.pending.clear();
-            std::mem::take(&mut state.wakers)
+            (std::mem::take(&mut state.wakers), failed)
         };
         shared.changed.notify_all();
         wakers.into_iter().for_each(Waker::wake);
+        if failed {
+            shared.notify_failure();
+        }
     }
 }
 
@@ -624,6 +653,7 @@ fn write_all(shared: &Weak<Shared>, mut out: impl Write) {
             bytes
         };
         let wrote = out.write_all(&bytes).and_then(|()| out.flush());
+        let failed = wrote.is_err();
         let wakers = {
             let mut state = lock(&shared.state);
             state.writing = 0;
@@ -654,6 +684,9 @@ fn write_all(shared: &Weak<Shared>, mut out: impl Write) {
         // (Woken with the state let go, as a task's waker may take locks of its executor's.)
         shared.changed.notify_all();
         wakers.into_iter().for_each(Waker::wake);
+        if failed {
+            shared.notify_failure();
+        }
     }
 }
 
@@ -690,7 +723,7 @@ pub(crate) mod tests {
     /// A pipe whose reading end nobody reads, already full, so a write to it waits until the test
     /// reads it. Returns its two ends and how many bytes fill it.
     #[cfg(unix)]
-    fn full_pipe() -> (std::fs::File, std::fs::File, usize) {
+    pub(crate) fn full_pipe() -> (std::fs::File, std::fs::File, usize) {
         use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
         let (read, mut write) = io::pipe().unwrap();
         let flags = fcntl_getfl(&write).unwrap();
@@ -891,8 +924,13 @@ pub(crate) mod tests {
         let (read, write, _) = full_pipe();
         drop(read);
         let writer = Writer::spawn(write, Vec::new()).unwrap();
+        let (told, telling) = mpsc::channel();
+        writer.on_failure(move || {
+            let _ = told.send(());
+        });
         writer.send(b"frame".to_vec()).unwrap();
         assert!(writer.wait_idle(LONG));
+        telling.recv_timeout(LONG).unwrap();
         assert_eq!(
             writer.failure(),
             Some(Failure::Gone(io::ErrorKind::BrokenPipe))
@@ -982,6 +1020,12 @@ pub(crate) mod tests {
         writer.send(b"[frame]".to_vec()).unwrap();
         assert!(writer.wait_idle(LONG));
         assert_eq!(writer.failure(), Some(Failure::Died));
+        // One told of a failure after it came hears of it at once.
+        let (told, telling) = mpsc::channel();
+        writer.on_failure(move || {
+            let _ = told.send(());
+        });
+        telling.recv_timeout(LONG).unwrap();
         assert!(writer.is_idle());
         assert_eq!(writer.send(b"[frame]".to_vec()), Err(Failure::Died));
         let (ticket, _) = writer.close(b"");

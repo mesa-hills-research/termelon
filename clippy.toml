@@ -9,3 +9,5 @@ disallowed-methods = [
     { path = "std::io::stdout", reason = "the terminal is written only by the writer thread" },
     { path = "std::io::stderr", reason = "the terminal is written only by the writer thread" },
 ]
+# Names of terminals and tools the harness's docs use, besides clippy's own list.
+doc-valid-idents = ["WezTerm", "ImageMagick", "FreeType", ".."]

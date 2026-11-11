@@ -2,7 +2,7 @@
 //! SGR reads back cell for cell.
 
 use proptest::prelude::*;
-use tuiframe_vt::{Color, Emulator, Profile, Style, Underline};
+use tuiframe_vt::{Color, Emulator, Profile, Quirk, Style, Underline};
 
 fn profiles() -> Vec<Profile> {
     vec![
@@ -13,6 +13,9 @@ fn profiles() -> Vec<Profile> {
         Profile::tmux_3_4(),
         Profile::linux_console(),
         Profile::silent(),
+        Quirk::ALL
+            .into_iter()
+            .fold(Profile::kitty(), Profile::with_quirk),
     ]
 }
 
@@ -69,6 +72,8 @@ fn fragment() -> impl Strategy<Value = Vec<u8>> {
             "\x1bM",
             "\x1b7",
             "\x1b8",
+            "\x1b[2L",
+            "\x1b[M",
             "\x1b[>1u",
             "\x1b[<u",
             "\x1b[?u",
@@ -134,7 +139,7 @@ proptest! {
         pieces in proptest::collection::vec(fragment(), 0..120),
         cols in 1u16..30,
         rows in 1u16..10,
-        profile in 0..7usize,
+        profile in 0..8usize,
         resize in proptest::option::of((1u16..30, 1u16..10)),
     ) {
         let mut term = Emulator::with_profile(profiles()[profile].clone(), cols, rows);
@@ -153,7 +158,7 @@ proptest! {
     }
 
     #[test]
-    fn random_bytes_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..4000), profile in 0..7usize) {
+    fn random_bytes_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..4000), profile in 0..8usize) {
         let mut term = Emulator::with_profile(profiles()[profile].clone(), 13, 5);
         term.set_strict(false);
         term.feed(&bytes).unwrap();

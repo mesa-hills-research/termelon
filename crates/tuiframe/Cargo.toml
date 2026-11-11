@@ -28,8 +28,11 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-# The emulator, whose key, mouse and paste encoders the decoder's round-trip tests run through.
+# The emulator, which reads what the library writes, encodes keys, mouse and pastes for the decoder,
+# and plays a terminal on a pty's other side.
 tuiframe-vt.workspace = true
+# To check that `Events::next` works inside `tokio::select!`.
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
 
 [lints]
 workspace = true

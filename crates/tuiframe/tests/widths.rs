@@ -164,7 +164,7 @@ fn every_east_asian_width_range() {
                 };
                 let s = c.to_string();
                 let expected = expected_char_width(cp, range, &zero, profile);
-                let got = text::width(&s, profile);
+                let got = text::width_with(&s, profile);
                 checked += 1;
                 if got != expected {
                     failures.push(format!(
@@ -305,13 +305,13 @@ fn every_emoji_test_sequence() {
     let mut failures = Vec::new();
     for s in &sequences {
         let string: String = s.chars.iter().collect();
-        let clusters = text::graphemes(&string, WidthProfile::default()).count();
+        let clusters = text::graphemes_with(&string, WidthProfile::default()).count();
         if clusters != 1 {
             failures.push(format!("{:X?} is {clusters} clusters", s.chars));
         }
         for profile in profiles() {
             let expected = expected_sequence_width(&s.chars, &p, &eaw, profile);
-            let got = text::width(&string, profile);
+            let got = text::width_with(&string, profile);
             if got != expected {
                 failures.push(format!(
                     "{:X?} {} under {profile:?}: {got}, expected {expected}",

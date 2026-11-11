@@ -25,8 +25,9 @@ use crate::event::{
 };
 use crate::layout::Size;
 use crate::output::writer::lock;
-use crate::restore::{Enabled, Mouse};
+use crate::restore::Enabled;
 use crate::sys::{Next, Shared};
+use crate::terminal::MouseMode;
 
 const LONG: Duration = Duration::from_secs(5);
 
@@ -605,7 +606,7 @@ fn vt_bytes_are_the_characters_of_key_downs() {
 fn enabled() -> Enabled {
     Enabled {
         alternate_screen: true,
-        mouse: Mouse::ButtonsAndDrags,
+        mouse: MouseMode::ButtonsAndDrags,
         focus: true,
         bracketed_paste: true,
         ..Enabled::default()

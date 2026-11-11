@@ -11,8 +11,9 @@ use super::{Console, Decode, InputMode, Window, forget_console_events, restore_o
 use crate::event::decode::Query;
 use crate::layout::Size;
 use crate::output::writer::{Writer, lock};
-use crate::restore::{CLOSE_WAIT, Enabled, Mouse, RestoreHandle, register, unregister};
+use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, register, unregister};
 use crate::sys::Shared;
+use crate::terminal::MouseMode;
 
 /// The console a program has.
 #[cfg(windows)]
@@ -157,7 +158,7 @@ impl<C: Console> ScreenOn<C> {
         self.writer.set_reset(effective.reset());
         let _ = self.writer.send(effective.setup());
         self.settings.set_focus(enabled.focus);
-        input.mouse = enabled.mouse != Mouse::Off;
+        input.mouse = enabled.mouse != MouseMode::Off;
         self.modes.set_input(input)
     }
 
