@@ -97,6 +97,9 @@ pub enum KeyboardSupport {
     },
     /// xterm's modifyOtherKeys, which tells modified keys apart but has no releases.
     ModifyOtherKeys,
+    /// The Windows console's key records, which tell every key apart, Shift+Enter included, and
+    /// report releases.
+    ConsoleRecords,
     /// The legacy encodings only, where Shift+Enter arrives as Enter.
     #[default]
     Legacy,

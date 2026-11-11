@@ -22,6 +22,7 @@ pub(crate) type Screen = ScreenOn<super::WinConsole>;
 /// The console while a program has it, on any [`Console`].
 #[derive(Debug)]
 pub(crate) struct ScreenOn<C> {
+    console: Arc<C>,
     writer: Writer,
     shared: Arc<Shared>,
     reader: Option<Reader>,
@@ -116,6 +117,7 @@ impl<C: Console> ScreenOn<C> {
         });
         match reader {
             Ok(reader) => Ok(Self {
+                console,
                 writer,
                 shared,
                 reader: Some(reader),
@@ -132,6 +134,12 @@ impl<C: Console> ScreenOn<C> {
                 Err(error)
             }
         }
+    }
+
+    /// The window's size now, or `None` when the console doesn't say or says 0x0.
+    pub(crate) fn window_size(&self) -> Option<Size> {
+        let size = self.console.window().ok()?.size();
+        (size.width > 0 && size.height > 0).then_some(size)
     }
 
     pub(crate) fn writer(&self) -> &Writer {
@@ -207,6 +215,13 @@ impl<C: Console> ScreenOn<C> {
     pub(crate) fn expect(&self, query: Query) {
         if let Some(reader) = &self.reader {
             reader.expect(query);
+        }
+    }
+
+    /// Makes a pending ESC among the bytes records carry wait `timeout` for what follows it.
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+        if let Some(reader) = &self.reader {
+            reader.set_escape_timeout(timeout);
         }
     }
 

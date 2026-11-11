@@ -81,6 +81,8 @@ enum Ask {
 struct Requests {
     /// What the decoder is to do at the next turn, in order.
     asks: Vec<Ask>,
+    /// A new escape timeout, from the next turn.
+    escape_timeout: Option<Duration>,
     stop: bool,
     /// The reader's thread ended.
     ended: bool,
@@ -129,6 +131,12 @@ impl Reader {
     /// before the query is written is enough.
     pub(crate) fn expect(&self, query: Query) {
         lock(&self.control.state).asks.push(Ask::Expect(query));
+        self.wake.wake();
+    }
+
+    /// Makes a pending ESC wait `timeout` for what follows it, from the next turn.
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+        lock(&self.control.state).escape_timeout = Some(timeout);
         self.wake.wake();
     }
 
@@ -215,6 +223,9 @@ impl<I: Input, D: Decode> Loop<I, D> {
                 if requests.stop {
                     break;
                 }
+                if let Some(timeout) = requests.escape_timeout.take() {
+                    self.escape_timeout = timeout;
+                }
                 for ask in requests.asks.drain(..) {
                     match ask {
                         Ask::Expect(query) => self.decoder.expect(query),
@@ -223,8 +234,12 @@ impl<I: Input, D: Decode> Loop<I, D> {
                 }
             }
             let timeout = waiting.map(|(since, wait)| wait.saturating_sub(since.elapsed()));
-            let Ok(ready) = self.input.wait(timeout) else {
-                break;
+            let ready = match self.input.wait(timeout) {
+                Ok(ready) => ready,
+                Err(error) => {
+                    self.ended.shared.events.fail(error.kind());
+                    break;
+                }
             };
             match ready {
                 Ready::Woken => continue,
@@ -241,7 +256,8 @@ impl<I: Input, D: Decode> Loop<I, D> {
                 }
                 Ready::Input => {
                     records.clear();
-                    if self.input.read(&mut records).is_err() {
+                    if let Err(error) = self.input.read(&mut records) {
+                        self.ended.shared.events.fail(error.kind());
                         break;
                     }
                     self.decode(&records, &mut bytes, &mut decoded);

@@ -440,3 +440,52 @@ Each turn of the reader's loop does these steps.
 enough. `park` and `unpark` hold the reader still while the program is suspended. After a suspend,
 `unpark(true)` takes the SIGCONT that ended it as the resume the program already did, and queues
 `Event::Resumed`. `stop` ends the thread at close.
+
+### The console on Windows
+
+In `sys::windows`. The calls into the console API are in `console.rs`, the only unsafe code on
+Windows. The rest works through two traits, `Console` (its modes, its window, a handle for the
+writer, the reader's end) and `Input` (wait, read, whether more is ready), so it's tested on every
+system against a console played in memory.
+
+```rust
+pub(crate) type Screen = ScreenOn<WinConsole>; // CONIN$ and CONOUT$, opened with OpenOptions
+
+impl<C: Console> ScreenOn<C> {
+    pub(crate) fn open<D: Decode>(console: C, decoder: impl FnOnce(u8) -> D, escape_timeout: Duration)
+        -> io::Result<Self>;                 // Unsupported without virtual terminal processing
+    pub(crate) fn enable(&self, enabled: &Enabled) -> io::Result<()>;
+    pub(crate) fn set_enabled(&self, enabled: &Enabled);
+    pub(crate) fn set_input(&self, mode: InputMode) -> io::Result<()>; // Records or Vt
+    pub(crate) fn restore_on_console_events(&self) -> io::Result<()>;
+    // writer, shared, window_size, restore_handle, draw_here, expect, cancel_expected,
+    // set_escape_timeout, suspend (Unsupported) and close, as on Unix
+}
+```
+
+- `open` saves the console's input and output modes and sets them for the program. Input has no line
+  editing, echo or processed input, so keys arrive one at a time and Ctrl+C is a key. Output reads
+  escape sequences, without the line feed that also returns the cursor. Closing puts back exactly
+  what was found. The code pages never change, since the writer writes UTF-16 with `WriteConsoleW`,
+  converting each packet from UTF-8.
+- `set_enabled` takes mouse records, with the console's quick edit off, when the mouse is on, and
+  leaves quick edit as found when it's off, so the user can still select text. Focus records become
+  events only when focus reports are on, since the console sends them regardless.
+- The reader waits on the console's input and a wake event with `WaitForMultipleObjects`, and reads
+  up to 64 records with `ReadConsoleInputW`. Mouse coordinates are made the window's, and a window
+  size record reads the window's size, not the buffer's.
+- In `InputMode::Records` keys decode as key records. In `InputMode::Vt` each key-down record's
+  character is a byte of what the terminal sent, so replies, the kitty protocol and bracketed paste
+  decode as on Unix. `Terminal` probes in `Vt`, where the console's answers decode as replies, and
+  then switches to `Records`. A probe left unanswered keeps `Vt` 200 ms longer first.
+- In `Records`, records that carry what a terminal sent rather than a key typed go to the byte
+  decoder for the whole session. Those are records with no virtual key, an ESC key-down that more
+  character records follow in the same read, and what comes while the byte decoder holds a sequence.
+  A late reply is then dropped rather than typed, and keys typed during the probe decode as the keys
+  they were.
+- The kitty keyboard flags are pushed only in `Vt`, since under a pseudoconsole the push reaches the
+  terminal, which would then send keys a records client can't take. `caps.keyboard` is
+  `ConsoleRecords` on Windows.
+- `restore_on_console_events` installs a handler with `SetConsoleCtrlHandler`, once, so the console
+  window closing, Ctrl+Break, logoff and shutdown give the console back before Windows ends the
+  process.
