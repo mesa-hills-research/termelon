@@ -142,6 +142,13 @@ impl Driver for Vte {
 
     fn send_keys(&mut self, keys: &[(Key, Mods)]) -> Result<(), Error> {
         for &(key, mods) in keys {
+            // GTK gives a shifted letter's keysym as the capital, as X does.
+            let key = match key {
+                Key::Char(c) if mods.contains(Mods::SHIFT) => {
+                    Key::Char(c.to_uppercase().next().unwrap_or(c))
+                }
+                _ => key,
+            };
             let name = keys::x_keysym(key).ok_or(Error::Unsupported("send that key"))?;
             let mods = Json::List(
                 keys::modifier_names(mods)

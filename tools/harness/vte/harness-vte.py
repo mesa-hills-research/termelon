@@ -69,6 +69,33 @@ def main():
     while Gtk.events_pending():
         Gtk.main_iteration()
 
+    # Event times, in milliseconds.
+    stamp = [0]
+
+    def key(name, mask):
+        """A key's press and release as GTK would deliver them. GTK's own test helper can't send
+        keys to an offscreen window."""
+        # GDK names no keysym for most characters, which come as Unicode keysyms (U00E9).
+        if len(name) > 2 and name[0] == "U" and all(c in "0123456789ABCDEF" for c in name[1:]):
+            keyval = Gdk.unicode_to_keyval(int(name[1:], 16))
+        else:
+            keyval = Gdk.keyval_from_name(name)
+        display = Gdk.Display.get_default()
+        found, entries = Gdk.Keymap.get_for_display(display).get_entries_for_keyval(keyval)
+        for kind in (Gdk.EventType.KEY_PRESS, Gdk.EventType.KEY_RELEASE):
+            event = Gdk.Event.new(kind)
+            fields = event.key
+            fields.window = terminal.get_window()
+            fields.keyval = keyval
+            fields.state = mask
+            if found and entries:
+                fields.hardware_keycode = entries[0].keycode
+                fields.group = entries[0].group
+            stamp[0] += 1000
+            fields.time = stamp[0]
+            event.set_device(display.get_default_seat().get_keyboard())
+            terminal.event(event)
+
     def spawned(_terminal, _pid, error, *_data):
         if error:
             reply({"error": str(error)})
@@ -99,7 +126,7 @@ def main():
             mask = Gdk.ModifierType(0)
             for name in request.get("mods", []):
                 mask |= MODIFIERS[name]
-            Gtk.test_widget_send_key(terminal, Gdk.keyval_from_name(request["key"]), mask)
+            key(request["key"], mask)
             reply({"sent": True})
         elif "quit" in request:
             Gtk.main_quit()
