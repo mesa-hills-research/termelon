@@ -16,8 +16,21 @@ fn disambiguate_escape_codes() {
         (b"\x1b[97;5u", vec![key(KeyCode::Char('a'), CTRL)]),
         (b"\x1b[97;3u", vec![key(KeyCode::Char('a'), ALT)]),
         (b"\x1b[97;7u", vec![key(KeyCode::Char('a'), CTRL | ALT)]),
-        (b"\x1b[97;4u", vec![key(KeyCode::Char('A'), SHIFT | ALT)]),
-        (b"\x1b[97;6u", vec![key(KeyCode::Char('A'), SHIFT | CTRL)]),
+        // With Ctrl or Alt, a letter stays lowercase and Shift stays held, as crossterm has it.
+        (b"\x1b[97;4u", vec![key(KeyCode::Char('a'), SHIFT | ALT)]),
+        (b"\x1b[97;6u", vec![key(KeyCode::Char('a'), SHIFT | CTRL)]),
+        (
+            b"\x1b[97:65;6u",
+            vec![key(KeyCode::Char('a'), SHIFT | CTRL)],
+        ),
+        (
+            b"\x1b[233:201;4u",
+            vec![key(KeyCode::Char('é'), SHIFT | ALT)],
+        ),
+        (
+            b"\x1b[97;10u",
+            vec![key(KeyCode::Char('A'), SHIFT | KeyModifiers::SUPER)],
+        ),
         (b"\x1b[49;5u", vec![key(KeyCode::Char('1'), CTRL)]),
         (b"\x1b[32;5u", vec![key(KeyCode::Char(' '), CTRL)]),
         (b"\x1b[13;2u", vec![key(KeyCode::Enter, SHIFT)]),
@@ -151,7 +164,7 @@ fn shortcuts_on_other_layouts_are_their_us_keys() {
         ),
         (
             "\x1b[1092:1060:97;6u".as_bytes(),
-            vec![key(KeyCode::Char('A'), CTRL | SHIFT)],
+            vec![key(KeyCode::Char('a'), CTRL | SHIFT)],
         ),
         (
             "\x1b[233::50;5u".as_bytes(),

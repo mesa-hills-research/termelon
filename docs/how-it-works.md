@@ -163,6 +163,7 @@ thread owns one.
 pub(crate) struct DecoderOptions {
     pub(crate) erase: u8,        // termios VERASE, 0x7f or 0x08
     pub(crate) max_paste: usize, // 64 MiB by default
+    pub(crate) all_keys: bool,   // Windows keys alone too, as kitty's flag 8 reports them
 }
 
 pub(crate) struct Decoder { /* the tokenizer's state and the outstanding queries */ }
@@ -281,7 +282,8 @@ pub(crate) struct FocusRecord {
 
 A key record with a repeat count of n gives n events, AltGr arrives as Ctrl+Alt with a printable
 character and decodes as that character, and a `WindowSizeRecord` gives `Event::Resize`. A modifier
-key pressed or released alone gives `KeyCode::Modifier`, and an Alt code (Alt held while digits are
+or lock key pressed or released alone, and the keypad's middle key, are dropped as crossterm drops
+them, and with `all_keys` they give their key codes. An Alt code (Alt held while digits are
 typed on the keypad) gives its character when Alt comes up.
 
 ### The encoder

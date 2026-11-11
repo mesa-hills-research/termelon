@@ -35,7 +35,20 @@ fn up(virtual_key: u16, unicode: u16, control_state: u32) -> InputRecord {
 }
 
 fn records(records: &[InputRecord]) -> Vec<Decoded> {
-    let mut decoder = Decoder::new(DecoderOptions::default());
+    decode_records_with(DecoderOptions::default(), records)
+}
+
+/// The records decoded with every key reported, the modifier and lock keys alone included.
+fn all_keys(records: &[InputRecord]) -> Vec<Decoded> {
+    let options = DecoderOptions {
+        all_keys: true,
+        ..DecoderOptions::default()
+    };
+    decode_records_with(options, records)
+}
+
+fn decode_records_with(options: DecoderOptions, records: &[InputRecord]) -> Vec<Decoded> {
+    let mut decoder = Decoder::new(options);
     let mut out = Vec::new();
     decoder.decode_records(records, &mut out);
     out
@@ -83,11 +96,37 @@ fn every_virtual_key_in_the_table() {
     }
     for (vk, code) in table {
         assert_eq!(
-            records(&[down(vk, 0, 0), up(vk, 0, 0)]),
+            all_keys(&[down(vk, 0, 0), up(vk, 0, 0)]),
             [key(code, NONE), release(code, NONE)],
             "virtual key {vk:#x}"
         );
     }
+}
+
+/// The modifier and lock keys alone, and the keypad's middle key, are dropped as crossterm drops
+/// them, unless every key is asked for.
+#[test]
+fn keys_alone_count_only_when_every_key_is_asked_for() {
+    let alone = [
+        down(0x10, 0, control::SHIFT_PRESSED),
+        down(0x11, 0, control::LEFT_CTRL_PRESSED),
+        up(0x12, 0, 0),
+        down(0x5b, 0, 0),
+        down(0x14, 0, 0),
+        down(0x90, 0, 0),
+        down(0x91, 0, 0),
+        down(0x0c, 0, 0),
+    ];
+    assert_eq!(records(&alone), []);
+    assert_eq!(all_keys(&alone).len(), alone.len());
+    // Shift held with a key still counts.
+    assert_eq!(
+        records(&[
+            down(0x10, 0, control::SHIFT_PRESSED),
+            down(0x41, u16::from(b'A'), control::SHIFT_PRESSED),
+        ]),
+        [key(KeyCode::Char('A'), SHIFT)]
+    );
 }
 
 #[test]
@@ -105,7 +144,7 @@ fn modifier_keys_alone() {
     };
     let modifier = |key| KeyCode::Modifier(key);
     assert_eq!(
-        records(&[
+        all_keys(&[
             shift_down(0x2a),
             shift_down(0x36),
             down(0x11, 0, control::LEFT_CTRL_PRESSED),
@@ -311,7 +350,7 @@ fn alt_codes_arrive_with_the_alt_release() {
             up(0x63, 0, alt),
             up(0x12, 0xe9, 0),
         ]),
-        [key(KeyCode::Modifier(ModifierKey::LeftAlt), ALT), ch('é'),]
+        [ch('é')]
     );
     // With Ctrl too, the keypad's digits are keys.
     assert_eq!(
