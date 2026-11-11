@@ -14,7 +14,16 @@ A terminal UI framework in pure Rust. It covers the whole stack a full-screen te
 It has no C dependencies, and its unsafe code is limited to the operating system calls that need it,
 each explained in [docs/why-this-is-safe.md](docs/why-this-is-safe.md).
 
-The project is in its first milestones and isn't published yet.
+The project is in its first milestones and isn't published yet. `cargo run --example todo` shows a
+small program.
+
+## Docs
+
+- [How it works](docs/how-it-works.md)
+- [Capabilities](docs/capabilities.md), what's detected and the fallbacks
+- [Testing](docs/testing.md), with the test terminal and goldens
+- [Porting from ratatui and crossterm](docs/porting-from-ratatui.md)
+- [Testing in real terminals](docs/real-terminals.md)
 
 ## License
 
