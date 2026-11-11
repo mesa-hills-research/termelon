@@ -1,0 +1,301 @@
+//! Terminals the emulator can play, with what each answers and how it draws.
+//!
+//! The facts come from each terminal's own code and docs where they were checked, and are believed
+//! where not. The constructors' docs say which.
+
+use crate::width::WidthRules;
+
+/// How a terminal encodes keys without the kitty keyboard protocol.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum KeyEncoding {
+    /// xterm's encodings, which most terminals share.
+    #[default]
+    Xterm,
+    /// tmux's, which are xterm's but for Home and End without modifiers, `CSI 1 ~` and `CSI 4 ~`.
+    Tmux,
+    /// The Linux console's. F1 to F5 are `CSI [ A` to `CSI [ E`, Home and End are `CSI 1 ~` and
+    /// `CSI 4 ~`, and modifiers on the other special keys are lost.
+    LinuxConsole,
+}
+
+/// A terminal as the emulator plays it: how it measures and erases, which modes it has, what it
+/// answers, and how it encodes input.
+///
+/// The fields are public, so a test can start from a constructor and change what it needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Profile {
+    /// A name for messages.
+    pub name: String,
+    /// How it measures grapheme clusters.
+    pub width: WidthRules,
+    /// Whether erasing and scrolling fill cells with the pen's background colour (BCE).
+    pub bce: bool,
+    /// The DEC private modes it has. It ignores the others, and DECRQM answers 0 for them.
+    pub modes: Vec<u16>,
+    /// Whether it answers DECRQM (`CSI ? n $ p`).
+    pub decrqm: bool,
+    /// Whether it keeps OSC 8 hyperlinks. Without them it ignores OSC 8.
+    pub hyperlinks: bool,
+    /// Whether it has the title stack (`CSI 22 t` and `CSI 23 t`).
+    pub title_stack: bool,
+    /// Whether it sets the cursor's shape with DECSCUSR (`CSI n SP q`).
+    pub cursor_shape: bool,
+    /// Whether it has the kitty keyboard protocol and answers `CSI ? u`.
+    pub kitty_keyboard: bool,
+    /// Whether it honours modifyOtherKeys (`CSI > 4 ; n m`).
+    pub modify_other_keys: bool,
+    /// Whether it parses `ESC ]` and `ESC P` as the Linux console does. A palette command is then the
+    /// only string it knows, and the text of any other prints on the screen.
+    pub linux_console: bool,
+    /// How it encodes keys without the kitty keyboard protocol.
+    pub keys: KeyEncoding,
+    /// Its answer to DA1 (`CSI c`).
+    pub da1: Option<String>,
+    /// Its answer to DA2 (`CSI > c`).
+    pub da2: Option<String>,
+    /// The text of its XTVERSION answer (`CSI > q`), which it sends as `DCS > | text ST`.
+    pub xtversion: Option<String>,
+    /// Whether it answers the cursor position report (`CSI 6 n`) and the status report (`CSI 5 n`).
+    pub cursor_report: bool,
+    /// Whether it answers `CSI 18 t` with its size in cells.
+    pub size_report: bool,
+    /// The colour it answers OSC 10 `?` with.
+    pub foreground: Option<(u8, u8, u8)>,
+    /// The colour it answers OSC 11 `?` with.
+    pub background: Option<(u8, u8, u8)>,
+    /// The capabilities it answers XTGETTCAP (`DCS + q name ST`) with, each a name and a value
+    /// (`None` for a boolean). `None` means it doesn't answer XTGETTCAP at all.
+    pub termcap: Option<Vec<(String, Option<String>)>>,
+}
+
+const XTERM_MODES: [u16; 16] = [
+    1, 6, 7, 9, 12, 25, 47, 1000, 1002, 1003, 1004, 1006, 1047, 1048, 1049, 2004,
+];
+
+fn caps(list: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
+    list.iter()
+        .map(|(name, value)| ((*name).to_owned(), value.map(str::to_owned)))
+        .collect()
+}
+
+impl Profile {
+    /// xterm 390, as Ubuntu 24.04 ships it, with `allowWindowOps` on as a test harness sets it. It
+    /// has no synchronized output, no grapheme mode, no hyperlinks and no kitty keyboard protocol,
+    /// and it answers everything else the startup probe asks.
+    pub fn xterm() -> Profile {
+        Profile {
+            name: "xterm".to_owned(),
+            width: WidthRules::default(),
+            bce: true,
+            modes: XTERM_MODES.to_vec(),
+            decrqm: true,
+            hyperlinks: false,
+            title_stack: true,
+            cursor_shape: true,
+            kitty_keyboard: false,
+            modify_other_keys: true,
+            linux_console: false,
+            keys: KeyEncoding::Xterm,
+            da1: Some("\x1b[?64;1;2;6;9;15;16;17;18;21;22;28c".to_owned()),
+            da2: Some("\x1b[>41;390;0c".to_owned()),
+            xtversion: Some("XTerm(390)".to_owned()),
+            cursor_report: true,
+            size_report: true,
+            foreground: Some((0, 0, 0)),
+            background: Some((0xff, 0xff, 0xff)),
+            termcap: Some(caps(&[
+                ("TN", Some("xterm")),
+                ("Co", Some("256")),
+                ("colors", Some("256")),
+            ])),
+        }
+    }
+
+    /// kitty 0.32, as Ubuntu 24.04 ships it. It joins emoji sequences, widens VS16, has the kitty
+    /// keyboard protocol and synchronized output, and answers every query. Its DA2 version field is
+    /// believed, not checked.
+    pub fn kitty() -> Profile {
+        let mut modes = XTERM_MODES.to_vec();
+        modes.retain(|&m| m != 9);
+        modes.push(2026);
+        Profile {
+            name: "kitty".to_owned(),
+            width: WidthRules {
+                joins_emoji: true,
+                vs16_widens: true,
+                ambiguous_wide: false,
+            },
+            bce: true,
+            modes,
+            decrqm: true,
+            hyperlinks: true,
+            title_stack: true,
+            cursor_shape: true,
+            kitty_keyboard: true,
+            modify_other_keys: false,
+            linux_console: false,
+            keys: KeyEncoding::Xterm,
+            da1: Some("\x1b[?62;c".to_owned()),
+            da2: Some("\x1b[>1;4000;32c".to_owned()),
+            xtversion: Some("kitty(0.32.2)".to_owned()),
+            cursor_report: true,
+            size_report: true,
+            foreground: Some((0xdd, 0xdd, 0xdd)),
+            background: Some((0, 0, 0)),
+            termcap: Some(caps(&[
+                ("TN", Some("xterm-kitty")),
+                ("Co", Some("256")),
+                ("colors", Some("256")),
+                ("Tc", None),
+                ("RGB", None),
+            ])),
+        }
+    }
+
+    /// Konsole 23.08, as Ubuntu 24.04 ships it. It answers neither DECRQM, XTVERSION nor XTGETTCAP,
+    /// and has no kitty keyboard protocol or synchronized output. Its title stack and `CSI 18 t`
+    /// answers are believed.
+    pub fn konsole() -> Profile {
+        let mut modes = XTERM_MODES.to_vec();
+        modes.retain(|&m| m != 9);
+        Profile {
+            name: "konsole".to_owned(),
+            width: WidthRules::default(),
+            bce: true,
+            modes,
+            decrqm: false,
+            hyperlinks: true,
+            title_stack: false,
+            cursor_shape: true,
+            kitty_keyboard: false,
+            modify_other_keys: false,
+            linux_console: false,
+            keys: KeyEncoding::Xterm,
+            da1: Some("\x1b[?62;1;4c".to_owned()),
+            da2: Some("\x1b[>1;115;0c".to_owned()),
+            xtversion: None,
+            cursor_report: true,
+            size_report: true,
+            foreground: Some((0xfc, 0xfc, 0xfc)),
+            background: Some((0x23, 0x26, 0x27)),
+            termcap: None,
+        }
+    }
+
+    /// Windows Terminal 1.22 or later. It answers DECRQM but not XTVERSION or XTGETTCAP, has the
+    /// kitty keyboard protocol, synchronized output and grapheme mode 2027, and joins clusters once a
+    /// program sets 2027. Its `CSI 18 t` answer is believed.
+    pub fn windows_terminal() -> Profile {
+        let mut modes = XTERM_MODES.to_vec();
+        modes.extend([2026, 2027]);
+        Profile {
+            name: "windows-terminal".to_owned(),
+            width: WidthRules::default(),
+            bce: true,
+            modes,
+            decrqm: true,
+            hyperlinks: true,
+            title_stack: false,
+            cursor_shape: true,
+            kitty_keyboard: true,
+            modify_other_keys: false,
+            linux_console: false,
+            keys: KeyEncoding::Xterm,
+            da1: Some("\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c".to_owned()),
+            da2: Some("\x1b[>0;10;1c".to_owned()),
+            xtversion: None,
+            cursor_report: true,
+            size_report: true,
+            foreground: Some((0xcc, 0xcc, 0xcc)),
+            background: Some((0x0c, 0x0c, 0x0c)),
+            termcap: None,
+        }
+    }
+
+    /// tmux 3.4, as Ubuntu 24.04 ships it, with its default options. It doesn't know mode 2026 and
+    /// doesn't answer DECRQM (3.6 answers it for some modes, 3.7 knows 2026), answers XTVERSION,
+    /// keeps hyperlinks, and sends no extended keys, since `extended-keys` is off by default. Its
+    /// `CSI 18 t` answer and its Home and End keys are believed.
+    pub fn tmux_3_4() -> Profile {
+        Profile {
+            name: "tmux-3.4".to_owned(),
+            width: WidthRules::default(),
+            bce: true,
+            modes: vec![
+                1, 6, 7, 12, 25, 47, 1000, 1002, 1003, 1004, 1006, 1047, 1049, 2004,
+            ],
+            decrqm: false,
+            hyperlinks: true,
+            title_stack: true,
+            cursor_shape: true,
+            kitty_keyboard: false,
+            modify_other_keys: false,
+            linux_console: false,
+            keys: KeyEncoding::Tmux,
+            da1: Some("\x1b[?1;2c".to_owned()),
+            da2: Some("\x1b[>84;0;0c".to_owned()),
+            xtversion: Some("tmux 3.4".to_owned()),
+            cursor_report: true,
+            size_report: true,
+            foreground: None,
+            background: None,
+            termcap: None,
+        }
+    }
+
+    /// The Linux console. It has no alternate screen, few modes and no cursor shapes, answers only
+    /// DA1 and the cursor report, and parses `ESC P` and `ESC ] P` as palette commands, so the text
+    /// of any other OSC or DCS prints on the screen.
+    pub fn linux_console() -> Profile {
+        Profile {
+            name: "linux".to_owned(),
+            width: WidthRules::default(),
+            bce: true,
+            modes: vec![1, 6, 7, 9, 25, 1000],
+            decrqm: false,
+            hyperlinks: false,
+            title_stack: false,
+            cursor_shape: false,
+            kitty_keyboard: false,
+            modify_other_keys: false,
+            linux_console: true,
+            keys: KeyEncoding::LinuxConsole,
+            da1: Some("\x1b[?6c".to_owned()),
+            da2: None,
+            xtversion: None,
+            cursor_report: true,
+            size_report: false,
+            foreground: None,
+            background: None,
+            termcap: None,
+        }
+    }
+
+    /// A terminal that draws as xterm does and answers nothing, not even DA1.
+    pub fn silent() -> Profile {
+        Profile {
+            name: "silent".to_owned(),
+            decrqm: false,
+            da1: None,
+            da2: None,
+            xtversion: None,
+            cursor_report: false,
+            size_report: false,
+            foreground: None,
+            background: None,
+            termcap: None,
+            ..Profile::xterm()
+        }
+    }
+
+    /// Whether it has a DEC private mode.
+    pub fn has_mode(&self, mode: u16) -> bool {
+        self.modes.contains(&mode)
+    }
+}
+
+impl Default for Profile {
+    fn default() -> Profile {
+        Profile::xterm()
+    }
+}
