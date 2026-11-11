@@ -226,11 +226,28 @@ fn kitty(csi: &Csi) -> Option<KeyEvent> {
             KeyCode::Modifier(key)
         }
         Some(key) => key,
-        None => shifted(character_key(code, modifiers)?, modifiers, params.sub(0, 1)),
+        None => match base_layout_key(csi, code, modifiers) {
+            Some(base) => shifted(KeyCode::Char(base), modifiers, None),
+            None => shifted(character_key(code, modifiers)?, modifiers, params.sub(0, 1)),
+        },
     };
     // (Flag 16's associated text, the third parameter, isn't kept, so a key compares equal
     // whatever flags the terminal had.)
     Some(KeyEvent::new_with_kind(key, modifiers, kind))
+}
+
+/// The key in the same place on a US layout, which flag 4 reports as the third sub-parameter, for a
+/// key outside ASCII held with Ctrl, Alt or Super. Shortcuts are named by those keys, so Ctrl+C is
+/// Ctrl+C on a Cyrillic layout too.
+fn base_layout_key(csi: &Csi, code: u32, modifiers: KeyModifiers) -> Option<char> {
+    let shortcut = KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER;
+    if code < 0x80 || !modifiers.intersects(shortcut) {
+        return None;
+    }
+    csi.params
+        .sub(0, 2)
+        .and_then(char::from_u32)
+        .filter(|base| base.is_ascii() && !base.is_ascii_control())
 }
 
 /// The capital of `ch` when it has exactly one.
