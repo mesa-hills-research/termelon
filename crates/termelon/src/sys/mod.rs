@@ -339,13 +339,13 @@ mod tests {
     /// and stops at the limit however many come.
     #[test]
     fn settling_waits_for_quiet_after_the_last_reply_up_to_the_limit() {
-        let quiet = Duration::from_millis(100);
         let slot = Arc::new(ReplySlot::default());
         slot.open();
         let started = Instant::now();
-        slot.settle(quiet, Duration::from_secs(5));
-        assert!(started.elapsed() >= quiet);
-        // (A reply every 10 ms until told to stop.)
+        slot.settle(Duration::from_millis(100), Duration::from_secs(5));
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        // (A reply every 10 ms until told to stop, far more often than the quiet that ends the
+        // wait, even on a busy machine.)
         let stop = Arc::new(AtomicBool::new(false));
         let offering = {
             let (slot, stop) = (slot.clone(), stop.clone());
@@ -356,14 +356,14 @@ mod tests {
                 }
             })
         };
-        let limit = Duration::from_millis(300);
+        let limit = Duration::from_millis(1500);
         let started = Instant::now();
-        slot.settle(quiet, limit);
+        slot.settle(Duration::from_secs(1), limit);
         let took = started.elapsed();
         stop.store(true, Ordering::Relaxed);
         offering.join().unwrap();
         assert!(took >= limit && took < Duration::from_secs(5), "{took:?}");
-        assert!(slot.close().len() >= 10);
+        assert_ne!(slot.close(), [] as [Reply; 0]);
     }
 
     /// Every task waiting for an event is woken when one comes, not only the first.

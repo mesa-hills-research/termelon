@@ -1089,7 +1089,7 @@ fn the_terminal_s_answers_after_a_pseudoconsole_s_da1_are_replies() {
             .wait(LONG, |replies| replies.iter().any(is_end))
     );
     fake.type_in(&vt_records("\x1b[?0u\x1bP>|termelon-vt\x1b\\"));
-    shared.replies.settle(Duration::from_millis(500), LONG);
+    shared.replies.settle(Duration::from_secs(1), LONG);
     let replies = shared.replies.close();
     assert!(
         replies.contains(&Reply::XtVersion("termelon-vt".into()))
