@@ -501,3 +501,8 @@ impl<C: Console> ScreenOn<C> {
 - `restore_on_console_events` installs a handler with `SetConsoleCtrlHandler`, once, so the console
   window closing, Ctrl+Break, logoff and shutdown give the console back before Windows ends the
   process.
+
+`tests/conpty.rs` runs programs on a pseudoconsole on Windows, with the emulator on its terminal
+side, through portable-pty. A `conpty.dll` and `OpenConsole.exe` copied beside the test binary
+make it the pseudoconsole Windows Terminal ships rather than the system's. The tests that need a
+real console window are in `sys/windows/tests.rs`, ignored unless run with `--ignored`.

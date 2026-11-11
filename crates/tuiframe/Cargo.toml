@@ -40,5 +40,9 @@ tuiframe-vt.workspace = true
 # To check that `Events::next` works inside `tokio::select!`.
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
 
+[target.'cfg(windows)'.dev-dependencies]
+# A pseudoconsole (ConPTY) for the end-to-end tests on Windows, with the emulator on its terminal side.
+portable-pty.workspace = true
+
 [lints]
 workspace = true

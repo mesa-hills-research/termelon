@@ -27,6 +27,8 @@ signal-hook = { version = "0.3.18", default-features = false }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Threading"] }
 futures-core = "0.3.31"
 proptest = { version = "1.6", default-features = false, features = ["std"] }
+# Pseudo-consoles (ConPTY) for the Windows end-to-end tests, dev-only.
+portable-pty = "=0.9.0"
 # Pinned, as the newer releases are under 30 days old.
 tokio = { version = "=1.53.2", default-features = false }
 
