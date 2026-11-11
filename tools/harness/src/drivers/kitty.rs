@@ -89,6 +89,7 @@ pub fn parse(text: &[u8], cols: u16, rows: u16, width: WidthRules) -> Result<Rea
         attributes: Attributes::ALL,
         cursor: true,
         wide_text: true,
+        trims_rows: false,
     };
     Ok(Readback {
         screen: ansi_screen(text, cols, rows, width)?,

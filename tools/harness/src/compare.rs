@@ -53,11 +53,25 @@ pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
     let (cols, rows) = expected.size();
     let reports = readback.reports;
     for y in 0..rows {
+        // The cells after the last one with text, which a readback that trims rows drops.
+        let text_end = (0..cols)
+            .rev()
+            .find(|&x| expected.cell(x, y).is_some_and(|cell| cell.text() != " "))
+            .map_or(0, |x| x + 1);
         for x in 0..cols {
             let (Some(e), Some(g)) = (expected.cell(x, y), got.cell(x, y)) else {
                 continue;
             };
+            // A space shows its foreground only through an underline, a line or reverse video.
+            let shows_fg = e.text() != " "
+                || e.style().reverse
+                || e.style().strike
+                || e.style().overline
+                || e.style().underline != tuiframe_vt::Underline::None;
             let mut push = |what: &'static str, a: String, b: String| {
+                if what == "fg" && !shows_fg {
+                    return;
+                }
                 if a != b && out.len() < MAX_MISMATCHES {
                     out.push(Mismatch {
                         x,
@@ -71,12 +85,19 @@ pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
             if reports.wide_text || narrow_text(expected, x, y) {
                 push("text", format!("{:?}", e.text()), format!("{:?}", g.text()));
             }
+            if reports.trims_rows && x >= text_end {
+                continue;
+            }
             compare_colors(e.style(), g.style(), reports.colors, &mut push);
             compare_attributes(e, g, readback, &mut push);
         }
     }
     if reports.cursor {
-        let (e, g) = (expected.cursor(), got.cursor());
+        let (mut e, g) = (expected.cursor(), got.cursor());
+        // A hidden cursor's place doesn't show.
+        if !e.visible && !g.visible {
+            (e.x, e.y) = (g.x, g.y);
+        }
         let place = |x: u16, y: u16, visible: bool| {
             format!("{x},{y} {}", if visible { "visible" } else { "hidden" })
         };
@@ -130,7 +151,10 @@ fn compare_colors(
                 (fg, bg) = (bg, fg);
             }
             let hex = |(r, g, b): (u8, u8, u8)| format!("#{r:02x}{g:02x}{b:02x}");
-            push("fg", hex(fg), hex(rgb(g.fg, foreground)));
+            // A dim cell's colour is the terminal's own blend, which RGB readbacks give as is.
+            if !e.dim {
+                push("fg", hex(fg), hex(rgb(g.fg, foreground)));
+            }
             push("bg", hex(bg), hex(rgb(g.bg, background)));
         }
     }
@@ -170,7 +194,10 @@ fn compare_attributes(
             format!("{:?}", e.underline),
             format!("{:?}", g.underline),
         );
-        if readback.reports.colors == Colors::AsWritten {
+        // An underline's colour shows only with the underline.
+        if readback.reports.colors == Colors::AsWritten
+            && e.underline != tuiframe_vt::Underline::None
+        {
             push(
                 "ul",
                 format!("{:?}", e.underline_color),

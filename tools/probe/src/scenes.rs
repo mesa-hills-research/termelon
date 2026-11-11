@@ -1,70 +1,39 @@
-//! Fixed scenes, as the bytes a program would write. Each fits in 80 by 24 cells and ends with
-//! its marker on the last row. Rows start with a cursor move rather than a line feed, since the
-//! terminal's line discipline turns LF into CR LF.
+//! The probe's scenes, drawn with the framework. Each fits in 80 by 24 cells and ends with its
+//! marker on the last row, which the harness waits for.
 
-/// A scene: its name, and its bytes, which [`bytes`] finishes with the marker.
+use tuiframe::{
+    Buffer, Color, Cursor, CursorShape, Modifier, Position, Rect, Style, UnderlineStyle,
+};
+
+/// A scene: its name, how it draws, and where it leaves the cursor (`None` hides it).
 pub(crate) struct Scene {
     /// The name the harness asks for.
     pub(crate) name: &'static str,
-    body: &'static str,
-    /// What comes after the marker, such as a final cursor move.
-    after: &'static str,
+    draw: fn(&mut Buffer),
+    /// The cursor the frame asks for.
+    pub(crate) cursor: Option<Cursor>,
 }
 
 /// Every scene.
-pub(crate) const SCENES: [Scene; 4] = [
+pub(crate) const SCENES: [Scene; 3] = [
     Scene {
         name: "text",
-        body: "\x1b[0m\x1b[H\x1b[2J\
-               \x1b[1;1Hprobe stand-in: text\
-               \x1b[3;1Hplain ASCII, punctuation !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\
-               \x1b[4;1HLatin-1: café ñ ß ü ¿\
-               \x1b[5;1HCJK: 字幕 한국어 カタカナ\
-               \x1b[6;1HCombining: e\u{301} a\u{308} n\u{303}\
-               \x1b[7;1HBox: ┌──┐ │ok│ └──┘ ═ ║\
-               \x1b[8;1HSymbols: ⣷ … → ✓ • ± °\
-               \x1b[10;40Hcolumn 40\
-               \x1b[12;75Hedge!\
-               \x1b[13;1Hoverwritten\x1b[13;1HOVER",
-        after: "",
+        draw: text,
+        cursor: None,
     },
     Scene {
         name: "styles",
-        body: "\x1b[0m\x1b[H\x1b[2J\
-               \x1b[1;1H\x1b[1mbold\x1b[0m \x1b[2mdim\x1b[0m \x1b[3mitalic\x1b[0m \x1b[4munderline\x1b[0m \
-               \x1b[7mreverse\x1b[0m \x1b[9mstrike\x1b[0m \x1b[5mblink\x1b[0m \x1b[53moverline\x1b[0m\
-               \x1b[2;1H\x1b[4:2mdouble\x1b[0m \x1b[4:3mcurly\x1b[0m \x1b[4:4mdotted\x1b[0m \x1b[4:5mdashed\x1b[0m \
-               \x1b[4;58;2;255;0;0mred line\x1b[0m \x1b[4;58;5;33mindexed line\x1b[0m\
-               \x1b[3;1H\x1b[30m30\x1b[31m31\x1b[32m32\x1b[33m33\x1b[34m34\x1b[35m35\x1b[36m36\x1b[37m37\
-               \x1b[90m90\x1b[91m91\x1b[92m92\x1b[93m93\x1b[94m94\x1b[95m95\x1b[96m96\x1b[97m97\x1b[0m\
-               \x1b[4;1H\x1b[41m41\x1b[42m42\x1b[43m43\x1b[44m44\x1b[45m45\x1b[46m46\x1b[47m47\
-               \x1b[100m100\x1b[101m101\x1b[107m107\x1b[0m\
-               \x1b[5;1H\x1b[38;5;1midx1\x1b[0m \x1b[38;5;196midx196\x1b[0m \x1b[48;5;236m bg236 \x1b[0m \
-               \x1b[38;5;250midx250\x1b[0m\
-               \x1b[6;1H\x1b[38;2;216;222;233mrgb fg\x1b[0m \x1b[48;2;30;40;50m rgb bg \x1b[0m \
-               \x1b[38:2::127:142:163mcolon rgb\x1b[0m \x1b[38:5:208mcolon idx\x1b[0m\
-               \x1b[7;1H\x1b[1;3;4;31mstacked\x1b[22;23;24mreset parts\x1b[0m \x1b[1;2mbold dim\x1b[22mnone\x1b[0m\
-               \x1b[8;1H\x1b]8;id=probe;https://example.com/docs\x1b\\a link\x1b]8;;\x1b\\ after\
-               \x1b[9;1H\x1b[44m  blue  \x1b[0m  \x1b[7;32m green reversed \x1b[0m",
-        after: "",
-    },
-    Scene {
-        name: "erase",
-        body: "\x1b[0m\x1b[H\x1b[2J\
-               \x1b[1;1Hline one is long and gets erased on the right\x1b[1;20H\x1b[K\
-               \x1b[2;1Hline two is erased on the left\x1b[2;10H\x1b[1K\
-               \x1b[3;1H\x1b[44m\x1b[K\x1b[0mblue background to the edge\
-               \x1b[5;1Hregion top\x1b[6;1Hregion 2\x1b[7;1Hregion 3\x1b[8;1Hregion bottom\
-               \x1b[5;8r\x1b[8;1H\x1bD\x1b[8;1Hscrolled in\x1b[5;1H\x1bMreverse\x1b[r\
-               \x1b[10;1H\x1b[2Sscrolled up twice\
-               \x1b[14;1Hgone\x1b[14;1H\x1b[2K\
-               \x1b[15;5Hcursor moves\x1b[2A\x1b[3Cup\x1b[4B\x1b[10Ddown\x1b[17;1H\x1b[30Gcha\x1b[20dvpa",
-        after: "",
+        draw: styles,
+        cursor: None,
     },
     Scene {
         name: "cursor",
-        body: "\x1b[0m\x1b[H\x1b[2J\x1b[1;1Hthe cursor ends hidden at 20,10 as a bar\x1b[5 q",
-        after: "\x1b[11;21H\x1b[?25l",
+        draw: cursor,
+        cursor: Some(Cursor {
+            position: Position::new(20, 10),
+            shape: CursorShape::Bar,
+            blinking: false,
+        }),
     },
 ];
 
@@ -73,13 +42,120 @@ pub(crate) fn find(name: &str) -> Option<&'static Scene> {
     SCENES.iter().find(|scene| scene.name == name)
 }
 
-/// A scene's bytes, its marker on the last row of 24 included.
-pub(crate) fn bytes(scene: &Scene) -> Vec<u8> {
-    format!(
-        "{}\x1b[0m\x1b[24;1Hprobe-done:{}{}",
-        scene.body, scene.name, scene.after
-    )
-    .into_bytes()
+/// The marker the harness waits for.
+pub(crate) fn marker(scene: &Scene) -> String {
+    format!("probe-done:{}", scene.name)
+}
+
+/// Draws a scene and its marker into a buffer.
+pub(crate) fn draw(scene: &Scene, buffer: &mut Buffer) {
+    (scene.draw)(buffer);
+    let bottom = buffer.area().height.saturating_sub(1);
+    buffer.set_string(0, bottom, marker(scene), Style::new());
+}
+
+fn text(b: &mut Buffer) {
+    let plain = Style::new();
+    b.set_string(0, 0, "probe: text", plain);
+    b.set_string(
+        0,
+        2,
+        "plain ASCII, punctuation !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
+        plain,
+    );
+    b.set_string(0, 3, "Latin-1: café ñ ß ü ¿", plain);
+    b.set_string(0, 4, "CJK: 字幕 한국어 カタカナ", plain);
+    b.set_string(0, 5, "Combining: e\u{301} a\u{308} n\u{303}", plain);
+    b.set_string(0, 6, "Box: ┌──┐ │ok│ └──┘ ═ ║", plain);
+    b.set_string(0, 7, "Symbols: ⣷ … → ✓ • ± °", plain);
+    b.set_string(39, 9, "column 40", plain);
+    let right = b.area().width.saturating_sub(5);
+    b.set_string(right, 11, "edge!", plain);
+}
+
+fn styles(b: &mut Buffer) {
+    let plain = Style::new();
+    let mut x = 0;
+    for (word, modifier) in [
+        ("bold", Modifier::BOLD),
+        ("dim", Modifier::DIM),
+        ("italic", Modifier::ITALIC),
+        ("underline", Modifier::UNDERLINED),
+        ("reverse", Modifier::REVERSED),
+        ("strike", Modifier::CROSSED_OUT),
+        ("blink", Modifier::SLOW_BLINK),
+        ("overline", Modifier::OVERLINED),
+    ] {
+        b.set_string(x, 0, word, plain.add_modifier(modifier));
+        x += u16::try_from(word.len()).unwrap_or(0) + 1;
+    }
+    let mut x = 0;
+    for (word, shape, color) in [
+        ("double", UnderlineStyle::Double, Color::Reset),
+        ("curly", UnderlineStyle::Curly, Color::Reset),
+        ("dotted", UnderlineStyle::Dotted, Color::Reset),
+        ("dashed", UnderlineStyle::Dashed, Color::Reset),
+        ("red line", UnderlineStyle::Single, Color::Rgb(255, 0, 0)),
+        ("indexed line", UnderlineStyle::Single, Color::Indexed(33)),
+    ] {
+        let style = plain
+            .add_modifier(Modifier::UNDERLINED)
+            .underline_style(shape)
+            .underline_color(color);
+        b.set_string(x, 1, word, style);
+        x += u16::try_from(word.chars().count()).unwrap_or(0) + 1;
+    }
+    let named = [
+        Color::Black,
+        Color::Red,
+        Color::Green,
+        Color::Yellow,
+        Color::Blue,
+        Color::Magenta,
+        Color::Cyan,
+        Color::Gray,
+        Color::DarkGray,
+        Color::LightRed,
+        Color::LightGreen,
+        Color::LightYellow,
+        Color::LightBlue,
+        Color::LightMagenta,
+        Color::LightCyan,
+        Color::White,
+    ];
+    for (i, &color) in (0u16..).zip(named.iter()) {
+        b.set_string(i * 3, 2, format!("{i:>2}"), plain.fg(color));
+        b.set_string(i * 3, 3, format!("{i:>2}"), plain.bg(color));
+    }
+    b.set_string(0, 4, "idx1", plain.fg(Color::Indexed(1)));
+    b.set_string(5, 4, "idx196", plain.fg(Color::Indexed(196)));
+    b.set_string(12, 4, " bg236 ", plain.bg(Color::Indexed(236)));
+    b.set_string(0, 5, "rgb fg", plain.fg(Color::Rgb(216, 222, 233)));
+    b.set_string(7, 5, " rgb bg ", plain.bg(Color::Rgb(30, 40, 50)));
+    let stacked = plain
+        .fg(Color::Red)
+        .add_modifier(Modifier::BOLD | Modifier::ITALIC | Modifier::UNDERLINED);
+    b.set_string(0, 6, "stacked", stacked);
+    b.set_string(
+        8,
+        6,
+        "bold dim",
+        plain.add_modifier(Modifier::BOLD | Modifier::DIM),
+    );
+    b.set_string(0, 7, "a link", plain);
+    b.set_link(Rect::new(0, 7, 6, 1), Some("https://example.com/docs"));
+    b.set_string(7, 7, "after", plain);
+    b.set_string(0, 8, "  blue  ", plain.bg(Color::Blue));
+    b.set_string(
+        10,
+        8,
+        " green reversed ",
+        plain.fg(Color::Green).add_modifier(Modifier::REVERSED),
+    );
+}
+
+fn cursor(b: &mut Buffer) {
+    b.set_string(0, 0, "the cursor ends at 20,10 as a bar", Style::new());
 }
 
 #[cfg(test)]
@@ -87,16 +163,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_scene_is_one_tuiframe_vt_knows() {
+    fn each_scene_reads_back_from_its_recording() {
         for scene in &SCENES {
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+            draw(scene, &mut buffer);
             let mut term = tuiframe_vt::Emulator::new(80, 24);
-            term.feed(&bytes(scene)).unwrap();
-            assert!(
-                term.text().contains(&format!("probe-done:{}", scene.name)),
-                "{}",
-                scene.name
-            );
-            assert!(!bytes(scene).contains(&b'\n'), "{}", scene.name);
+            let allowed = crate::record::Allowed::ALL;
+            term.feed(&crate::record::render(&buffer, scene.cursor, allowed))
+                .unwrap();
+            for y in 0..24 {
+                let row: String = (0..80).map(|x| buffer.symbol((x, y)).to_owned()).collect();
+                assert_eq!(
+                    term.row_text(y).unwrap(),
+                    row.trim_end(),
+                    "{} row {y}",
+                    scene.name
+                );
+            }
+            assert!(term.text().contains(&marker(scene)));
         }
     }
 }

@@ -75,8 +75,18 @@ pub fn kitty(key: Key, mods: Mods) -> Option<String> {
 
 /// The key as `xdotool key` names it, an X keysym such as `ctrl+a`, `shift+Up` or `F5`.
 pub fn xdotool(key: Key, mods: Mods) -> Option<String> {
-    let name = match key {
-        Key::Char(c) => keysym(c),
+    let name = x_keysym(key)?;
+    Some(format!(
+        "{}{name}",
+        modifiers(mods, ["ctrl+", "alt+", "shift+", "super+"])
+    ))
+}
+
+/// The X keysym of a key, without modifiers, such as `a`, `Return` or `Prior`. GTK and wtype name
+/// keys this way too.
+pub fn x_keysym(key: Key) -> Option<String> {
+    match key {
+        Key::Char(c) => Some(keysym(c)),
         _ => special(
             key,
             [
@@ -96,12 +106,22 @@ pub fn xdotool(key: Key, mods: Mods) -> Option<String> {
                 "Delete",
             ],
             "F",
-        )?,
-    };
-    Some(format!(
-        "{}{name}",
-        modifiers(mods, ["ctrl+", "alt+", "shift+", "super+"])
-    ))
+        ),
+    }
+}
+
+/// The modifiers held, as `ctrl`, `alt`, `shift` and `super`.
+pub fn modifier_names(mods: Mods) -> Vec<&'static str> {
+    [
+        (Mods::CTRL, "ctrl"),
+        (Mods::ALT, "alt"),
+        (Mods::SHIFT, "shift"),
+        (Mods::SUPER, "super"),
+    ]
+    .into_iter()
+    .filter(|&(held, _)| mods.contains(held))
+    .map(|(_, name)| name)
+    .collect()
 }
 
 fn modifiers(mods: Mods, names: [&str; 4]) -> String {

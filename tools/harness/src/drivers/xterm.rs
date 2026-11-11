@@ -15,7 +15,7 @@ use crate::driver::{
     work_dir, x_screenshot,
 };
 use crate::drivers::x11;
-use crate::readback::{ansi_screen, xterm_html};
+use crate::readback::{ansi_screen, html_dump};
 
 /// How long a dump may take to appear.
 const DUMP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -83,7 +83,7 @@ pub fn start_command(launch: &Launch, dir: &Path, tty_file: &Path) -> Command {
 ///
 /// When the dump has no `<pre>`.
 pub fn parse(html: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
-    let dump = xterm_html(html)?;
+    let dump = html_dump(html)?;
     let screen = ansi_screen(&dump.ansi, cols, rows, WidthRules::default())?;
     let colors = Colors::Rgb {
         foreground: dump.foreground.unwrap_or(FOREGROUND),
@@ -103,6 +103,7 @@ pub fn parse(html: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
             attributes,
             cursor: false,
             wide_text: true,
+            trims_rows: false,
         },
     })
 }

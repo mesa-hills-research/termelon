@@ -1,14 +1,21 @@
 //! Each driver's parser on saved readbacks, so they're tested where the terminals can't run.
 //!
-//! The tmux and GNU screen samples were recorded from tmux 3.6 and screen 4.9.1 running the probe's
-//! scenes. The kitty, xterm and WezTerm samples are written by hand in the formats their docs
-//! describe, for the small screen in `small.bytes`, until a run on CI records real ones.
+//! The tmux, GNU screen, xterm.js and VTE samples were recorded from tmux 3.6, screen 4.9.1,
+//! `@xterm/headless` 6.0.0 and VTE 0.84 running the probe's scenes, and the Alacritty samples are
+//! `alacritty_terminal` 0.26's serialization of its grid for those scenes, which is what
+//! `--ref-test` writes. The kitty, xterm, WezTerm, Konsole, foot and Ghostty samples are written by
+//! hand in the formats their docs describe, for the small screen in `small.bytes`, until a run on
+//! CI records real ones.
 
 use std::path::PathBuf;
 
-use harness::drivers::{kitty, screen, tmux, wezterm, xterm};
+use harness::drivers::{
+    alacritty, foot, ghostty, kitty, konsole, screen, tmux, vte, wezterm, xterm, xtermjs,
+};
+use harness::json::Json;
 use harness::{Readback, compare};
 use tuiframe_vt::{Color, Emulator, Profile, WidthRules};
+use tuiframe_vt::{Key, Mods};
 
 #[expect(clippy::panic, reason = "a helper of tests, which fail on an error")]
 fn sample(name: &str) -> Vec<u8> {
@@ -202,4 +209,173 @@ fn wezterm_starts_at_the_size_in_a_new_process() {
     let start = args.iter().position(|arg| arg == "start").unwrap();
     assert_eq!(args[start + 1], "--always-new-process");
     assert_eq!(args[args.len() - 4..], ["--", "probe", "--scene", "text"]);
+}
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "a helper of tests, which fail on an error"
+)]
+fn json(name: &str) -> Json {
+    Json::parse(&String::from_utf8(sample(name)).unwrap()).unwrap()
+}
+
+#[test]
+fn xtermjs_screens() {
+    for scene in ["styles", "text"] {
+        let readback =
+            xtermjs::parse(&json(&format!("xtermjs-6.0.0-{scene}.json")), 80, 24).unwrap();
+        let profile = Profile {
+            hyperlinks: true,
+            ..Profile::xterm()
+        };
+        assert_same(
+            &expected(profile, 80, 24, &format!("{scene}.bytes")),
+            &readback,
+        );
+    }
+}
+
+#[test]
+fn vte_screens() {
+    for scene in ["styles", "text"] {
+        let readback = vte::parse(&json(&format!("vte-0.84-{scene}.json")), 80, 24).unwrap();
+        assert_same(
+            &expected(Profile::xterm(), 80, 24, &format!("{scene}.bytes")),
+            &readback,
+        );
+    }
+}
+
+#[test]
+fn alacritty_grids() {
+    for scene in ["styles", "text"] {
+        let text = String::from_utf8(sample(&format!(
+            "alacritty-terminal-0.26-{scene}.grid.json"
+        )))
+        .unwrap();
+        let readback = alacritty::parse(&text).unwrap();
+        let profile = Profile {
+            hyperlinks: true,
+            ..Profile::xterm()
+        };
+        assert_same(
+            &expected(profile, 80, 24, &format!("{scene}.bytes")),
+            &readback,
+        );
+    }
+}
+
+#[test]
+fn konsole_displayed_text() {
+    let result = String::from_utf8(sample("konsole-constructed-small.gdbus")).unwrap();
+    let text = konsole::gvariant_string(&result).unwrap();
+    let readback = konsole::parse(&text, 20, 4).unwrap();
+    assert_same(
+        &expected(Profile::konsole(), 20, 4, "small.bytes"),
+        &readback,
+    );
+}
+
+#[test]
+fn gvariant_strings() {
+    assert_eq!(
+        konsole::gvariant_string("('a\\'b\\\\c\\u00e9\\U0001f600\\n',)").unwrap(),
+        "a'b\\cé😀\n"
+    );
+    assert_eq!(konsole::gvariant_string("(\"it's\",)").unwrap(), "it's");
+    assert!(konsole::gvariant_string("()").is_err());
+    assert_eq!(konsole::gvariant_quote("a'b\\\u{1b}"), "'a\\'b\\\\\\u001b'");
+}
+
+#[test]
+fn foot_piped_text() {
+    let text = String::from_utf8(sample("foot-constructed-small.txt")).unwrap();
+    let readback = foot::parse(&text, 20, 4).unwrap();
+    assert_same(&expected(Profile::xterm(), 20, 4, "small.bytes"), &readback);
+}
+
+#[test]
+fn foot_keys_and_binding() {
+    assert_eq!(
+        foot::wtype_args(Key::Char('a'), Mods::CTRL | Mods::SUPER).unwrap(),
+        [
+            "-M", "ctrl", "-M", "logo", "-k", "a", "-m", "logo", "-m", "ctrl"
+        ]
+    );
+    assert_eq!(foot::wtype_args(Key::Up, Mods::NONE).unwrap(), ["-k", "Up"]);
+    let config = foot::config(std::path::Path::new("/tmp/f/screen.txt"));
+    assert!(
+        config.contains("pipe-visible=[sh -c \"cat > '/tmp/f/screen.txt'\"] Control+Shift+F12")
+    );
+}
+
+#[test]
+fn ghostty_screen_file() {
+    let text = String::from_utf8(sample("ghostty-constructed-small.txt")).unwrap();
+    let readback = ghostty::parse(&text, 20, 4).unwrap();
+    assert_same(&expected(Profile::kitty(), 20, 4, "small.bytes"), &readback);
+}
+
+#[test]
+fn ghostty_keystrokes() {
+    assert_eq!(
+        ghostty::keystroke_script(Key::Char('a'), Mods::CTRL | Mods::SHIFT).unwrap(),
+        "tell application \"System Events\" to keystroke \"a\" using {control down, shift down}"
+    );
+    assert_eq!(
+        ghostty::keystroke_script(Key::F(12), Mods::NONE).unwrap(),
+        "tell application \"System Events\" to key code 111"
+    );
+    assert_eq!(ghostty::keystroke_script(Key::Insert, Mods::NONE), None);
+}
+
+#[test]
+fn alacritty_starts_with_its_ref_test() {
+    assert_eq!(
+        alacritty::config(100, 30),
+        "[window]\ndimensions = { columns = 100, lines = 30 }\n\n[scrolling]\nhistory = 0\n"
+    );
+    let command = alacritty::start_command(
+        &launch(),
+        std::path::Path::new("/tmp/a"),
+        std::path::Path::new("/tmp/a/pid"),
+    );
+    let args = args(&command);
+    assert_eq!(
+        args[..3],
+        ["--ref-test", "--config-file", "/tmp/a/alacritty.toml"]
+    );
+    assert_eq!(
+        args[args.len() - 5..],
+        ["/tmp/a/pid", "/home/ada/proj", "probe", "--scene", "text"]
+    );
+}
+
+#[test]
+fn konsole_starts_at_the_size() {
+    let command = konsole::start_command(&launch(), std::path::Path::new("/tmp/k"));
+    let args = args(&command);
+    for wanted in [
+        "--separate",
+        "--nofork",
+        "TerminalColumns=100",
+        "TerminalRows=30",
+    ] {
+        assert!(args.iter().any(|arg| arg == wanted), "{wanted} in {args:?}");
+    }
+    assert_eq!(args[args.len() - 4..], ["-e", "probe", "--scene", "text"]);
+}
+
+#[test]
+fn ghostty_starts_at_the_size_with_its_binding() {
+    let command = ghostty::start_command(std::path::Path::new(ghostty::APP_BINARY), &launch());
+    let args = args(&command);
+    for wanted in [
+        "--window-width=100",
+        "--window-height=30",
+        "--keybind=ctrl+shift+f12=write_screen_file:copy",
+    ] {
+        assert!(args.iter().any(|arg| arg == wanted), "{wanted} in {args:?}");
+    }
+    assert_eq!(args[args.len() - 4..], ["-e", "probe", "--scene", "text"]);
 }

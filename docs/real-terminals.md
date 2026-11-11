@@ -2,8 +2,15 @@
 
 `tools/harness` starts a real terminal running `tools/probe`, waits until the probe's scene shows,
 reads the screen back, and compares it cell by cell with the screen `tuiframe-vt` computes for the
-bytes the probe wrote. Text and colours always count. Attributes and the cursor count where the
-terminal's readback reports them.
+probe's frame. Text and colours always count. Attributes and the cursor count where the terminal's
+readback reports them.
+
+The probe opens the terminal with the framework, which asks what it supports and measures its
+widths, checks that it has the size the harness asked for, and draws the scene as a frame ending
+with a marker on the last row. Before drawing, it saves the bytes that show the frame on a cleared
+screen, leaving out what the framework leaves out for that terminal (underline styles, underline
+colours, links and cursor shapes it lacks). Once the screen is read back, the harness presses `q`,
+and the probe writes a report of the capabilities it found and the events it received.
 
 ```sh
 cargo build -p harness -p probe
@@ -13,7 +20,7 @@ target/debug/harness run tmux --probe target/debug/probe --out harness-out
 
 `smoke` starts the terminal with `echo` and reads it back, which tells a broken setup from a
 failure of the program under test. `run` runs every scene the probe lists (or those named with
-`--scene`) at 80 by 24 (or `--size`). For each scene it writes the bytes the probe wrote, a JSON
+`--scene`) at 80 by 24 (or `--size`). For each scene it writes the probe's bytes and report, a JSON
 report with each difference, both screens in the styled-text format, an HTML page with the two side
 by side, and a screenshot where there's a display. It exits with 1 when a screen differs.
 
@@ -24,8 +31,19 @@ by side, and a screenshot where there's a display. It exits with 1 when a screen
 | kitty | kitty, an X display, xdotool | `kitten @ get-text --ansi --add-cursor` | text, colours, attributes, cursor |
 | xterm | xterm, the `9x15` font, an X display, xdotool | the `CSI 10 i` XHTML dump | text, RGB colours, bold, italic, underline, strike |
 | WezTerm | wezterm, an X display, xdotool | `wezterm cli get-text --escapes` | text, colours, attributes, cursor |
+| xterm.js | node, and `npm ci` in `tools/harness/xtermjs` | `@xterm/headless`'s buffer, through a node script | text, colours, attributes, links, cursor |
+| VTE | Python's GObject bindings, VTE 2.91 (0.76 or later), a display | `get_text_format(HTML)` in `tools/harness/vte` | text, RGB colours, attributes |
+| Alacritty | alacritty, an X display | `--ref-test`'s `grid.json`, written as the window closes | text, colours, attributes, links |
+| Konsole | Konsole 24.02 or later, an X display, a D-Bus session, gdbus | D-Bus `getAllDisplayedText` | text only |
+| foot | foot and wtype, under a Wayland compositor | `pipe-visible`, bound to a key | text only |
+| Ghostty | Ghostty on macOS, with Accessibility for `osascript` | the `write_screen_file` action | text only |
 
-Under X, start Xvfb first and set `DISPLAY`, as `.github/workflows/terminals.yml` does. Screenshots
+Alacritty reports its screen only as its window closes, so a readback ends the program, and the
+driver reads once after the program has had a moment to draw. xterm.js takes keys only as browser
+events, so its driver sends bytes.
+
+Under X, start Xvfb first and set `DISPLAY`, and for foot a headless sway and `WAYLAND_DISPLAY`, as
+`.github/workflows/terminals.yml` does. Screenshots
 are taken with ImageMagick's `import` where it's installed. They're for a person to look at, and
 never decide a result.
 
