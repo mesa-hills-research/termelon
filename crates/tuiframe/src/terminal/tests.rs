@@ -459,10 +459,17 @@ fn a_writer_that_fails_ends_the_events() {
     let (signals, _resize, _resume) = Signals::unregistered().unwrap();
     let options = Options::default().capabilities(Capabilities::default());
     let mut terminal = Terminal::open_on(tty, options, &Vars(&[]), signals).unwrap();
-    // The terminal goes away once the setup was taken, and the next write fails.
+    // The terminal goes away once the setup was taken, and a write fails. (A child another test
+    // forks holds a copy of the pipe's reader until it execs, so a write may still go through
+    // for a moment.)
     assert!(block_on(terminal.written(), LONG));
     drop(read);
-    terminal.bell().unwrap();
+    let started = Instant::now();
+    while terminal.bell().is_ok() {
+        assert!(started.elapsed() < LONG, "the writer never failed");
+        assert!(block_on(terminal.written(), LONG));
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert!(matches!(
         terminal.events().next_timeout(LONG),
         Err(Error::Closed)
@@ -983,4 +990,47 @@ fn open_installs_the_panic_hook() {
         String::from_utf8_lossy(&pty.shown)
     );
     assert_eq!(pty.modes(), before);
+}
+
+/// With the record on, the bytes the terminal took come out in order, and replayed through
+/// another emulator they give the same screen.
+#[test]
+fn the_record_replays_to_the_same_screen() {
+    use crate::style::Style;
+    let (played, signals) = Played::new(Profile::kitty());
+    let mut terminal = open(
+        &played,
+        signals,
+        &[],
+        &Options::default().record_output(true),
+    );
+    wait_until_written(&terminal);
+    let drawn = terminal.draw(|frame| {
+        frame
+            .buffer_mut()
+            .set_string(2, 1, "recorded", Style::new());
+        frame.set_cursor_position((4, 3));
+    });
+    assert!(matches!(drawn, Ok(Drawn::Written(_))));
+    terminal.set_title("title").unwrap();
+    wait_until_written(&terminal);
+    let written = terminal.take_written();
+    let mut replayed = Emulator::with_profile(Profile::kitty(), 80, 24);
+    replayed.feed(&written).unwrap();
+    played.until("drawn", |emulator| {
+        emulator.row_text(1).as_deref() == Some("  recorded")
+    });
+    {
+        let emulator = lock(&played.emulator);
+        assert_eq!(replayed.rows(), emulator.rows());
+        assert_eq!(replayed.cursor(), emulator.cursor());
+        assert_eq!(replayed.title(), "title");
+    }
+    assert!(terminal.take_written().is_empty());
+    terminal.close().unwrap();
+    let (unrecorded, signals) = Played::new(Profile::kitty());
+    let mut terminal = open(&unrecorded, signals, &[], &Options::default());
+    wait_until_written(&terminal);
+    assert!(terminal.take_written().is_empty());
+    terminal.close().unwrap();
 }

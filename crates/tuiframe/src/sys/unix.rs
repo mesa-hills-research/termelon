@@ -1253,12 +1253,11 @@ pub(crate) mod tests {
             wait([first.as_fd(), second.as_fd()], None).unwrap(),
             [true, false]
         );
-        // A pipe whose writer closed counts as ready, as a terminal that hung up does.
+        // A pipe whose writer closed counts as ready, as a terminal that hung up does. (A child
+        // another test forks holds a copy of every descriptor until it execs, so the hang-up may
+        // come a moment later.)
         drop(second_end);
-        assert_eq!(
-            wait([second.as_fd()], Some(Duration::ZERO)).unwrap(),
-            [true]
-        );
+        assert_eq!(wait([second.as_fd()], Some(LONG)).unwrap(), [true]);
     }
 
     /// The variable that makes a test's process the child that runs its case.

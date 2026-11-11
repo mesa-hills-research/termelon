@@ -60,9 +60,10 @@ mod tests {
             wait([first.as_fd(), second.as_fd()], None).unwrap(),
             [true, false]
         );
+        // (A child another test forks holds a copy of the writer until it execs.)
         drop(second_end);
         assert_eq!(
-            wait([second.as_fd()], Some(Duration::ZERO)).unwrap(),
+            wait([second.as_fd()], Some(Duration::from_secs(5))).unwrap(),
             [true]
         );
 
