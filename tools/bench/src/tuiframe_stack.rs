@@ -46,6 +46,9 @@ impl TuiframeStack {
         caps.synchronized_output = Support::Yes;
         caps.underline_color = Support::Yes;
         caps.cursor_shape = Support::Yes;
+        // Erasing with the background, as every terminal of the known-terminal table does but
+        // tmux and GNU screen.
+        caps.bce = Support::Yes;
         TuiframeStack {
             front: Buffer::with_width_profile(area, PROFILE),
             back: Buffer::with_width_profile(area, PROFILE),
