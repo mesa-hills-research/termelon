@@ -15,11 +15,15 @@ categories = ["command-line-interface"]
 stream = ["dep:futures-core"]
 # The encoder on its own, for the bench in tools/bench. It isn't part of the stable API.
 unstable-encoder = []
+# `testing::TestTerminal` and the golden helpers, for the tests of programs.
+testing = ["dep:tuiframe-vt"]
 
 [dependencies]
 unicode-width.workspace = true
 unicode-segmentation.workspace = true
 futures-core = { workspace = true, optional = true }
+# The emulator `TestTerminal` feeds its frames to, so a test sees what a terminal would show.
+tuiframe-vt = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

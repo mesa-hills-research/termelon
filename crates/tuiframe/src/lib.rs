@@ -12,6 +12,7 @@
 //! | [`event`] | [`Event`] and the key and mouse types in it |
 //! | [`caps`] | [`Capabilities`], what the terminal supports |
 //! | [`terminal`] | `Terminal`, opened with [`Options`], and its [`Events`] |
+//! | `testing` | `TestTerminal`, a terminal in memory for tests, and golden files, with the `testing` feature |
 //!
 //! A frame's cursor is a [`Cursor`], and a frame the terminal took is a [`CompletedFrame`] with
 //! its [`FrameStats`].
@@ -29,6 +30,8 @@ mod restore;
 pub mod style;
 mod sys;
 pub mod terminal;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod text;
 #[cfg(feature = "unstable-encoder")]
 #[doc(hidden)]
