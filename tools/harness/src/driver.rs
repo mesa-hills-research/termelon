@@ -146,6 +146,9 @@ pub struct Reports {
     /// Whether it drops the blank cells at the end of each row, background colour and all, as
     /// VTE's HTML does.
     pub trims_rows: bool,
+    /// Whether it gives the first sixteen colours of the 256-colour palette (`38;5;n`) as the
+    /// named ones (`30 + n`), as kitty's does.
+    pub indexed_as_named: bool,
 }
 
 /// A terminal's screen as it reported it, rebuilt in an emulator, so it can be compared with

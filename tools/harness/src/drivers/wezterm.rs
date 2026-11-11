@@ -126,6 +126,7 @@ pub fn parse(text: &[u8], list_json: &str, cols: u16, rows: u16) -> Result<Readb
         cursor: true,
         wide_text: true,
         trims_rows: false,
+        indexed_as_named: false,
     };
     Ok(Readback::new(screen, reports))
 }

@@ -97,6 +97,7 @@ pub fn parse(reply: &Json, cols: u16, rows: u16) -> Result<Readback, Error> {
             cursor: false,
             wide_text: true,
             trims_rows: true,
+            indexed_as_named: false,
         },
     })
 }

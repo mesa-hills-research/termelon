@@ -116,6 +116,7 @@ pub fn parse(html: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
             cursor: false,
             wide_text: true,
             trims_rows: false,
+            indexed_as_named: false,
         },
     })
 }

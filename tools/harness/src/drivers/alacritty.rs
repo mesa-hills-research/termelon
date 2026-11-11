@@ -247,6 +247,7 @@ pub fn parse(grid_json: &str) -> Result<Readback, Error> {
         cursor: false,
         wide_text: true,
         trims_rows: false,
+        indexed_as_named: false,
     };
     Ok(Readback::new(screen, reports))
 }

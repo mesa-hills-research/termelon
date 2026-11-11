@@ -94,7 +94,13 @@ pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
             if reports.trims_rows && x >= text_end {
                 continue;
             }
-            compare_colors(e.style(), g.style(), reports.colors, &mut push);
+            compare_colors(
+                e.style(),
+                g.style(),
+                reports.colors,
+                reports.indexed_as_named,
+                &mut push,
+            );
             compare_attributes(e, g, readback, &mut push);
         }
     }
@@ -139,13 +145,18 @@ fn compare_colors(
     e: &Style,
     g: &Style,
     colors: Colors,
+    indexed_as_named: bool,
     push: &mut impl FnMut(&'static str, String, String),
 ) {
     match colors {
         Colors::None => {}
         Colors::AsWritten => {
-            push("fg", format!("{:?}", e.fg), format!("{:?}", g.fg));
-            push("bg", format!("{:?}", e.bg), format!("{:?}", g.bg));
+            let written = |color: Color| match color {
+                Color::Indexed(n) if indexed_as_named => Color::named(n).unwrap_or(color),
+                _ => color,
+            };
+            push("fg", format!("{:?}", written(e.fg)), format!("{:?}", g.fg));
+            push("bg", format!("{:?}", written(e.bg)), format!("{:?}", g.bg));
         }
         Colors::Rgb {
             foreground,

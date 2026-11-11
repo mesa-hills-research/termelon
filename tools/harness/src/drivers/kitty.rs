@@ -80,7 +80,8 @@ pub const GET_TEXT: [&str; 5] = ["get-text", "--extent", "screen", "--ansi", "--
 /// Rebuilds kitty's `get-text --ansi --add-cursor` output, whose last line ends with the cursor's
 /// place, visibility and shape as escape sequences. It writes dotted and dashed underlines as none
 /// (`decoration_as_sgr` in its `line.c` knows only the first three styles in 0.32, and drops the
-/// style's number in 0.45).
+/// style's number in 0.45), and the palette's first sixteen colours as the named ones, since kitty
+/// stores `38;5;1` as it stores `31`.
 ///
 /// # Errors
 ///
@@ -95,6 +96,7 @@ pub fn parse(text: &[u8], cols: u16, rows: u16, width: WidthRules) -> Result<Rea
         cursor: true,
         wide_text: true,
         trims_rows: false,
+        indexed_as_named: true,
     };
     Ok(Readback {
         raw: Vec::new(),
@@ -119,6 +121,9 @@ impl Driver for Kitty {
     fn start(&mut self, launch: &Launch) -> Result<(), Error> {
         self.stop()?;
         x11::require_display()?;
+        // A kitty that was killed leaves its socket, and kitty 0.32 won't listen on a path that's
+        // there.
+        let _ = std::fs::remove_file(self.dir.join("kitty.sock"));
         let mut child = x11::spawn(start_command(launch, &self.socket()), &self.dir)?;
         let ready = x11::wait_until(&mut child, &self.dir, || {
             let mut command = self.kitten();
@@ -138,6 +143,15 @@ impl Driver for Kitty {
     }
 
     fn send_keys(&mut self, keys: &[(Key, Mods)]) -> Result<(), Error> {
+        // `send-key` makes a key event without the text a keyboard's layout would give it, so
+        // Shift+A comes as `a` and é as nothing (or an error in kitty 0.32).
+        if keys.iter().any(|&(key, mods)| {
+            matches!(key, Key::Char(c) if mods.contains(Mods::SHIFT) || !c.is_ascii())
+        }) {
+            return Err(Error::Unsupported(
+                "send a key that types a shifted or non-ASCII character, since `send-key` gives it no text",
+            ));
+        }
         let names = keys
             .iter()
             .map(|&(key, mods)| keys::kitty(key, mods).ok_or(Error::Unsupported("send that key")))

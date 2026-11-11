@@ -154,6 +154,7 @@ pub fn parse(
         cursor: true,
         wide_text: true,
         trims_rows: false,
+        indexed_as_named: false,
     };
     Ok(Readback::new(screen, reports))
 }
