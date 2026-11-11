@@ -16,7 +16,7 @@ Most fields are a `Support` of `Yes`, `No` or `Unknown`.
 | `multiplexer` | tmux or GNU screen, with its version, when the program runs inside one |
 | `colors` | `TrueColor`, `Ansi256`, `Ansi16` or `None` |
 | `width_profile` | How the terminal measures emoji sequences, emoji with VS16 and East Asian ambiguous characters |
-| `keyboard` | The kitty keyboard protocol with its flags, xterm's modifyOtherKeys, or the legacy encodings |
+| `keyboard` | The kitty keyboard protocol with its flags, xterm's modifyOtherKeys, the Windows console's key records, or the legacy encodings |
 | `alternate_screen` | The alternate screen, which the Linux console lacks |
 | `synchronized_output` | Synchronized updates (mode 2026) |
 | `grapheme_clustering` | Grapheme clustering (mode 2027) |
@@ -25,6 +25,7 @@ Most fields are a `Support` of `Yes`, `No` or `Unknown`.
 | `focus_events`, `bracketed_paste`, `mouse` | Focus reports (1004), bracketed paste (2004), SGR mouse reports (1006) |
 | `clipboard_write` | Copying with OSC 52 |
 | `cursor_shape` | Cursor shapes (`CSI n SP q`) |
+| `bce` | Background colour erase, which lets the encoder erase a run of spaces in a colour instead of writing them |
 | `title`, `title_stack` | Setting the window title, and saving it on xterm's title stack |
 | `background` | The background colour, for choosing a dark or a light theme |
 | `glyphs` | `Full`, or `Limited` where the font may lack box drawing and braille |

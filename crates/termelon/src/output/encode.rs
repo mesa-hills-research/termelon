@@ -150,7 +150,7 @@ impl Encoder {
         not(any(test, feature = "unstable-encoder")),
         expect(
             dead_code,
-            reason = "scroll detection stays off until the terminal matrix passes it"
+            reason = "`Terminal` leaves scroll detection off, so only tests and the bench turn it on"
         )
     )]
     pub(crate) fn set_scroll_detection(&mut self, on: bool) {
