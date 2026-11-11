@@ -695,6 +695,17 @@ fn vt_bytes_are_the_characters_of_key_downs() {
         vt_bytes(key, &mut surrogate, &mut bytes);
     }
     assert_eq!(bytes, "é😀zzz".as_bytes());
+    // An Alt code's character comes with Alt's release.
+    bytes.clear();
+    for record in
+        recorded("K+12:38:0000:0002 K+68:48:0000:0002 K-68:48:0000:0002 K-12:38:00e9:0000")
+    {
+        let InputRecord::Key(key) = record else {
+            unreachable!()
+        };
+        vt_bytes(key, &mut surrogate, &mut bytes);
+    }
+    assert_eq!(bytes, "é".as_bytes());
     // A low surrogate with no high one before it is dropped.
     bytes.clear();
     vt_bytes(
@@ -1001,6 +1012,58 @@ fn held_input_is_given_up_on_after_silence() {
     assert!(typed.elapsed() >= HELD_WAIT);
     fake.type_in(&[key_record(true, 0x41, u16::from(b'a'), 0)]);
     assert_eq!(next(&shared), key(KeyCode::Char('a'), KeyModifiers::NONE));
+}
+
+/// Key records as the console tests print them, such as `K+12:38:0000:0002`, a key's press (`+`)
+/// or release (`-`), then its virtual key, scan code, UTF-16 unit and control key state in hex.
+fn recorded(text: &str) -> Vec<InputRecord> {
+    text.split_whitespace()
+        .map(|record| {
+            let (key_down, fields) = match record.strip_prefix("K+") {
+                Some(fields) => (true, fields),
+                None => (false, record.strip_prefix("K-").unwrap()),
+            };
+            let fields: Vec<u32> = fields
+                .split(':')
+                .map(|field| u32::from_str_radix(field, 16).unwrap())
+                .collect();
+            let unit = |i: usize| u16::try_from(fields[i]).unwrap();
+            InputRecord::Key(KeyRecord {
+                key_down,
+                repeat: 1,
+                virtual_key: unit(0),
+                scan_code: unit(1),
+                unicode: unit(2),
+                control_state: fields[3],
+            })
+        })
+        .collect()
+}
+
+/// The system's pseudoconsole delivers a character its keyboard layout has no key for as an Alt
+/// code, Alt held while digits are typed on the keypad, with the character on Alt's release. It
+/// does so in either input mode, and either mode takes it as that character. (The records are
+/// what Windows Server 2025's pseudoconsole gave for U+1F600 sent by its terminal.)
+#[test]
+fn an_alt_code_from_a_pseudoconsole_is_its_character_in_either_mode() {
+    let emoji = recorded(
+        "K+12:38:0000:0002 K+66:4d:0000:0002 K-66:4d:0000:0002 K+63:51:0000:0002 \
+         K-63:51:0000:0002 K-12:38:d83d:0000 K+12:38:0000:0002 K+66:4d:0000:0002 \
+         K-66:4d:0000:0002 K+63:51:0000:0002 K-63:51:0000:0002 K-12:38:de00:0000",
+    );
+    for mode in [InputMode::Vt, InputMode::Records] {
+        let fake = Fake::new();
+        let settings = Arc::new(Settings::default());
+        settings.set_mode(mode);
+        let (_reader, shared) = reading(&fake, &settings, Duration::ZERO);
+        fake.type_in(&emoji);
+        assert_eq!(
+            next(&shared),
+            key(KeyCode::Char('😀'), KeyModifiers::NONE),
+            "{mode:?}"
+        );
+        nothing_more(&shared);
+    }
 }
 
 /// The kitty keyboard flags go to the console only while keys come as bytes, since under a

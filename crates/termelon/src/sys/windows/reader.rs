@@ -347,7 +347,8 @@ impl<I: Input, D: Decode> Loop<I, D> {
         for (at, record) in records.iter().enumerate() {
             match *record {
                 InputRecord::Key(key) if mode == InputMode::Vt => self.feed_key(key, bytes, out),
-                InputRecord::Key(key) if burst && !key.key_down => {}
+                // (Of the key-ups, only an Alt code's carries a character of the burst.)
+                InputRecord::Key(key) if burst && !key.key_down => self.feed_key(key, bytes, out),
                 InputRecord::Key(key)
                     if key.unicode != 0
                         && (burst || key.virtual_key == 0 || self.decoder.has_held()) =>
@@ -417,13 +418,23 @@ impl<I: Input, D: Decode> Loop<I, D> {
     }
 }
 
+/// The Alt key's virtual-key code, `VK_MENU`.
+const VK_MENU: u16 = 0x12;
+
 /// Appends the bytes a key record carries in [`InputMode::Vt`], in its character, as UTF-8. A
 /// surrogate pair comes across two records, so the first half waits in `surrogate`. Key-up
-/// records carry none.
+/// records carry none, except the Alt key's. A pseudoconsole delivers a character its keyboard
+/// layout has no key for as an Alt code, Alt held while digits are typed on the keypad, and the
+/// character comes with Alt's release.
 pub(crate) fn vt_bytes(key: KeyRecord, surrogate: &mut Option<u16>, bytes: &mut Vec<u8>) {
-    if !key.key_down || key.unicode == 0 {
+    let alt_code = !key.key_down && key.virtual_key == VK_MENU;
+    if !(key.key_down || alt_code) || key.unicode == 0 {
         return;
     }
+    let key = KeyRecord {
+        repeat: if alt_code { 1 } else { key.repeat },
+        ..key
+    };
     let unit = key.unicode;
     let ch = match unit {
         0xd800..=0xdbff => {
