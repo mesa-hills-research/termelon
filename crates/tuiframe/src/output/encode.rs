@@ -20,6 +20,7 @@ use crate::buffer::{Buffer, Cell};
 use crate::caps::{Capabilities, ColorDepth, Support};
 use crate::layout::{Position, Rect};
 use crate::style::{Color, Modifier, UnderlineStyle};
+use crate::text;
 
 const SYNC_BEGIN: &[u8] = b"\x1b[?2026h";
 const SYNC_END: &[u8] = b"\x1b[?2026l";
@@ -227,6 +228,7 @@ impl Encoder {
             }
             let mut erased = None;
             let mut blank_from = (usize::MAX, 0);
+            let mut written_to = (usize::MAX, 0);
             for &run in &runs {
                 if erased == Some(run.row) {
                     continue;
@@ -234,8 +236,17 @@ impl Encoder {
                 if blank_from.0 != run.row {
                     blank_from = (run.row, blank_tail(next, next.row(run.row)));
                 }
-                let (written, erased_row) = self.write_run(next, run, blank_from.1, allowed, out);
+                let mut run = run;
+                if written_to.0 == run.row {
+                    run.start = run.start.max(written_to.1);
+                    if run.start >= run.end {
+                        continue;
+                    }
+                }
+                let (written, erased_row, reached) =
+                    self.write_run(next, run, blank_from.1, allowed, out);
                 cells += written;
+                written_to = (run.row, reached);
                 if erased_row {
                     erased = Some(run.row);
                 }
@@ -322,8 +333,9 @@ impl Encoder {
     }
 
     /// Writes one run, or erases its blank tail with `CSI K` from `blank_from`, the column from
-    /// which the row looks blank to its end. Returns the cells written and whether it erased the
-    /// rest of the row.
+    /// which the row looks blank to its end. Returns the cells written, whether it erased the
+    /// rest of the row, and the column it wrote up to, which an uncertain width can take past
+    /// the run's end.
     fn write_run(
         &mut self,
         next: &Buffer,
@@ -331,33 +343,26 @@ impl Encoder {
         blank_from: usize,
         allowed: Allowed,
         out: &mut Vec<u8>,
-    ) -> (usize, bool) {
+    ) -> (usize, bool, usize) {
         let area = next.area();
         let row = next.row(run.row);
         let Some(y) = u16::try_from(run.row)
             .ok()
             .map(|r| area.y.saturating_add(r))
         else {
-            return (0, false);
+            return (0, false, run.end);
         };
+        let mut unit = Unit { row, y, link: 0 };
         let mut cells = 0;
-        let mut link = 0;
-        let mut last: Option<usize> = None;
         let mut x = run.start;
         let mut erased = false;
         while x < run.end {
             let Some(cell) = row.get(x) else {
                 break;
             };
-            let Some(abs_x) = u16::try_from(x).ok().map(|x| area.x.saturating_add(x)) else {
-                break;
-            };
             if x >= blank_from && self.erase_is_shorter(run.end - x) {
-                if link != 0 {
-                    out.extend_from_slice(LINK_CLOSE);
-                    link = 0;
-                }
-                self.move_to(abs_x, y, false, out);
+                unit.close_link(out);
+                self.move_to(column(area, x), y, false, out);
                 let neutral = self.pen.map_or(Pen::DEFAULT, |p| Pen {
                     bg: Color::Reset,
                     modifier: p.modifier - Modifier::REVERSED,
@@ -367,45 +372,129 @@ impl Encoder {
                 out.extend_from_slice(ERASE_LINE);
                 cells += run.end - x;
                 erased = true;
+                x = run.end;
                 break;
             }
-            let width = diff::unit_width(row, x);
-            let breaks_join = last
-                .and_then(|l| row.get(l))
-                .is_some_and(|before| self.joins(next.cell_symbol(before), next.cell_symbol(cell)));
-            self.move_to(abs_x, y, breaks_join, out);
-            let wanted = if allowed.hyperlinks {
-                next.link_index(cell)
+            if cell.uncertain_width() {
+                let (written, reached) = self.write_uncertain(next, &mut unit, x, allowed, out);
+                cells += written;
+                x = reached;
             } else {
-                0
-            };
-            if wanted != link {
-                if link != 0 {
-                    out.extend_from_slice(LINK_CLOSE);
-                }
-                let url = next.cell_link(cell).filter(|_| wanted != 0);
-                link = if open_link(url, out) { wanted } else { 0 };
+                let width = self.write_unit(next, &mut unit, x, false, allowed, out);
+                cells += width;
+                x += width;
             }
-            let pen = pen_of(next, cell, allowed, &mut self.lowering);
-            self.set_pen(pen, allowed, out);
-            match next.cell_symbol(cell) {
-                "" => out.push(b' '),
-                symbol => out.extend_from_slice(symbol.as_bytes()),
-            }
-            let end = usize::from(abs_x) + width;
-            self.col = if cell.uncertain_width() || end >= usize::from(area.right()) {
-                None
+        }
+        unit.close_link(out);
+        (cells, erased, x.max(run.end))
+    }
+
+    /// Writes the cluster at column `x` whose width terminals disagree on, so a terminal that
+    /// measures it otherwise leaves blanks in its cells, not old text, and nothing wrong around
+    /// it. It writes spaces over the cells the cluster takes, writes the cluster from its first
+    /// cell again, and then writes again the cells a wider measure of it would cover. A cluster
+    /// that a wider measure wouldn't fit before the right edge stays spaces, since a terminal
+    /// places a cluster too wide for the room left over the cells before it. Returns the cells
+    /// written and the column after the last.
+    fn write_uncertain(
+        &mut self,
+        next: &Buffer,
+        unit: &mut Unit<'_>,
+        x: usize,
+        allowed: Allowed,
+        out: &mut Vec<u8>,
+    ) -> (usize, usize) {
+        let area = next.area();
+        let row = unit.row;
+        let row_len = row.len();
+        let Some(cell) = row.get(x) else {
+            return (0, x + 1);
+        };
+        let width = diff::unit_width(row, x);
+        unit.close_link(out);
+        self.move_to(column(area, x), unit.y, false, out);
+        let pen = pen_of(next, cell, allowed, &mut self.lowering);
+        self.set_pen(pen, allowed, out);
+        out.resize(out.len() + width, b' ');
+        let widest = usize::from(text::widest(next.cell_symbol(cell), next.width_profile()));
+        if x + widest > row_len {
+            let end = usize::from(column(area, x + width));
+            self.col = u16::try_from(end)
+                .ok()
+                .filter(|_| end < usize::from(area.right()));
+            return (width, x + width);
+        }
+        self.col = None;
+        let mut cells = self.write_unit(next, unit, x, true, allowed, out);
+        let mut after = x + width;
+        let reach = x + widest;
+        while after < reach {
+            if row.get(after).is_some_and(Cell::uncertain_width) {
+                let (written, reached) = self.write_uncertain(next, unit, after, allowed, out);
+                cells += written;
+                after = reached;
             } else {
-                u16::try_from(end).ok()
-            };
-            last = Some(x);
-            cells += width;
-            x += width;
+                let w = self.write_unit(next, unit, after, true, allowed, out);
+                cells += w;
+                after += w;
+            }
         }
-        if link != 0 {
-            out.extend_from_slice(LINK_CLOSE);
+        (cells, after)
+    }
+
+    /// Writes the unit at column `x` of `unit`'s row, moving the cursor there first, absolutely
+    /// when `absolute` says so. Returns its width.
+    fn write_unit(
+        &mut self,
+        next: &Buffer,
+        unit: &mut Unit<'_>,
+        x: usize,
+        absolute: bool,
+        allowed: Allowed,
+        out: &mut Vec<u8>,
+    ) -> usize {
+        let area = next.area();
+        let Some(cell) = unit.row.get(x) else {
+            return 1;
+        };
+        let width = diff::unit_width(unit.row, x);
+        let abs_x = column(area, x);
+        // Writing on from where the cursor is, the cell joins the one written before it if the
+        // terminal would make the two one cluster.
+        let continues = self.row == Some(unit.y) && self.col == Some(abs_x) && x > 0;
+        let breaks_join = continues && {
+            let mut before = x - 1;
+            while before > 0 && unit.row.get(before).is_some_and(Cell::is_continuation) {
+                before -= 1;
+            }
+            unit.row
+                .get(before)
+                .is_some_and(|b| self.joins(next.cell_symbol(b), next.cell_symbol(cell)))
+        };
+        self.move_to(abs_x, unit.y, absolute || breaks_join, out);
+        let wanted = if allowed.hyperlinks {
+            next.link_index(cell)
+        } else {
+            0
+        };
+        if wanted != unit.link {
+            unit.close_link(out);
+            let url = next.cell_link(cell).filter(|_| wanted != 0);
+            unit.link = if open_link(url, out) { wanted } else { 0 };
         }
-        (cells, erased)
+        let pen = pen_of(next, cell, allowed, &mut self.lowering);
+        self.set_pen(pen, allowed, out);
+        match next.cell_symbol(cell) {
+            "" => out.push(b' '),
+            symbol => out.extend_from_slice(symbol.as_bytes()),
+        }
+        let end = usize::from(abs_x) + width;
+        self.col = if cell.uncertain_width() || end >= usize::from(area.right()) {
+            None
+        } else {
+            u16::try_from(end).ok()
+        };
+        width
     }
 
     /// Whether erasing `cells` blank cells with `CSI K` is shorter than writing them as spaces,
@@ -566,6 +655,27 @@ impl Encoder {
             self.visible = Some(true);
         }
     }
+}
+
+/// Where a run is being written: its row and the link open.
+struct Unit<'a> {
+    row: &'a [Cell],
+    y: u16,
+    link: u32,
+}
+
+impl Unit<'_> {
+    fn close_link(&mut self, out: &mut Vec<u8>) {
+        if self.link != 0 {
+            out.extend_from_slice(LINK_CLOSE);
+            self.link = 0;
+        }
+    }
+}
+
+/// The screen column of column `x` of the buffer's area.
+fn column(area: Rect, x: usize) -> u16 {
+    u16::try_from(x).map_or(u16::MAX, |x| area.x.saturating_add(x))
 }
 
 /// The pen that draws `cell`, a cell of `next`, on this terminal.

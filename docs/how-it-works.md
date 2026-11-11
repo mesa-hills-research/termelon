@@ -90,8 +90,11 @@ measure with the same one, since `Terminal::open` makes the terminal's the proce
 (`text::set_width_profile`), which `text::width`, the text types' `width` and `Buffer::empty`
 read. Tests set one for their own thread with `text::with_width_profile`. Cells whose
 width terminals disagree on (emoji sequences, and emoji newer than many terminals' width tables) are
-marked, and after writing one the encoder positions the next run absolutely, so a terminal that
-measures differently misdraws that cell alone. East Asian ambiguous characters follow the profile
+marked. The encoder writes spaces over such a cell's cells first, then the cluster, then again the
+cells that the widest measure of it would cover, placing each absolutely, so a terminal that
+measures differently shows blanks in that cluster's cells and nothing wrong around it. One that
+the widest measure wouldn't fit before the right edge stays blank, since a terminal pushes a
+cluster too wide for the room left over the cells before it. East Asian ambiguous characters follow the profile
 without a mark. They include box drawing and the Greek and Cyrillic alphabets, which every measured
 terminal draws narrow unless it's set for East Asian text, and a resync after each would make them
 several times longer to write.

@@ -728,6 +728,23 @@ pub(crate) fn measure(cluster: &str, profile: WidthProfile) -> Measure {
 /// The cells `c` takes on its own. That's unicode-width's width, except that an East Asian
 /// ambiguous character takes two under `ambiguous_wide`, and the halfwidth katakana sound marks
 /// take one, as terminals draw them as characters of their own.
+/// The most cells a terminal gives `cluster`, whether or not it joins emoji sequences or widens a
+/// text symbol followed by U+FE0F, for the encoder to rewrite what a wider cluster covered.
+pub(crate) fn widest(cluster: &str, profile: WidthProfile) -> u8 {
+    [(false, false), (false, true), (true, false), (true, true)]
+        .into_iter()
+        .map(|(joins_emoji, vs16_widens)| {
+            let rules = WidthProfile {
+                joins_emoji,
+                vs16_widens,
+                ..profile
+            };
+            measure(cluster, rules).width
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 fn char_width(c: char, profile: WidthProfile) -> usize {
     let width = match c {
         '\u{FF9E}' | '\u{FF9F}' => 1,
@@ -1078,6 +1095,15 @@ mod tests {
         assert_eq!(measure("界\u{903}", profile(true, false, false)).width, 2);
         assert!(!measure("e\u{301}", PLAIN).uncertain);
         assert!(!measure("\u{1100}\u{1161}\u{11a8}", PLAIN).uncertain);
+    }
+
+    #[test]
+    fn widest_is_the_most_any_rule_gives() {
+        let family = "👨\u{200d}👩\u{200d}👧";
+        assert_eq!(widest(family, profile(true, false, false)), 6);
+        assert_eq!(widest("❤\u{fe0f}", PLAIN), 2);
+        assert_eq!(widest("a", PLAIN), 1);
+        assert_eq!(widest("±", profile(false, false, true)), 2);
     }
 
     #[test]

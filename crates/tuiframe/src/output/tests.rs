@@ -145,11 +145,11 @@ fn byte_goldens() {
             "␛[?2026h␛[?25l␛[H␛[0ma界b␛[?2026l",
         ),
         (
-            "an uncertain width is followed by an absolute move",
+            "an uncertain width is written over spaces and followed by an absolute move",
             blank.clone(),
             text(AREA, &[(0, 0, "a❤\u{fe0f}b", Style::new())]),
             None,
-            "␛[?2026h␛[?25l␛[H␛[0ma❤\u{fe0f}␛[3Gb␛[?2026l",
+            "␛[?2026h␛[?25l␛[H␛[0ma ␛[2G❤\u{fe0f}␛[3Gb␛[?2026l",
         ),
         (
             "a link closes at the end of its run",
@@ -747,8 +747,38 @@ fn check_cells(
             let theirs = term.cell(x, y).ok_or("the emulator lacks a cell")?;
             let at = || format!("({x}, {y}) of\n{:?}\n{:?}", term.rows(), buffer);
             if ours.width() == 0 {
+                let mut lead = x;
+                while lead > area.left() && buffer.cell((lead, y)).is_some_and(|c| c.width() == 0) {
+                    lead -= 1;
+                }
+                let leader = buffer.cell((lead, y)).ok_or("a leader is missing")?;
+                let room = usize::from(area.right() - lead);
+                if leader.has_uncertain_width()
+                    && usize::from(crate::text::widest(leader.symbol(), buffer.width_profile()))
+                        > room
+                {
+                    continue;
+                }
                 if !theirs.is_continuation() {
                     return Err(format!("not a continuation cell at {}", at()));
+                }
+                continue;
+            }
+            // An uncertain cluster that a wider measure wouldn't fit before the right edge is
+            // written as spaces.
+            let room = usize::from(area.right() - x);
+            if ours.has_uncertain_width()
+                && usize::from(crate::text::widest(ours.symbol(), buffer.width_profile())) > room
+            {
+                for k in 0..ours.width() {
+                    let blank = term.cell(x + k, y).is_some_and(|c| c.text() == " ");
+                    if !blank {
+                        return Err(format!(
+                            "{:?} near the edge isn't blank at {}",
+                            ours.symbol(),
+                            at()
+                        ));
+                    }
                 }
                 continue;
             }
@@ -1263,6 +1293,54 @@ fn a_partial_frame_that_breaks_a_wide_character_inside_it() {
     run_frames(profile, &full_caps(), false, false, &[frame]).unwrap();
 }
 
+/// The clusters of `buffer` that a terminal measuring by `rules` gives another width, as their
+/// rows and the columns of their own cells.
+fn disagreements(buffer: &Buffer, rules: WidthRules) -> Vec<(u16, u16, u16)> {
+    let area = buffer.area();
+    let mut spans = Vec::new();
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            let Some(cell) = buffer.cell((x, y)) else {
+                continue;
+            };
+            let mine = cell.width();
+            if mine > 0 && mine != u16::from(rules.width(cell.symbol())) {
+                spans.push((y, x, x + mine));
+            }
+        }
+    }
+    spans
+}
+
+/// Whether the screen matches the buffer outside the cells of the clusters in `spans`, and shows
+/// in those cells only blanks or the cluster itself, never text left from before.
+fn check_damage(
+    term: &Emulator,
+    buffer: &Buffer,
+    caps: &Capabilities,
+    spans: &[(u16, u16, u16)],
+) -> Result<(), String> {
+    let within = |x: u16, y: u16| spans.iter().find(|&&(sy, a, b)| sy == y && a <= x && x < b);
+    check_cells(term, buffer, caps, |x, y| within(x, y).is_some())?;
+    for y in 0..buffer.area().height {
+        for x in 0..buffer.area().width {
+            let Some(&(_, start, _)) = within(x, y) else {
+                continue;
+            };
+            let theirs = term.cell(x, y).ok_or("the emulator lacks a cell")?;
+            let cluster = buffer.symbol((start, y));
+            let text = theirs.text();
+            if !(text == " " || theirs.is_continuation() || text == cluster) {
+                return Err(format!(
+                    "{text:?} at ({x}, {y}) is in the cells of {cluster:?}, which hold only blanks or it\n{:?}",
+                    term.rows()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 proptest! {
     /// For random sequences of random frames, the emulator's screen after the encoder's bytes
     /// equals the last buffer, cell for cell, and its cursor equals the frame's.
@@ -1280,7 +1358,8 @@ proptest! {
     }
 
     /// With the emulator measuring emoji sequences by other rules than the buffer, a cluster they
-    /// disagree on misdraws only the cells either of them gives it.
+    /// disagree on misdraws only its own cells, which show blanks rather than text from before,
+    /// and the same after a frame that changes that cluster's cell alone.
     #[test]
     fn a_width_disagreement_misdraws_only_its_cluster(
         ours in width_profile(),
@@ -1307,29 +1386,20 @@ proptest! {
         encoder.encode(&filler, &next, None, &caps, &mut out);
         term.feed(&out).unwrap();
         let rules = WidthRules { joins_emoji: theirs.joins_emoji, vs16_widens: theirs.vs16_widens, ambiguous_wide: theirs.ambiguous_wide };
-        let mut spans = Vec::new();
-        for y in 0..H {
-            for x in 0..W {
-                let cell = next.cell((x, y)).unwrap();
-                let (mine, other) = (cell.width(), u16::from(rules.width(cell.symbol())));
-                if mine > 0 && mine != other {
-                    // A terminal places a cluster too wide for the room left against the right
-                    // edge, over the cells before it, and the wide character it cuts goes too.
-                    let mut from = if x + other > W { (W - other).min(x) } else { x };
-                    let mut to = (x + mine.max(other)).min(W);
-                    while from > 0 && next.cell((from, y)).is_some_and(|c| c.width() == 0) {
-                        from -= 1;
-                    }
-                    while to < W && next.cell((to, y)).is_some_and(|c| c.width() == 0) {
-                        to += 1;
-                    }
-                    spans.push((y, from, to));
-                }
-            }
-        }
-        let skip = |x: u16, y: u16| spans.iter().any(|&(sy, a, b)| sy == y && a <= x && x < b);
-        if let Err(e) = check_cells(&term, &next, &caps, skip) {
+        let spans = disagreements(&next, rules);
+        if let Err(e) = check_damage(&term, &next, &caps, &spans) {
             prop_assert!(false, "{}\nspans {:?}\nbytes {}", e, spans, show(&out));
+        }
+        // A frame that changes only one such cluster's cell.
+        if let Some(&(y, x, _)) = spans.first() {
+            let mut restyled = next.clone();
+            restyled.set_style(Rect::new(x, y, 1, 1), Style::new().add_modifier(Modifier::BOLD));
+            out.clear();
+            encoder.encode(&next, &restyled, None, &caps, &mut out);
+            term.feed(&out).unwrap();
+            if let Err(e) = check_damage(&term, &restyled, &caps, &spans) {
+                prop_assert!(false, "after the cluster changed alone, {}\nspans {:?}\nbytes {}", e, spans, show(&out));
+            }
         }
     }
 }
