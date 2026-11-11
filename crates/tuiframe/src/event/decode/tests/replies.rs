@@ -378,3 +378,16 @@ fn replies_split_across_reads_decode_whole() {
     // After each of the three ESCs that start a reply, and after `ESC ]`, `ESC P` and `ESC [`.
     assert_eq!(pending, 6);
 }
+
+/// A probe that stopped waiting cancels what it expected, so a cursor report that comes later is
+/// no reply.
+#[test]
+fn cancelled_expectations_make_no_reply() {
+    let mut decoder = Decoder::new(DecoderOptions::default());
+    let mut out = Vec::new();
+    decoder.expect(Query::CursorPosition);
+    decoder.expect(Query::CursorPosition);
+    decoder.cancel_expected();
+    decoder.feed(b"\x1b[1;5R", &mut out);
+    assert_eq!(out, [key(KeyCode::F(3), KeyModifiers::CONTROL)]);
+}

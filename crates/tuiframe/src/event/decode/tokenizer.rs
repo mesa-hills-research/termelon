@@ -9,7 +9,8 @@
 //! `ESC ^` and `ESC X` are always keys.
 //!
 //! The bounds are fixed. Parameters stop at [`MAX_PARAMS`], strings at [`MAX_STRING`] bytes with
-//! the rest dropped to the string's end, and a paste is kept whole until its terminator.
+//! the rest dropped to the string's end, and a paste is kept whole until its terminator, or until
+//! it reaches the decoder's paste bound, when what came so far is delivered as a paste of its own.
 
 /// The most parameters and sub-parameters a sequence keeps. Later ones are dropped.
 pub(crate) const MAX_PARAMS: usize = 32;
@@ -285,10 +286,12 @@ pub(crate) struct Tokenizer {
     buf: Vec<u8>,
     /// Set when a string passed [`MAX_STRING`], so it's dropped at its end.
     overflow: bool,
+    /// The most bytes of a paste held at once. A longer paste comes in pieces of about this size.
+    max_paste: usize,
 }
 
 impl Tokenizer {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(max_paste: usize) -> Self {
         Self {
             state: State::Ground,
             utf8: [0; 4],
@@ -299,7 +302,29 @@ impl Tokenizer {
             x10_len: 0,
             buf: Vec::new(),
             overflow: false,
+            max_paste: max_paste.max(1),
         }
+    }
+
+    /// Whether it holds anything: what [`Tokenizer::has_pending`] counts, a sequence with more of
+    /// it, a string, a paste or part of a character.
+    pub(crate) fn has_held(&self) -> bool {
+        self.state != State::Ground
+    }
+
+    /// Gives up on what it holds, as the input has been silent too long for it to be finished.
+    /// What [`Tokenizer::flush`] takes is keys, a paste is delivered as it stands, and anything
+    /// else is dropped. Afterwards nothing is held.
+    pub(crate) fn flush_held(&mut self, emit: &mut impl FnMut(Token<'_>)) {
+        if self.has_pending() {
+            self.flush(emit);
+        } else if self.state == State::Paste {
+            emit(Token::Paste(&self.buf));
+            self.clear_buf();
+        } else {
+            self.clear_buf();
+        }
+        self.state = State::Ground;
     }
 
     /// Whether it holds an ESC or a sequence's introducer with nothing after it, which
@@ -445,6 +470,8 @@ impl Tokenizer {
                     self.state = State::Ground;
                     emit(Token::Paste(self.buf.get(..body).unwrap_or(&[])));
                     self.clear_buf();
+                } else if self.buf.len() >= self.max_paste + PASTE_END.len() {
+                    self.paste_piece(emit);
                 }
             }
         }
@@ -711,6 +738,24 @@ impl Tokenizer {
             });
         }
         self.clear_buf();
+    }
+
+    /// Delivers what a paste past the bound holds, as a paste of its own, and keeps the rest. It
+    /// keeps what may be the start of the terminator, part of a character and a CR that an LF may
+    /// follow, so the next piece takes them whole.
+    fn paste_piece(&mut self, emit: &mut impl FnMut(Token<'_>)) {
+        let mut cut = self.buf.len() - (PASTE_END.len() - 1);
+        while cut > 0 && self.buf.get(cut).is_some_and(|&byte| byte & 0xc0 == 0x80) {
+            cut -= 1;
+        }
+        if cut > 0 && self.buf.get(cut - 1) == Some(&b'\r') {
+            cut -= 1;
+        }
+        if cut == 0 {
+            return;
+        }
+        emit(Token::Paste(self.buf.get(..cut).unwrap_or(&[])));
+        self.buf.drain(..cut);
     }
 
     /// Empties the string and paste buffer, and lets a large paste's memory go.
