@@ -62,6 +62,7 @@ pub fn start_command(binary: &Path, launch: &Launch) -> Command {
         "--confirm-close-surface=false".to_owned(),
         "--quit-after-last-window-closed=true".to_owned(),
         "--window-save-state=never".to_owned(),
+        "--auto-update=off".to_owned(),
         "--keybind=ctrl+shift+f12=write_screen_file:copy".to_owned(),
         format!("--working-directory={}", launch.cwd.display()),
     ] {
