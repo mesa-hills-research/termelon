@@ -161,6 +161,11 @@ mod tests {
     }
 
     /// Draws `line` alone, on the top row, waiting while the console takes the last frame.
+    /// What of `line` fits on the first row of an 80-column console.
+    fn first_row(line: &str) -> String {
+        line.chars().take(80).collect()
+    }
+
     fn say(terminal: &mut Terminal, line: &str) {
         let started = Instant::now();
         loop {
@@ -247,7 +252,7 @@ mod tests {
         played.until_shown("ready");
         for ((typed, mods), expected) in &keys {
             played.key(*typed, *mods);
-            played.until_shown(&format!("got {expected:?}"));
+            played.until_shown(&first_row(&format!("got {expected:?}")));
         }
         played.resize(Size::new(100, 30));
         played.until_shown("done");
@@ -305,6 +310,9 @@ mod tests {
         if case().as_deref() == Some(TEST) {
             let mut terminal = open();
             say(&mut terminal, "ready");
+            // (Released, the console shows its main screen, so the terminal waits to see this
+            // one first.)
+            assert_eq!(next(&terminal), key(KeyCode::Char('r'), KeyModifiers::NONE));
             terminal.release().unwrap();
             std::thread::sleep(Duration::from_millis(200));
             terminal.reacquire().unwrap();
@@ -315,6 +323,7 @@ mod tests {
         }
         let played = Played::spawn(TEST, Profile::windows_terminal());
         played.until_shown("ready");
+        played.key(Key::Char('r'), Mods::NONE);
         played.until_shown("back");
         played.key(Key::Char('b'), Mods::NONE);
         played.finish();
