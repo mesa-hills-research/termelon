@@ -221,7 +221,12 @@ mod unix {
         ) -> Result<Self> {
             let screen = Screen::open_with(
                 tty,
-                |erase| Decoder::new(DecoderOptions { erase }),
+                |erase| {
+                    Decoder::new(DecoderOptions {
+                        erase,
+                        ..DecoderOptions::default()
+                    })
+                },
                 options.escape_timeout,
                 signals,
             )?;

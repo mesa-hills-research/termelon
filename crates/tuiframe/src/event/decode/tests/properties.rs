@@ -84,6 +84,29 @@ proptest! {
     }
 
     #[test]
+    fn nothing_is_held_once_held_input_is_given_up(bytes in noisy_bytes(512)) {
+        let mut decoder = Decoder::new(DecoderOptions::default());
+        let mut out = Vec::new();
+        decoder.feed(&bytes, &mut out);
+        decoder.flush_held(&mut out);
+        prop_assert!(!decoder.has_held() && !decoder.has_pending());
+        prop_assert!(out.len() <= bytes.len());
+    }
+
+    #[test]
+    fn a_paste_never_holds_more_than_its_bound(bytes in noisy_bytes(2048)) {
+        let options = DecoderOptions { max_paste: 64, ..DecoderOptions::default() };
+        let mut decoder = Decoder::new(options);
+        let mut out = Vec::new();
+        let mut paste = b"\x1b[200~".to_vec();
+        paste.extend_from_slice(&bytes);
+        for piece in paste.chunks(97) {
+            decoder.feed(piece, &mut out);
+            prop_assert!(decoder.buffer_capacity() <= MAX_STRING);
+        }
+    }
+
+    #[test]
     fn decoding_recovers_after_garbage(garbage in noisy_bytes(512), known in prop::sample::select(KNOWN)) {
         let expected = decode(known);
         prop_assert!(!expected.is_empty());
