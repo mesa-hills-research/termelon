@@ -310,8 +310,12 @@ pub struct FrameStats {
   and the caller then sends no packet. The encoder keeps what the terminal shows besides the cells
   (where its cursor is, its shape and visibility, and the ids of links it has seen), which two
   buffers alone can't say.
-- `encode_regions` is the partial frame. It compares `before` and `after` inside `regions` only, and
-  `before` may hold anything outside them.
+- `encode_regions` is the partial frame. It compares `before` and `after` inside `regions`, and
+  `before` may hold anything outside them. `after` was drawn under a clip of the regions
+  (`Buffer::set_clip`), which drops writes to cells outside them but writes a wide character that
+  starts inside whole, and breaks one that starts outside when a write covers part of it. The
+  buffer records the cells outside that this changed, and `encode_regions` writes them too, with
+  any wide character, in either buffer, that crosses a region's edge.
 - `redraw` makes the next `encode` a full redraw, which clears the screen, ignores `prev`, writes
   every cell that isn't blank and sends the cursor's state and the pen again.
 - `set_scroll_detection` turns on looking for rows that moved when more than half of a frame's

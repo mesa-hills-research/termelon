@@ -151,8 +151,9 @@ impl Encoder {
         self.frame(prev, next, None, cursor, caps, out)
     }
 
-    /// The partial frame. It compares `before` and `after` inside `regions` only, and `before`
-    /// may hold anything outside them.
+    /// The partial frame. It compares `before` and `after` inside `regions` only, with the cells
+    /// outside them that writes under `after`'s clip changed, and `before` may hold anything
+    /// elsewhere.
     pub(crate) fn encode_regions(
         &mut self,
         before: &Buffer,
@@ -189,7 +190,7 @@ impl Encoder {
             }
         } else if let Some(regions) = regions {
             for y in 0..height {
-                self.region_columns(area, regions, y);
+                self.region_columns(area, regions, next.clip_spill(y), y);
                 if !self.columns.is_empty() {
                     diff::diff_row(Before::Row(prev, y), next, y, &self.columns, &mut runs);
                 }
@@ -256,8 +257,15 @@ impl Encoder {
         }
     }
 
-    /// The columns of row `y` that `regions` cover, sorted and joined, into `self.columns`.
-    fn region_columns(&mut self, area: Rect, regions: &[Rect], y: usize) {
+    /// The columns of row `y` that `regions` cover, and `spill`, the columns outside them that
+    /// writes under a clip changed, sorted and joined, into `self.columns`.
+    fn region_columns(
+        &mut self,
+        area: Rect,
+        regions: &[Rect],
+        spill: Option<(usize, usize)>,
+        y: usize,
+    ) {
         self.columns.clear();
         let Some(abs_y) = u16::try_from(y).ok().map(|y| area.y.saturating_add(y)) else {
             return;
@@ -270,6 +278,7 @@ impl Encoder {
             self.columns
                 .push((usize::from(r.x - area.x), usize::from(r.right() - area.x)));
         }
+        self.columns.extend(spill);
         self.columns.sort_unstable();
         let mut kept = 0;
         for i in 0..self.columns.len() {

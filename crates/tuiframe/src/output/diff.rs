@@ -32,8 +32,8 @@ pub(crate) enum Before<'a> {
 const MAX_GAP: usize = 8;
 
 /// Appends the changed cells of row `y` of `next` to `runs`, looking only at `columns`, sorted
-/// spans of columns that don't overlap. Runs in two spans stay apart, so cells between them are
-/// never written.
+/// spans of columns that don't overlap, and at the wide characters, in either frame, that cross
+/// their edges. Runs in two spans stay apart, so cells between them are never written.
 pub(crate) fn diff_row(
     before: Before<'_>,
     next: &Buffer,
@@ -52,12 +52,20 @@ pub(crate) fn diff_row(
         }
         Before::Blank => None,
     };
+    let crosses = |x: usize| {
+        row.get(x).is_some_and(Cell::is_continuation)
+            || prev.is_some_and(|(_, p)| p.get(x).is_some_and(Cell::is_continuation))
+    };
     for &(from, to) in columns {
         let first = runs.len();
-        let to = to.min(row.len());
+        // A span takes in whole the wide characters of either frame that cross its edges.
         let mut x = from.min(row.len());
-        while x > 0 && row.get(x).is_some_and(Cell::is_continuation) {
+        while x > 0 && crosses(x) {
             x -= 1;
+        }
+        let mut to = to.min(row.len());
+        while to < row.len() && crosses(to) {
+            to += 1;
         }
         while x < to {
             let width = unit_width(row, x);

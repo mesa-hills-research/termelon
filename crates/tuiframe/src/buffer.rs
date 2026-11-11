@@ -458,6 +458,9 @@ pub struct Buffer {
     /// inside the area, when `clipped`.
     clip: Vec<ClipRegion>,
     clipped: bool,
+    /// For each row, the columns outside the clip that writes under it changed, through wide
+    /// characters across its edges, from the first to the one after the last.
+    spill: Vec<Option<(usize, usize)>>,
 }
 
 /// A region of a clip, in rows and columns counted inside the buffer's area.
@@ -487,6 +490,7 @@ impl Buffer {
             width_profile: profile,
             clip: Vec::new(),
             clipped: false,
+            spill: Vec::new(),
         };
         buffer.resize(area);
         buffer
@@ -535,6 +539,7 @@ impl Buffer {
         self.area = area;
         self.clip.clear();
         self.clipped = false;
+        self.spill.clear();
         self.cells.clear();
         self.cells.resize(area.area() as usize, Cell::BLANK);
         self.rich_rows.clear();
@@ -813,9 +818,10 @@ impl Buffer {
     fn put(&mut self, row: usize, col: usize, glyph: Glyph, style: Option<Style>) {
         let width = usize::from(glyph.width.max(1));
         let row_len = usize::from(self.area.width);
-        if !self.may_write(row, col, width) {
+        if !self.may_change(row + col) {
             return;
         }
+        self.note_spill(row, col, col + width);
         self.break_wide(row, row_len, col, col + width);
         let i = row + col;
         if let Some(style) = style {
@@ -920,12 +926,41 @@ impl Buffer {
             return;
         }
         let (row, col) = (index - index % width, index % width);
-        if !self.may_write(row, col, 1) {
+        if !self.may_change(index) {
             return;
         }
+        self.note_spill(row, col, col + 1);
         self.break_wide(row, width, col, col + 1);
         if let Some(cell) = self.cells.get_mut(index) {
             *cell = Cell::BLANK;
+        }
+    }
+
+    /// Records the cells outside the clip that writing columns `from..to` of the row starting at
+    /// `row` changes, those columns and the parts of wide characters it turns into spaces.
+    fn note_spill(&mut self, row: usize, from: usize, to: usize) {
+        if !self.clipped {
+            return;
+        }
+        let row_len = usize::from(self.area.width);
+        let Some(cells) = self.cells.get(row..row + row_len) else {
+            return;
+        };
+        let mut start = from;
+        while start > 0 && cells.get(start).is_some_and(Cell::is_continuation) {
+            start -= 1;
+        }
+        let mut end = to.min(row_len);
+        while end < row_len && cells[end].is_continuation() {
+            end += 1;
+        }
+        let y = row / row_len.max(1);
+        for col in start..end {
+            if !self.may_change(row + col)
+                && let Some(spill) = self.spill.get_mut(y)
+            {
+                *spill = Some(spill.map_or((col, col + 1), |(a, b)| (a.min(col), b.max(col + 1))));
+            }
         }
     }
 
@@ -939,27 +974,6 @@ impl Buffer {
         self.clip
             .iter()
             .any(|r| r.top <= row && row < r.bottom && r.left <= col && col < r.right)
-    }
-
-    /// Whether the clip allows writing `width` cells at column `col` of the row starting at
-    /// `row`, with the parts of wide characters the write would turn into spaces.
-    fn may_write(&self, row: usize, col: usize, width: usize) -> bool {
-        if !self.clipped {
-            return true;
-        }
-        let row_len = usize::from(self.area.width);
-        let Some(cells) = self.cells.get(row..row + row_len) else {
-            return false;
-        };
-        let mut from = col;
-        while from > 0 && cells.get(from).is_some_and(Cell::is_continuation) {
-            from -= 1;
-        }
-        let mut to = (col + width).min(row_len);
-        while to < row_len && cells[to].is_continuation() {
-            to += 1;
-        }
-        (from..to).all(|c| self.may_change(row + c))
     }
 
     /// The text of each row, with continuation cells left out.
@@ -981,10 +995,12 @@ impl Buffer {
     )
 )]
 impl Buffer {
-    /// Drops every write from now on that would change a cell outside `regions`, whatever the
-    /// call, until [`clear_clip`](Self::clear_clip). A wide character that crosses a region's
-    /// edge is neither written nor broken, and text goes on past the cells it couldn't write, so
-    /// a string over two regions lands in both.
+    /// Drops every write from now on to a cell outside `regions`, whatever the call, until
+    /// [`clear_clip`](Self::clear_clip). Text goes on past the cells it couldn't write, so a
+    /// string over two regions lands in both. A wide character that starts inside is written
+    /// whole, and one that starts outside is turned into spaces when a write inside covers part
+    /// of it, so the cells a write changes outside are the parts of wide characters that cross a
+    /// region's edge, which the diff of a partial frame takes in.
     pub(crate) fn set_clip(&mut self, regions: &[Rect]) {
         self.clip.clear();
         let area = self.area;
@@ -1001,12 +1017,21 @@ impl Buffer {
             });
         }
         self.clipped = true;
+        self.spill.clear();
+        self.spill.resize(usize::from(area.height), None);
     }
 
-    /// Lets writes change every cell again.
+    /// Lets writes change every cell again. What writes under the clip spilled past it stays
+    /// known until the next clip.
     pub(crate) fn clear_clip(&mut self) {
         self.clip.clear();
         self.clipped = false;
+    }
+
+    /// The columns of row `y`, counted inside the area, outside the last clip that writes under
+    /// it changed, from the first to the one after the last.
+    pub(crate) fn clip_spill(&self, y: usize) -> Option<(usize, usize)> {
+        self.spill.get(y).copied().flatten()
     }
 }
 
@@ -1789,34 +1814,38 @@ mod tests {
     }
 
     #[test]
-    fn a_clip_neither_writes_nor_breaks_a_wide_character_across_its_edge() {
+    fn a_clip_writes_a_wide_character_across_its_edge_whole() {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 8, 1));
         buffer.set_string(0, 0, "a界b界cd", Style::new());
         buffer.set_clip(&[Rect::new(2, 0, 3, 1)]);
         buffer.set_string(2, 0, "x", Style::new());
         assert_eq!(
             row(&buffer, 0),
-            "a界b界cd",
-            "x would break the 界 that starts outside"
+            "a xb界cd",
+            "the 界 that starts outside is broken"
         );
         buffer.set_string(3, 0, "yz", Style::new());
         assert_eq!(
             row(&buffer, 0),
-            "a界y界cd",
-            "z would break the 界 that ends outside"
+            "a xyz cd",
+            "and so is the one that ends outside"
         );
-        buffer.set_string(3, 0, "界", Style::new());
-        assert_eq!(row(&buffer, 0), "a界y界cd");
-        buffer.cell_mut((4, 0)).unwrap().set_symbol("w");
-        assert_eq!(row(&buffer, 0), "a界y界cd");
+        buffer.set_string(4, 0, "界", Style::new());
+        assert_eq!(
+            row(&buffer, 0),
+            "a xy界cd",
+            "one that starts inside is written whole"
+        );
+        buffer.set_string(5, 0, "w", Style::new());
+        assert_eq!(
+            row(&buffer, 0),
+            "a xy界cd",
+            "a write that starts outside is dropped"
+        );
         let mut wide = Buffer::empty(Rect::new(0, 0, 6, 1));
         wide.set_clip(&[Rect::new(0, 0, 3, 1)]);
         wide.set_string(0, 0, "界界界", Style::new());
-        assert_eq!(
-            row(&wide, 0),
-            "界    ",
-            "the second 界 crosses the edge and the third is outside"
-        );
+        assert_eq!(row(&wide, 0), "界界  ");
     }
 
     #[test]
@@ -1829,8 +1858,8 @@ mod tests {
         assert_eq!(row(&buffer, 1), "a  def");
         assert_eq!(
             buffer.symbol((2, 2)),
-            "👨\u{200d}👩\u{200d}👧",
-            "the family is wider than the clip"
+            " ",
+            "the family starts outside the clip and is broken by a reset inside it"
         );
         assert_eq!(buffer.cell((3, 1)).unwrap().fg(), Color::Reset);
         buffer.resize(Rect::new(0, 0, 3, 1));
@@ -1892,8 +1921,40 @@ mod tests {
             ]
         }
 
+        /// The cells of row `y` the clip reaches, its own and those of the wide characters, in
+        /// either buffer, that cross into them, and so on.
+        fn reach(
+            before: &Buffer,
+            after: &Buffer,
+            y: u16,
+            inside: &impl Fn(u16, u16) -> bool,
+        ) -> Vec<bool> {
+            let width = before.area().width;
+            let mut reach: Vec<bool> = (0..width).map(|x| inside(x, y)).collect();
+            loop {
+                let mut grew = false;
+                for buffer in [before, after] {
+                    let mut x = 0;
+                    while x < width {
+                        let w = buffer.cell((x, y)).map_or(1, |c| c.width().max(1));
+                        let unit = usize::from(x)..usize::from(x + w).min(usize::from(width));
+                        let cells = &mut reach[unit];
+                        if cells.iter().any(|&r| r) && !cells.iter().all(|&r| r) {
+                            cells.fill(true);
+                            grew = true;
+                        }
+                        x += w;
+                    }
+                }
+                if !grew {
+                    return reach;
+                }
+            }
+        }
+
         proptest! {
-            /// Under a clip, no write changes a cell outside it, and wide characters stay whole.
+            /// Under a clip, a write changes a cell outside it only through a wide character that
+            /// crosses its edge, before or after the write, and wide characters stay whole.
             #[test]
             fn writes_under_a_clip_change_only_the_clip(
                 setup in prop::collection::vec((0..4u16, text()), 0..4),
@@ -1905,10 +1966,11 @@ mod tests {
                 for (y, t) in &setup {
                     buffer.set_string(0, *y, t, Style::new().fg(Color::Green));
                 }
-                let before = buffer.clone();
+                let original = buffer.clone();
                 buffer.set_clip(&regions);
                 let inside = |x: u16, y: u16| regions.iter().any(|r| r.contains(Position::new(x, y)));
                 for op in &ops {
+                    let before = buffer.clone();
                     match op {
                         Op::Text(x, y, t) => {
                             buffer.set_string(*x, *y, t, Style::new().bg(Color::Blue));
@@ -1935,8 +1997,16 @@ mod tests {
                             prop_assert_eq!(usize::from(cell.width()), text::width_with(cell.symbol(), WidthProfile::default()));
                             x += cell.width();
                         }
+                        let reach = reach(&before, &buffer, y, &inside);
+                        let spill = buffer.clip_spill(usize::from(y));
+                        let spilled = |x: u16| spill.is_some_and(|(a, b)| a <= usize::from(x) && usize::from(x) < b);
                         for x in 0..area.width {
-                            if !inside(x, y) {
+                            if !inside(x, y) && !spilled(x) {
+                                let (a, b) = (buffer.cell((x, y)).unwrap(), original.cell((x, y)).unwrap());
+                                prop_assert_eq!(a.symbol(), b.symbol(), "({}, {}) outside the clip and its spill after {:?}", x, y, op);
+                                prop_assert_eq!(a.style(), b.style());
+                            }
+                            if !reach[usize::from(x)] && !spilled(x) {
                                 let (a, b) = (buffer.cell((x, y)).unwrap(), before.cell((x, y)).unwrap());
                                 prop_assert_eq!(a.symbol(), b.symbol(), "({}, {}) after {:?}", x, y, op);
                                 prop_assert_eq!(a.style(), b.style(), "({}, {}) after {:?}", x, y, op);

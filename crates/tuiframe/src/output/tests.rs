@@ -531,6 +531,30 @@ fn partial_frames_touch_only_their_regions() {
 }
 
 #[test]
+fn partial_frames_take_in_wide_characters_across_their_edges() {
+    let caps = full_caps();
+    let area = Rect::new(0, 0, 10, 1);
+    let before = text(area, &[(0, 0, "a界b界cdef", Style::new())]);
+    let mut after = before.clone();
+    let region = Rect::new(2, 0, 3, 1);
+    after.set_clip(&[region]);
+    after.set_string(2, 0, "x", Style::new());
+    after.set_string(4, 0, "界", Style::new());
+    after.clear_clip();
+    assert_eq!(after.symbol((1, 0)), " ");
+    let mut term = emulator(WidthProfile::default(), area, true);
+    let mut encoder = Encoder::new();
+    feed(
+        &mut term,
+        &packet(&mut encoder, &Buffer::empty(area), &before, None, &caps),
+    );
+    let mut out = Vec::new();
+    encoder.encode_regions(&before, &after, &[region], None, &caps, &mut out);
+    feed(&mut term, &show(&out));
+    check_screen(&term, &after, None, &caps).unwrap();
+}
+
+#[test]
 fn stats_count_cells_and_bytes() {
     let caps = full_caps();
     let next = text(AREA, &[(0, 0, "a界", Style::new())]);
@@ -905,6 +929,8 @@ struct Frame {
     shift: i8,
     cursor: Option<(u16, u16, u8, bool)>,
     redraw: bool,
+    /// The regions of a partial frame, drawn under a clip over the last frame.
+    regions: Option<Vec<Rect>>,
 }
 
 const W: u16 = 12;
@@ -934,12 +960,14 @@ fn frame() -> impl Strategy<Value = Frame> {
         prop_oneof![6 => Just(0i8), 1 => -2i8..3],
         prop::option::of((0..W + 2, 0..H + 2, 0..4u8, any::<bool>())),
         prop::bool::weighted(0.1),
+        prop::option::weighted(0.3, prop::collection::vec(rect(), 1..3)),
     )
-        .prop_map(|(ops, shift, cursor, redraw)| Frame {
+        .prop_map(|(ops, shift, cursor, redraw, regions)| Frame {
             ops,
             shift,
             cursor,
             redraw,
+            regions,
         })
 }
 
@@ -990,7 +1018,10 @@ const URLS: [&str; 3] = [
 fn draw(frame: &Frame, last: &Buffer, profile: WidthProfile) -> Buffer {
     let area = last.area();
     let mut next = Buffer::with_width_profile(area, profile);
-    if frame.shift != 0 {
+    if let Some(regions) = &frame.regions {
+        next = last.clone();
+        next.set_clip(regions);
+    } else if frame.shift != 0 {
         for y in area.top()..area.bottom() {
             let from = i32::from(y) + i32::from(frame.shift);
             let Ok(from) = u16::try_from(from) else {
@@ -1056,6 +1087,150 @@ fn frame_cursor(frame: &Frame) -> Option<Cursor> {
     })
 }
 
+/// Draws `frames` one after another and checks the emulator against each, as the property test
+/// does.
+fn run_frames(
+    profile: WidthProfile,
+    caps: &Capabilities,
+    bce: bool,
+    scroll: bool,
+    frames: &[Frame],
+) -> Result<(), String> {
+    let area = Rect::new(0, 0, W, H);
+    let mut term = emulator(profile, area, bce);
+    let mut encoder = Encoder::new();
+    encoder.set_scroll_detection(scroll);
+    let mut prev = Buffer::with_width_profile(area, profile);
+    for (i, frame) in frames.iter().enumerate() {
+        let mut next = draw(frame, &prev, profile);
+        let cursor = frame_cursor(frame);
+        if frame.redraw {
+            encoder.redraw();
+        }
+        let mut out = Vec::new();
+        match &frame.regions {
+            Some(regions) => {
+                encoder.encode_regions(&prev, &next, regions, cursor.as_ref(), caps, &mut out)
+            }
+            None => encoder.encode(&prev, &next, cursor.as_ref(), caps, &mut out),
+        };
+        next.clear_clip();
+        term.take_events();
+        term.feed(&out)
+            .map_err(|e| format!("frame {i}: the emulator refused {:?}: {e:?}", show(&out)))?;
+        let visible = term.events().iter().any(|e| {
+            matches!(
+                e,
+                Event::Drawn {
+                    cursor_visible: true,
+                    ..
+                }
+            )
+        });
+        if visible {
+            return Err(format!(
+                "frame {i}: drew with the cursor showing: {}",
+                show(&out)
+            ));
+        }
+        check_screen(&term, &next, cursor, caps)
+            .map_err(|e| format!("frame {i}: {e}\nbytes {}", show(&out)))?;
+        prev = next;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_partial_frame_over_wide_characters_at_its_edge() {
+    let line = |x, spans: &[(&str, usize)]| Op::Line {
+        x,
+        y: 0,
+        spans: spans.iter().map(|&(s, i)| (s.to_owned(), i)).collect(),
+    };
+    let frame = Frame {
+        ops: vec![
+            line(1, &[("ᄀ", 0), ("ｗｉｄｅ", 3)]),
+            line(2, &[(" ᄀ🫨", 0), ("word", 0)]),
+        ],
+        shift: 0,
+        cursor: None,
+        redraw: false,
+        regions: Some(vec![Rect::new(1, 0, 3, 1)]),
+    };
+    let profile = WidthProfile {
+        ambiguous_wide: true,
+        ..WidthProfile::default()
+    };
+    run_frames(profile, &full_caps(), false, false, &[frame]).unwrap();
+}
+
+#[test]
+fn a_partial_frame_writes_what_a_wide_character_spilled_past_its_region() {
+    let line = |x, spans: &[(&str, usize)]| Op::Line {
+        x,
+        y: 1,
+        spans: spans.iter().map(|&(s, i)| (s.to_owned(), i)).collect(),
+    };
+    // The 👍 starts in the region and ends past it, and the "3" then breaks it, which leaves a
+    // space in its background outside the region, in neither frame a wide character.
+    let frame = Frame {
+        ops: vec![
+            line(5, &[("worde\u{301}👍", 3), ("a", 0)]),
+            line(2, &[("a👍🏽", 0), ("a", 0), ("❤\u{fe0f}\u{1b}[31m", 0)]),
+        ],
+        shift: 0,
+        cursor: None,
+        redraw: false,
+        regions: Some(vec![Rect::new(7, 0, 4, 2)]),
+    };
+    run_frames(
+        WidthProfile::default(),
+        &full_caps(),
+        false,
+        false,
+        &[frame],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_partial_frame_that_breaks_a_wide_character_inside_it() {
+    let line = |x, spans: &[(&str, usize)]| Op::Line {
+        x,
+        y: 3,
+        spans: spans.iter().map(|&(s, i)| (s.to_owned(), i)).collect(),
+    };
+    let frame = Frame {
+        ops: vec![line(1, &[(" 👍", 3)]), line(2, &[("word", 0)])],
+        shift: 0,
+        cursor: None,
+        redraw: false,
+        regions: Some(vec![Rect::new(1, 1, 3, 3)]),
+    };
+    let profile = WidthProfile {
+        joins_emoji: true,
+        ..WidthProfile::default()
+    };
+    let next = draw(
+        &frame,
+        &Buffer::with_width_profile(Rect::new(0, 0, W, H), profile),
+        profile,
+    );
+    let bgs: Vec<_> = (0..6).map(|x| next.cell((x, 3)).unwrap().bg()).collect();
+    assert_eq!(
+        bgs,
+        [
+            Color::Reset,
+            Color::Blue,
+            Color::Blue,
+            Color::Blue,
+            Color::Reset,
+            Color::Reset
+        ]
+    );
+    run_frames(profile, &full_caps(), false, false, &[frame]).unwrap();
+}
+
 proptest! {
     /// For random sequences of random frames, the emulator's screen after the encoder's bytes
     /// equals the last buffer, cell for cell, and its cursor equals the frame's.
@@ -1067,29 +1242,8 @@ proptest! {
         scroll in any::<bool>(),
         frames in prop::collection::vec(frame(), 1..6),
     ) {
-        let area = Rect::new(0, 0, W, H);
-        let mut term = emulator(profile, area, bce);
-        let mut encoder = Encoder::new();
-        encoder.set_scroll_detection(scroll);
-        let mut prev = Buffer::with_width_profile(area, profile);
-        for (i, frame) in frames.iter().enumerate() {
-            let next = draw(frame, &prev, profile);
-            let cursor = frame_cursor(frame);
-            if frame.redraw {
-                encoder.redraw();
-            }
-            let mut out = Vec::new();
-            encoder.encode(&prev, &next, cursor.as_ref(), &caps, &mut out);
-            term.take_events();
-            if let Err(e) = term.feed(&out) {
-                prop_assert!(false, "frame {}: the emulator refused {:?}: {:?}", i, show(&out), e);
-            }
-            let visible = term.events().iter().any(|e| matches!(e, Event::Drawn { cursor_visible: true, .. }));
-            prop_assert!(!visible, "frame {}: drew with the cursor showing: {}", i, show(&out));
-            if let Err(e) = check_screen(&term, &next, cursor, &caps) {
-                prop_assert!(false, "frame {}: {}\nbytes {}", i, e, show(&out));
-            }
-            prev = next;
+        if let Err(e) = run_frames(profile, &caps, bce, scroll, &frames) {
+            prop_assert!(false, "{}", e);
         }
     }
 
