@@ -454,8 +454,9 @@ pub enum Constraint {
 ///
 /// 1. `Length(n)`, `Min(n)` and `Max(n)` start at n cells, `Percentage` and `Ratio` at their part
 ///    of the area, and `Fill` at none.
-/// 2. When those overflow the area, the last constraints shrink first, each to nothing before the
-///    one before it shrinks.
+/// 2. When those overflow the area, `Percentage`, `Ratio` and `Max` shrink first, then `Length` and
+///    `Min`. In each group the last constraints shrink first, each to nothing before the one before
+///    it shrinks.
 /// 3. Otherwise the space left goes to the `Fill` constraints by weight. With no `Fill` (or only
 ///    zero weights), the `Min` constraints share it equally.
 /// 4. Space nothing takes stays empty after the last area.
@@ -558,12 +559,15 @@ fn solve(constraints: &[Constraint], total: u16) -> Vec<u16> {
     let used: u64 = sizes.iter().map(|&s| u64::from(s)).sum();
     if used > whole {
         let mut excess = used - whole;
-        for size in sizes.iter_mut().rev() {
-            let cut = excess.min(u64::from(*size));
-            *size -= part(cut);
-            excess -= cut;
-            if excess == 0 {
-                break;
+        // Parts of the area and maximums give way first, then lengths and minimums.
+        for firm in [false, true] {
+            for (size, &c) in sizes.iter_mut().zip(constraints).rev() {
+                if matches!(c, Constraint::Length(_) | Constraint::Min(_)) != firm {
+                    continue;
+                }
+                let cut = excess.min(u64::from(*size));
+                *size -= part(cut);
+                excess -= cut;
             }
         }
         return sizes;
@@ -841,9 +845,20 @@ mod tests {
     fn overflow_shrinks_the_last_constraints_first() {
         assert_eq!(sizes(&[Length(5), Length(5), Length(5)], 12), [5, 5, 2]);
         assert_eq!(sizes(&[Length(5), Min(5), Length(5)], 7), [5, 2, 0]);
-        assert_eq!(sizes(&[Percentage(100), Min(20)], 50), [50, 0]);
         assert_eq!(sizes(&[Length(5), Fill(1), Length(5)], 6), [5, 0, 1]);
         assert_eq!(sizes(&[Length(u16::MAX), Length(u16::MAX)], 3), [3, 0]);
+    }
+
+    #[test]
+    fn overflow_shrinks_parts_and_maximums_before_lengths_and_minimums() {
+        assert_eq!(sizes(&[Percentage(100), Min(20)], 50), [30, 20]);
+        assert_eq!(sizes(&[Min(20), Percentage(100)], 50), [20, 30]);
+        assert_eq!(sizes(&[Length(3), Ratio(1, 1), Max(4)], 10), [3, 7, 0]);
+        assert_eq!(
+            sizes(&[Percentage(50), Percentage(50), Length(4)], 10),
+            [5, 1, 4]
+        );
+        assert_eq!(sizes(&[Percentage(100), Length(8), Min(8)], 10), [0, 8, 2]);
     }
 
     #[test]
