@@ -84,6 +84,7 @@
 mod emulator;
 mod event;
 mod grid;
+mod input;
 mod parser;
 mod profile;
 mod style;
@@ -92,6 +93,7 @@ mod width;
 pub use emulator::{Cursor, CursorShape, Emulator};
 pub use event::{ClipboardWrite, Event, FeedError, Pos, UnknownSequence};
 pub use grid::Cell;
+pub use input::{Key, KeyKind, Mods, Mouse, MouseButton, MouseKind};
 pub use profile::{KeyEncoding, Profile};
 pub use style::{Color, Hyperlink, Style, Underline};
 pub use width::WidthRules;

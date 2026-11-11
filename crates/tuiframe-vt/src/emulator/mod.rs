@@ -1,6 +1,7 @@
 //! The emulator: the screens, the cursor, the pen and the modes, driven by the parser.
 
 mod csi;
+mod keys;
 mod readback;
 mod strings;
 
