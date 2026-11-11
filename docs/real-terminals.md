@@ -24,8 +24,19 @@ by side, and a screenshot where there's a display. It exits with 1 when a screen
 | kitty | kitty, an X display, xdotool | `kitten @ get-text --ansi --add-cursor` | text, colours, attributes, cursor |
 | xterm | xterm, the `9x15` font, an X display, xdotool | the `CSI 10 i` XHTML dump | text, RGB colours, bold, italic, underline, strike |
 | WezTerm | wezterm, an X display, xdotool | `wezterm cli get-text --escapes` | text, colours, attributes, cursor |
+| xterm.js | node, and `npm ci` in `tools/harness/xtermjs` | `@xterm/headless`'s buffer, through a node script | text, colours, attributes, links, cursor |
+| VTE | Python's GObject bindings, VTE 2.91 (0.76 or later), a display | `get_text_format(HTML)` in `tools/harness/vte` | text, RGB colours, attributes |
+| Alacritty | alacritty, an X display | `--ref-test`'s `grid.json`, written as the window closes | text, colours, attributes, links |
+| Konsole | Konsole 24.02 or later, an X display, a D-Bus session, gdbus | D-Bus `getAllDisplayedText` | text only |
+| foot | foot and wtype, under a Wayland compositor | `pipe-visible`, bound to a key | text only |
+| Ghostty | Ghostty on macOS, with Accessibility for `osascript` | the `write_screen_file` action | text only |
 
-Under X, start Xvfb first and set `DISPLAY`, as `.github/workflows/terminals.yml` does. Screenshots
+Alacritty reports its screen only as its window closes, so a readback ends the program, and the
+driver reads once after the program has had a moment to draw. xterm.js takes keys only as browser
+events, so its driver sends bytes.
+
+Under X, start Xvfb first and set `DISPLAY`, and for foot a headless sway and `WAYLAND_DISPLAY`, as
+`.github/workflows/terminals.yml` does. Screenshots
 are taken with ImageMagick's `import` where it's installed. They're for a person to look at, and
 never decide a result.
 
