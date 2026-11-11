@@ -14,8 +14,9 @@ use crate::sys::{Next, Shared};
 ///
 /// Events read together come out together, so after [`next`](Self::next) gives one,
 /// [`batch`](Self::batch) gives those that came with it. The events end when the terminal closes,
-/// the terminal stops taking output, or the [`Terminal`](super::Terminal) closes. Clones share one
-/// queue, and each event goes to one of them.
+/// the terminal stops taking output, or the [`Terminal`](super::Terminal) closes, and then
+/// [`next_timeout`](Self::next_timeout) and [`next`](Self::next) give [`Error::Closed`] once none is
+/// left. Clones share one queue, and each event goes to one of them.
 #[derive(Debug, Clone)]
 pub struct Events {
     shared: Arc<Shared>,
@@ -58,8 +59,7 @@ impl Events {
         self.shared.events.batch()
     }
 
-    /// The next event, as a future that works on any executor, `tokio::select!` included. It
-    /// completes with `None` once the events ended and none is left.
+    /// The next event, as a future that works on any executor, `tokio::select!` included.
     ///
     /// Every task waiting on it is woken when an event comes, not only the first, so no event
     /// waits for something else to wake its task.
@@ -71,11 +71,12 @@ impl Events {
         NextEvent { events: self }
     }
 
-    fn poll(&self, cx: &Context<'_>) -> Poll<Result<Option<Event>>> {
-        self.shared
-            .events
-            .poll_next(cx)
-            .map(|next| next.map_err(|kind| Error::Io(kind.into())))
+    fn poll(&self, cx: &Context<'_>) -> Poll<Result<Event>> {
+        self.shared.events.poll_next(cx).map(|next| match next {
+            Ok(Some(event)) => Ok(event),
+            Ok(None) => Err(Error::Closed),
+            Err(kind) => Err(Error::Io(kind.into())),
+        })
     }
 }
 
@@ -83,7 +84,8 @@ impl Events {
 ///
 /// # Errors
 ///
-/// It completes with [`Error::Io`] when reading the terminal failed.
+/// It completes with [`Error::Closed`] once the events ended and none is left, as
+/// [`Events::next_timeout`] does, and with [`Error::Io`] when reading the terminal failed.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
 pub struct NextEvent<'a> {
@@ -91,14 +93,15 @@ pub struct NextEvent<'a> {
 }
 
 impl Future for NextEvent<'_> {
-    type Output = Result<Option<Event>>;
+    type Output = Result<Event>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.events.poll(cx)
     }
 }
 
-/// The events as a stream, which gives a failure to read the terminal once and then ends.
+/// The events as a stream, which ends once the events end, after giving a failure to read the
+/// terminal once.
 #[cfg(feature = "stream")]
 impl futures_core::Stream for Events {
     type Item = Result<Event>;
@@ -108,7 +111,8 @@ impl futures_core::Stream for Events {
             return Poll::Ready(None);
         }
         self.as_ref().get_ref().poll(cx).map(|next| match next {
-            Ok(event) => event.map(Ok),
+            Ok(event) => Some(Ok(event)),
+            Err(Error::Closed) => None,
             Err(error) => {
                 self.failure_given = true;
                 Some(Err(error))
@@ -177,7 +181,7 @@ mod tests {
             Duration::from_secs(5)
         ));
         pushing.join().unwrap();
-        assert_eq!(first, Some(Some(key('a'))));
+        assert_eq!(first, Some(key('a')));
         assert_eq!(events.batch(), [key('b')]);
         let pushing = push_later(&shared, vec![key('c')]);
         let mut second = None;
@@ -186,14 +190,14 @@ mod tests {
             Duration::from_secs(5)
         ));
         pushing.join().unwrap();
-        assert_eq!(second, Some(Some(key('c'))));
+        assert_eq!(second, Some(key('c')));
         shared.events.close();
         let mut last = None;
         assert!(block_on(
-            async { last = Some(events.next().await.unwrap()) },
+            async { last = Some(events.next().await) },
             Duration::from_secs(5)
         ));
-        assert_eq!(last, Some(None));
+        assert!(matches!(last, Some(Err(Error::Closed))));
     }
 
     /// `next` works as a branch of `tokio::select!`, beside a timer.
@@ -215,7 +219,7 @@ mod tests {
             }
         });
         pushing.join().unwrap();
-        assert_eq!(got, Some(key('a')));
+        assert_eq!(got, key('a'));
         assert!(ticks > 0);
         assert_eq!(events.batch(), [key('b')]);
         let timed_out = runtime.block_on(async {
