@@ -90,8 +90,11 @@ measure with the same one, since `Terminal::open` makes the terminal's the proce
 (`text::set_width_profile`), which `text::width`, the text types' `width` and `Buffer::empty`
 read. Tests set one for their own thread with `text::with_width_profile`. Cells whose
 width terminals disagree on (emoji sequences, and emoji newer than many terminals' width tables) are
-marked, and after writing one the encoder positions the next run absolutely, so a terminal that
-measures differently misdraws that cell alone. East Asian ambiguous characters follow the profile
+marked. The encoder writes spaces over such a cell's cells first, then the cluster, then again the
+cells that the widest measure of it would cover, placing each absolutely, so a terminal that
+measures differently shows blanks in that cluster's cells and nothing wrong around it. One that
+the widest measure wouldn't fit before the right edge stays blank, since a terminal pushes a
+cluster too wide for the room left over the cells before it. East Asian ambiguous characters follow the profile
 without a mark. They include box drawing and the Greek and Cyrillic alphabets, which every measured
 terminal draws narrow unless it's set for East Asian text, and a resync after each would make them
 several times longer to write.
@@ -121,9 +124,10 @@ A frame that changes no cell writes only a cursor move when the cursor moved, an
 
 Closing gives the terminal back in every way a program can end. The reset packet is built at open
 from what was enabled. It ends any synchronized update, pops the kitty keyboard flags, turns off the
-reports that were on, resets the pen, turns autowrap back on, leaves the alternate screen, shows the
-cursor and restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now`
-writes CAN and the reset from a thread of its own, once.
+reports that were on, resets the pen, turns autowrap back on, resets the scroll region, leaves the
+alternate screen, shows the cursor and restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now`
+writes CAN, ST and the reset from a thread of its own, once, and the writer stops within the 4 KiB
+chunk it was writing.
 
 ## Input
 
@@ -160,6 +164,7 @@ thread owns one.
 pub(crate) struct DecoderOptions {
     pub(crate) erase: u8,        // termios VERASE, 0x7f or 0x08
     pub(crate) max_paste: usize, // 64 MiB by default
+    pub(crate) all_keys: bool,   // Windows keys alone too, as kitty's flag 8 reports them
 }
 
 pub(crate) struct Decoder { /* the tokenizer's state and the outstanding queries */ }
@@ -278,7 +283,8 @@ pub(crate) struct FocusRecord {
 
 A key record with a repeat count of n gives n events, AltGr arrives as Ctrl+Alt with a printable
 character and decodes as that character, and a `WindowSizeRecord` gives `Event::Resize`. A modifier
-key pressed or released alone gives `KeyCode::Modifier`, and an Alt code (Alt held while digits are
+or lock key pressed or released alone, and the keypad's middle key, are dropped as crossterm drops
+them, and with `all_keys` they give their key codes. An Alt code (Alt held while digits are
 typed on the keypad) gives its character when Alt comes up.
 
 ### The encoder
@@ -322,13 +328,18 @@ pub struct FrameStats {
   and the caller then sends no packet. The encoder keeps what the terminal shows besides the cells
   (where its cursor is, its shape and visibility, and the ids of links it has seen), which two
   buffers alone can't say.
-- `encode_regions` is the partial frame. It compares `before` and `after` inside `regions` only, and
-  `before` may hold anything outside them.
+- `encode_regions` is the partial frame. It compares `before` and `after` inside `regions`, and
+  `before` may hold anything outside them. `after` was drawn under a clip of the regions
+  (`Buffer::set_clip`), which drops writes to cells outside them but writes a wide character that
+  starts inside whole, and breaks one that starts outside when a write covers part of it. The
+  buffer records the cells outside that this changed, and `encode_regions` writes them too, with
+  any wide character, in either buffer, that crosses a region's edge.
 - `redraw` makes the next `encode` a full redraw, which clears the screen, ignores `prev`, writes
   every cell that isn't blank and sends the cursor's state and the pen again.
 - `set_scroll_detection` turns on looking for rows that moved when more than half of a frame's
   rows changed. When scrolling a region of rows saves bytes, the terminal scrolls them itself
-  (`DECSTBM` and `CSI n S` or `CSI n T`) and only the rest is written. It's off until the terminal
+  (`DECSTBM`, then delete or insert lines with `CSI n M` or `CSI n L` at the region's top, which
+  every VT102 descendant has, the Linux console too) and only the rest is written. It's off until the terminal
   matrix passes it.
 
 `Cursor` is the frame's cursor request (`position`, `shape`, `blinking`), and `FrameStats` reaches the
@@ -371,8 +382,8 @@ impl Writer {
 - `ticket` stands for everything sent so far, and `wait` says what became of it within the timeout.
 - `close` drops the packets not yet started, then queues the reset and the program's `tail`, and says
   whether this call ended the output. Its ticket counts as written only once the reset is.
-- `takeover` gives what writes CAN and the reset from a thread of its own when the writer is stuck
-  or died, with a record outside the writer's lock, so the reset is never written twice.
+- `takeover` gives what writes CAN, ST and the reset from a thread of its own when the writer is
+  stuck or died, with a record outside the writer's lock, so the reset is never written twice.
   `RestoreHandle` (`Clone + Send + Sync`) keeps one, and its `restore_now(timeout)` uses it.
 - `failure` is set once a write fails or the thread ends. The terminal ends the event stream then.
 
@@ -394,22 +405,26 @@ pub(crate) struct Reader { /* the thread's handle and its wake pipe or event */ 
 impl Reader {
     pub(crate) fn spawn(
         input: OwnedFd,
-        decoder: impl Decode, // feed, has_pending and flush_pending
+        decoder: impl Decode, // feed, has_pending, flush_pending and expect, as Decoder has
         shared: Arc<Shared>,
         escape_timeout: Duration,
-        signals: Signals,     // a pipe each for SIGWINCH and SIGCONT
-        resume: Resume,       // takes the terminal back on SIGCONT
+        signals: Signals,     // pipes for SIGWINCH, SIGCONT, SIGTSTP and the ending signals
+        hooks: Hooks,         // what to do on SIGCONT, SIGTSTP and an ending signal
     ) -> io::Result<Self>;
     pub(crate) fn expect(&self, query: Query);
+    pub(crate) fn cancel_expected(&self);
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration);
     pub(crate) fn park(&self) -> bool;
-    pub(crate) fn unpark(&self, resumed: bool);
+    pub(crate) fn unpark(&self);
+    pub(crate) fn wait_for_stop(&self, since: u64, start: Duration) -> bool;
     pub(crate) fn stop(self);
 }
 ```
 
-The reply slot and `expect` come with the decoder's replies. On Unix, `restore::screen::Screen` puts
-these together. It takes the terminal (raw mode, the writer, the setup packet, the reader), closes
-it, and suspends it.
+On Unix, `restore::screen::Screen` puts these together. `Screen::open_with` takes the terminal
+(raw mode, the writer, the reader) and `enable` sends the setup the probe's answers decided on. It
+also closes the terminal, suspends it, and lends it to another program with `release` and
+`reacquire`. A writer that fails ends the events.
 
 Each turn of the reader's loop does these steps.
 
@@ -419,13 +434,18 @@ Each turn of the reader's loop does these steps.
    `expect` queued since the last turn, then decode.
 3. Queue the events, notifying the condvar and waking every stored waker. Put replies in the reply
    slot when it's open, and drop them otherwise.
-4. When no more input is ready, call `flush_pending` if the escape timeout is zero or has passed.
+4. When no more input is ready, call `flush_pending` once the escape timeout has passed, and
+   `flush_held` once the input has been silent for a second with something held.
 5. On SIGWINCH or a window size record, store the new size, ask for a full redraw and queue
-   `Event::Resize`. On SIGCONT, call `resume`, which applies raw mode and the screen's modes again,
-   ask for a full redraw and queue `Event::Resumed`.
+   `Event::Resize`. On SIGTSTP, call the `stop` hook, which gives the terminal back, stops the
+   process with SIGSTOP and takes the terminal back once it runs again, then queue
+   `Event::Resumed`. On a SIGCONT that came without it, call `resume`, which sends the reset and
+   the setup again and applies raw mode, and queue `Event::Resumed`. Either asks for a full
+   redraw. On an ending signal, call `end`, which gives the terminal back and lets the signal end
+   the program.
 6. When the input closes or fails, or the thread ends, mark the queue closed, so `Events` ends.
 
 `expect` queues the query for the reader's next turn, so calling it before the query is written is
-enough. `park` and `unpark` hold the reader still while the program is suspended. After a suspend,
-`unpark(true)` takes the SIGCONT that ended it as the resume the program already did, and queues
-`Event::Resumed`. `stop` ends the thread at close.
+enough. `park` and `unpark` hold the reader still while another program has the terminal.
+`wait_for_stop` is how a suspend, which sends SIGTSTP to the process group, waits for the reader to
+handle it. `stop` ends the thread at close.

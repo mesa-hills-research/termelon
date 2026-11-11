@@ -203,14 +203,33 @@ fn character_key(code: u32, modifiers: KeyModifiers) -> Option<KeyCode> {
 
 /// A character key held with Shift is the character it types, the `alternate` the kitty protocol's
 /// flag 4 reports or else the capital of a letter, so Shift+a is `A` with Shift in every encoding.
+/// With Ctrl or Alt held too, a letter stays lowercase, as crossterm gives it, so a program's
+/// Ctrl+C arm takes Ctrl+Shift+C as it does where the terminal sends 0x03 for both.
 fn shifted(code: KeyCode, modifiers: KeyModifiers, alternate: Option<u32>) -> KeyCode {
-    match code {
-        KeyCode::Char(ch) if modifiers.contains(KeyModifiers::SHIFT) => alternate
-            .and_then(char::from_u32)
-            .filter(|ch| !ch.is_control())
-            .or_else(|| single_upper(ch))
-            .map_or(code, KeyCode::Char),
-        _ => code,
+    let KeyCode::Char(ch) = code else {
+        return code;
+    };
+    if !modifiers.contains(KeyModifiers::SHIFT) {
+        return code;
+    }
+    if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        && (ch.is_lowercase() || ch.is_uppercase())
+    {
+        return KeyCode::Char(single_lower(ch).unwrap_or(ch));
+    }
+    alternate
+        .and_then(char::from_u32)
+        .filter(|ch| !ch.is_control())
+        .or_else(|| single_upper(ch))
+        .map_or(code, KeyCode::Char)
+}
+
+/// The lowercase of `ch` when it has exactly one other than itself.
+fn single_lower(ch: char) -> Option<char> {
+    let mut lower = ch.to_lowercase();
+    match (lower.next(), lower.next()) {
+        (Some(low), None) if low != ch => Some(low),
+        _ => None,
     }
 }
 

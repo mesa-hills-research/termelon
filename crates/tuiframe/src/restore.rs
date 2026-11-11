@@ -15,6 +15,7 @@ use std::time::Duration;
 use crate::output::writer::{
     self, Direct, Finish, LOCK_WAIT, Takeover, Writer, lock, try_lock_for,
 };
+use crate::terminal::MouseMode;
 
 /// How long giving the terminal back waits for the terminal to take the reset, before what comes
 /// next (a panic's message, the end of the process).
@@ -25,7 +26,10 @@ pub(crate) const CLOSE_WAIT: Duration = Duration::from_secs(1);
 pub(crate) struct Enabled {
     /// The alternate screen, mode 1049.
     pub(crate) alternate_screen: bool,
-    pub(crate) mouse: Mouse,
+    /// The screen is cleared when the program takes it and when it gives it back, where there's no
+    /// alternate screen to leave it untouched.
+    pub(crate) clear: bool,
+    pub(crate) mouse: MouseMode,
     /// Focus reports, mode 1004.
     pub(crate) focus: bool,
     /// Bracketed paste, mode 2004.
@@ -36,6 +40,8 @@ pub(crate) struct Enabled {
     pub(crate) theme_reports: bool,
     /// The kitty keyboard flags pushed, if any were.
     pub(crate) keyboard: Option<u8>,
+    /// xterm's modifyOtherKeys at level 1.
+    pub(crate) modify_other_keys: bool,
     /// The window's title saved on xterm's title stack, to be put back from it.
     pub(crate) save_title: bool,
     /// Frames may hold hyperlinks, so the reset ends one left open.
@@ -44,33 +50,33 @@ pub(crate) struct Enabled {
     pub(crate) cursor_shape: bool,
 }
 
-/// Which mouse reports are on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum Mouse {
-    /// None.
-    #[default]
-    Off,
-    /// Buttons, the wheel and drags, in SGR coordinates (modes 1000, 1002 and 1006).
-    ButtonsAndDrags,
-    /// Every motion too (mode 1003).
-    AnyMotion,
+/// The private modes `mouse` turns on, in order.
+fn mouse_modes(mouse: MouseMode) -> &'static [u16] {
+    match mouse {
+        MouseMode::Off => &[],
+        MouseMode::ButtonsAndDrags => &[1000, 1002, 1006],
+        MouseMode::AnyMotion => &[1000, 1002, 1003, 1006],
+    }
 }
 
-impl Mouse {
-    /// The private modes it turns on, in order.
-    fn modes(self) -> &'static [u16] {
-        match self {
-            Mouse::Off => &[],
-            Mouse::ButtonsAndDrags => &[1000, 1002, 1006],
-            Mouse::AnyMotion => &[1000, 1002, 1003, 1006],
+/// What turns the mouse reports from `from` to `to`.
+pub(crate) fn mouse_switch(from: MouseMode, to: MouseMode) -> Vec<u8> {
+    let mut out = Vec::new();
+    if from != to {
+        for &mode in mouse_modes(from).iter().rev() {
+            private_mode(&mut out, mode, false);
+        }
+        for &mode in mouse_modes(to) {
+            private_mode(&mut out, mode, true);
         }
     }
+    out
 }
 
 impl Enabled {
     /// The private modes it turns on after the alternate screen, in order.
     fn modes(&self) -> Vec<u16> {
-        let mut modes = self.mouse.modes().to_vec();
+        let mut modes = mouse_modes(self.mouse).to_vec();
         let switches = [
             (self.focus, 1004),
             (self.bracketed_paste, 2004),
@@ -99,7 +105,24 @@ impl Enabled {
         if let Some(flags) = self.keyboard {
             out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
         }
+        if self.modify_other_keys {
+            out.extend_from_slice(b"\x1b[>4;1m");
+        }
+        if self.clear {
+            out.extend_from_slice(b"\x1b[H\x1b[2J");
+        }
         out
+    }
+
+    /// What takes the terminal after `done` took it, which is [`setup`](Self::setup) without
+    /// entering the alternate screen again, since entering it twice loses the main screen's
+    /// cursor.
+    pub(crate) fn setup_after(&self, done: &Enabled) -> Vec<u8> {
+        let mut rest = self.clone();
+        if done.alternate_screen {
+            rest.alternate_screen = false;
+        }
+        rest.setup()
     }
 
     /// What gives the terminal back. It ends a synchronized update a frame left open, pops the
@@ -111,6 +134,9 @@ impl Enabled {
         if self.keyboard.is_some() {
             out.extend_from_slice(b"\x1b[<1u");
         }
+        if self.modify_other_keys {
+            out.extend_from_slice(b"\x1b[>4;0m");
+        }
         for mode in self.modes().into_iter().rev() {
             private_mode(&mut out, mode, false);
         }
@@ -118,12 +144,16 @@ impl Enabled {
         if self.hyperlinks {
             out.extend_from_slice(b"\x1b]8;;\x1b\\");
         }
-        out.extend_from_slice(b"\x1b[?7h");
+        // (Autowrap back on, then the whole screen as the scroll region, before leaving.)
+        out.extend_from_slice(b"\x1b[?7h\x1b[r");
         if self.alternate_screen {
             out.extend_from_slice(b"\x1b[?1049l");
         }
         if self.cursor_shape {
             out.extend_from_slice(b"\x1b[0 q");
+        }
+        if self.clear {
+            out.extend_from_slice(b"\x1b[H\x1b[2J");
         }
         out.extend_from_slice(b"\x1b[?25h");
         if self.save_title {
@@ -193,8 +223,8 @@ impl RestoreHandle {
 
     /// Gives the terminal back now, without waiting for the writer, for a program about to end.
     ///
-    /// It writes CAN, which cancels an escape sequence that a write left half done, then the
-    /// reset, from a thread of its own, waits at most `timeout` for them, and puts the terminal's
+    /// It writes CAN and ST, which end an escape sequence or a string that a write left half done,
+    /// then the reset, from a thread of its own, waits at most `timeout` for them, and puts the terminal's
     /// modes back as the program found them. Returns whether the reset reached the terminal, from
     /// this call or an earlier one. Once the terminal was given back, it writes nothing more.
     pub fn restore_now(&self, timeout: Duration) -> bool {
@@ -215,6 +245,17 @@ impl RestoreHandle {
         };
         self.restore_modes();
         written
+    }
+
+    /// How long the terminal has kept the write going on waiting, as
+    /// [`Terminal::writer_waiting`](crate::Terminal::writer_waiting) gives it, for a watchdog on a
+    /// thread of its own.
+    pub fn writer_waiting(&self) -> Option<Duration> {
+        self.inner
+            .takeover
+            .writer()?
+            .busy_since()
+            .map(|since| since.elapsed())
     }
 
     /// Whether the terminal was given back, so its modes are the program's own again.
@@ -348,32 +389,107 @@ fn give_back_on_panic() {
 /// The terminal while a program has it, on Unix.
 #[cfg(unix)]
 pub(crate) mod screen {
+    use std::ffi::c_int;
     use std::fs::File;
     use std::io::{self, Write};
+    use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use super::{CLOSE_WAIT, Enabled, RestoreHandle, register, unregister};
-    use crate::output::writer::{Writer, lock};
-    use std::os::fd::AsFd;
-
+    use crate::event::decode::Query;
     use crate::layout::Size;
+    use crate::output::writer::{Writer, lock};
     use crate::sys::Shared;
     use crate::sys::unix::{
-        Decode, Modes, Reader, Resume, Signals, Tty, stop_process, window_size,
+        Decode, Hooks, Modes, Reader, Signals, Tty, stop_group, stop_now, window_size,
     };
+
+    /// How long a suspend waits for the reader to take the SIGTSTP it sent. A process whose
+    /// group is orphaned never gets it, and the suspend then returns.
+    const STOP_START: Duration = Duration::from_millis(250);
 
     /// The terminal while a program has it, with its writer, its reader and its modes.
     #[derive(Debug)]
     pub(crate) struct Screen {
+        session: Arc<Session>,
+        reader: Option<Reader>,
+        /// The terminal, for its size.
+        size_fd: OwnedFd,
+        closed: bool,
+    }
+
+    /// What giving the terminal back and taking it back need, shared with the reader's hooks.
+    #[derive(Debug)]
+    struct Session {
         writer: Writer,
         shared: Arc<Shared>,
-        reader: Option<Reader>,
         restore: RestoreHandle,
         modes: Arc<Modes>,
         /// What takes the terminal, sent again when the program runs again after a stop.
-        setup: Arc<Mutex<Vec<u8>>>,
-        closed: bool,
+        setup: Mutex<Vec<u8>>,
+    }
+
+    impl Session {
+        /// Gives the terminal back until [`take_back`](Self::take_back), with the program's output
+        /// still open.
+        fn give_back_for_now(&self) -> io::Result<()> {
+            self.writer.send(self.writer.reset().to_vec())?;
+            let _ = self.writer.wait(self.writer.ticket(), CLOSE_WAIT);
+            self.modes.restore()
+        }
+
+        /// Takes the terminal back, after something else had it, and makes the next frame a full
+        /// redraw. With `reset`, the reset goes first, for a terminal something else stopped,
+        /// which still has what the program turned on, so pushing it again doesn't grow the title
+        /// and keyboard stacks.
+        fn take_back(&self, reset: bool) -> io::Result<()> {
+            self.modes.apply_raw()?;
+            let mut packet = if reset {
+                self.writer.reset().to_vec()
+            } else {
+                Vec::new()
+            };
+            packet.extend_from_slice(&lock(&self.setup));
+            self.writer.send(packet)?;
+            self.shared.request_redraw();
+            Ok(())
+        }
+
+        /// What the reader does on the signals.
+        fn hooks(session: &Arc<Self>) -> Hooks {
+            let (resumed, stopped, ended) = (session.clone(), session.clone(), session.clone());
+            Hooks {
+                resume: Box::new(move || {
+                    if !resumed.restore.is_given_back() {
+                        let _ = resumed.take_back(true);
+                    }
+                }),
+                stop: Box::new(move || {
+                    if stopped.restore.is_given_back() {
+                        let _ = stop_now();
+                        return;
+                    }
+                    let given_back = stopped.give_back_for_now();
+                    let _ = stop_now();
+                    if given_back.is_ok() {
+                        let _ = stopped.take_back(false);
+                    }
+                }),
+                end: Box::new(move |signal: c_int| {
+                    ended.restore.restore_now(CLOSE_WAIT);
+                    let _ = signal_hook::low_level::emulate_default_handler(signal);
+                }),
+            }
+        }
+    }
+
+    /// The size of the terminal `fd` is on, unless it says 0x0.
+    fn cells(fd: BorrowedFd<'_>) -> Option<Size> {
+        window_size(fd)
+            .ok()
+            .map(|size| size.cells)
+            .filter(|size| size.width > 0 && size.height > 0)
     }
 
     /// The terminal's output for a reset written without the writer, a descriptor kept from open,
@@ -391,32 +507,37 @@ pub(crate) mod screen {
     }
 
     impl Screen {
-        /// Takes the terminal `tty`. It puts it in raw mode, starts the writer and sends what
-        /// `enabled` turns on, then starts the reader, whose decoder `decoder` makes from the byte
-        /// Backspace sends. A panic gives the terminal back from now on, where
-        /// [`install_panic_hook`] was called. When it fails, the terminal is as it was.
-        pub(crate) fn open<D: Decode>(
-            tty: Tty,
-            decoder: impl FnOnce(u8) -> D,
-            escape_timeout: Duration,
-            enabled: &Enabled,
-        ) -> io::Result<Self> {
-            Self::open_with(tty, decoder, escape_timeout, enabled, Signals::register()?)
-        }
-
-        /// [`open`](Self::open), with the reader learning of signals through `signals`.
+        /// Takes the terminal `tty`. It puts it in raw mode, starts the writer, then starts the
+        /// reader, whose decoder `decoder` makes from the byte Backspace sends, and which learns of
+        /// signals through `signals`. A panic gives the terminal back from now on, where
+        /// [`install_panic_hook`](super::install_panic_hook) was called, and a writer that fails
+        /// ends the events. [`enable`](Self::enable) then turns on what the program uses. When it
+        /// fails, the terminal is as it was.
         pub(crate) fn open_with<D: Decode>(
             tty: Tty,
             decoder: impl FnOnce(u8) -> D,
             escape_timeout: Duration,
-            enabled: &Enabled,
             signals: Signals,
         ) -> io::Result<Self> {
             let Tty { input, output } = tty;
             let modes = Arc::new(Modes::enter(input.as_fd())?);
-            let size = window_size(output.as_fd()).map_or(Size::ZERO, |size| size.cells);
+            // (The output is the screen, unless it isn't a terminal.)
+            let size_fd = if rustix::termios::isatty(&output) {
+                output.try_clone()
+            } else {
+                input.try_clone()
+            };
+            let size_fd = match size_fd {
+                Ok(fd) => fd,
+                Err(error) => {
+                    let _ = modes.restore();
+                    return Err(error);
+                }
+            };
+            let size = cells(size_fd.as_fd()).unwrap_or(Size::ZERO);
+            let shared = Arc::new(Shared::new(size));
             let started = output.try_clone().and_then(|direct| {
-                let writer = Writer::spawn(File::from(output), enabled.reset())?;
+                let writer = Writer::spawn(File::from(output), Enabled::default().reset())?;
                 Ok((writer, Arc::new(File::from(direct))))
             });
             let (writer, direct) = match started {
@@ -437,108 +558,135 @@ pub(crate) mod screen {
                 }),
             );
             register(&restore);
-            let setup = enabled.setup();
-            let _ = writer.send(setup.clone());
-            let setup = Arc::new(Mutex::new(setup));
-            let shared = Arc::new(Shared::new(size));
-            let resume: Resume = Box::new({
-                let (modes, writer, setup, restore) = (
-                    modes.clone(),
-                    writer.clone(),
-                    setup.clone(),
-                    restore.clone(),
-                );
-                move || {
-                    if !restore.is_given_back() {
-                        let _ = modes.apply_raw();
-                        let _ = writer.send(lock(&setup).clone());
-                    }
-                }
+            writer.on_failure({
+                let shared = shared.clone();
+                move || shared.events.close()
             });
-            let decoder = decoder(modes.erase());
+            let session = Arc::new(Session {
+                writer,
+                shared,
+                restore,
+                modes,
+                setup: Mutex::new(Vec::new()),
+            });
+            let decoder = decoder(session.modes.erase());
             let reader = Reader::spawn(
                 input,
                 decoder,
-                shared.clone(),
+                session.shared.clone(),
                 escape_timeout,
                 signals,
-                resume,
+                Session::hooks(&session),
             );
             match reader {
                 Ok(reader) => Ok(Self {
-                    writer,
-                    shared,
+                    session,
                     reader: Some(reader),
-                    restore,
-                    modes,
-                    setup,
+                    size_fd,
                     closed: false,
                 }),
                 Err(error) => {
-                    restore.give_back(&writer, &[], CLOSE_WAIT);
-                    unregister(&restore);
+                    session.restore.give_back(&session.writer, &[], CLOSE_WAIT);
+                    unregister(&session.restore);
                     Err(error)
                 }
             }
         }
 
+        /// The terminal's size as it says now, or `None` when it doesn't say or says 0x0.
+        pub(crate) fn window_size(&self) -> Option<Size> {
+            cells(self.size_fd.as_fd())
+        }
+
         pub(crate) fn writer(&self) -> &Writer {
-            &self.writer
+            &self.session.writer
         }
 
         pub(crate) fn shared(&self) -> &Arc<Shared> {
-            &self.shared
+            &self.session.shared
         }
 
         pub(crate) fn restore_handle(&self) -> RestoreHandle {
-            self.restore.clone()
+            self.session.restore.clone()
         }
 
         /// Makes this thread the one that draws, whose panic gives the terminal back.
         pub(crate) fn draw_here(&self) {
-            self.restore.draw_here();
+            self.session.restore.draw_here();
+        }
+
+        /// Tells the decoder of a query whose answer is outstanding, before the query is written.
+        pub(crate) fn expect(&self, query: Query) {
+            if let Some(reader) = &self.reader {
+                reader.expect(query);
+            }
+        }
+
+        /// Makes a lone ESC wait `timeout` for a following byte from now on.
+        pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+            if let Some(reader) = &self.reader {
+                reader.set_escape_timeout(timeout);
+            }
+        }
+
+        /// Tells the decoder to forget the queries whose answers are outstanding.
+        pub(crate) fn cancel_expected(&self) {
+            if let Some(reader) = &self.reader {
+                reader.cancel_expected();
+            }
+        }
+
+        /// Turns on what `enabled` says, which the reset then undoes and a resume turns on again.
+        /// Fails once the writer failed.
+        pub(crate) fn enable(&self, enabled: &Enabled) -> io::Result<()> {
+            self.set_enabled(enabled);
+            self.session.writer.send(enabled.setup())?;
+            Ok(())
         }
 
         /// Makes `enabled` what the reset undoes and what a resume turns on again. The program
         /// sends what turns the change on.
         pub(crate) fn set_enabled(&self, enabled: &Enabled) {
-            self.writer.set_reset(enabled.reset());
-            *lock(&self.setup) = enabled.setup();
+            self.session.writer.set_reset(enabled.reset());
+            *lock(&self.session.setup) = enabled.setup();
         }
 
-        /// Suspends the program as Ctrl+Z does in a shell. It holds the reader still, gives the
-        /// terminal back as closing does, and stops the process with SIGTSTP. When the process
-        /// runs again, it takes the terminal back and queues [`Event::Resumed`], and the next
-        /// frame redraws everything. Fails when the terminal couldn't be given back or taken back.
+        /// Suspends the program as Ctrl+Z does in a shell. It sends SIGTSTP to the process's
+        /// group, and the reader takes it as it takes one from outside: it gives the terminal
+        /// back, stops the process, and when the process runs again takes the terminal back and
+        /// queues [`Event::Resumed`], and the next frame redraws everything. This returns once
+        /// that's done, or at once when the stop never came, as in a group the shell no longer
+        /// leads. Fails when the signal couldn't be sent.
         ///
         /// [`Event::Resumed`]: crate::event::Event::Resumed
         pub(crate) fn suspend(&self) -> io::Result<()> {
+            let Some(reader) = &self.reader else {
+                return Ok(());
+            };
+            let since = reader.stops();
+            stop_group()?;
+            reader.wait_for_stop(since, STOP_START);
+            Ok(())
+        }
+
+        /// Gives the terminal back as closing does, without ending the program's output, and holds
+        /// the reader still, for running another program on the terminal, such as an editor, until
+        /// [`reacquire`](Self::reacquire).
+        pub(crate) fn release(&self) -> io::Result<()> {
             if let Some(reader) = &self.reader {
                 reader.park();
             }
-            let given_back = self.give_back_for_now();
-            let resumed = given_back.is_ok();
-            let stopped = given_back.and_then(|()| stop_process());
-            let taken_back = self.take_back();
+            self.session.give_back_for_now()
+        }
+
+        /// Takes the terminal back after [`release`](Self::release), and makes the next frame a
+        /// full redraw.
+        pub(crate) fn reacquire(&self) -> io::Result<()> {
+            let taken_back = self.session.take_back(false);
             if let Some(reader) = &self.reader {
-                reader.unpark(resumed);
+                reader.unpark();
             }
-            stopped.and(taken_back)
-        }
-
-        /// Gives the terminal back until [`take_back`](Self::take_back), with the program's output
-        /// still open.
-        fn give_back_for_now(&self) -> io::Result<()> {
-            self.writer.send(self.writer.reset().to_vec())?;
-            let _ = self.writer.wait(self.writer.ticket(), CLOSE_WAIT);
-            self.modes.restore()
-        }
-
-        fn take_back(&self) -> io::Result<()> {
-            self.modes.apply_raw()?;
-            self.writer.send(lock(&self.setup).clone())?;
-            self.shared.request_redraw();
-            Ok(())
+            taken_back
         }
 
         /// Gives the terminal back, with `tail` after the reset, waiting at most `wait` for it.
@@ -552,8 +700,9 @@ pub(crate) mod screen {
             if let Some(reader) = self.reader.take() {
                 reader.stop();
             }
-            let written = self.restore.give_back(&self.writer, tail, wait);
-            unregister(&self.restore);
+            let session = &self.session;
+            let written = session.restore.give_back(&session.writer, tail, wait);
+            unregister(&session.restore);
             written
         }
     }
@@ -579,12 +728,14 @@ mod tests {
     fn everything() -> Enabled {
         Enabled {
             alternate_screen: true,
-            mouse: Mouse::ButtonsAndDrags,
+            clear: false,
+            mouse: MouseMode::ButtonsAndDrags,
             focus: true,
             bracketed_paste: true,
             grapheme_clusters: true,
             theme_reports: true,
             keyboard: Some(1),
+            modify_other_keys: true,
             save_title: true,
             hyperlinks: true,
             cursor_shape: true,
@@ -598,19 +749,22 @@ mod tests {
         assert_eq!(
             String::from_utf8(enabled.setup()).unwrap(),
             "\x1b[22;0t\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1004h\
-             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u"
+             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u\x1b[>4;1m"
         );
         assert_eq!(
             String::from_utf8(enabled.reset()).unwrap(),
-            "\x1b[?2026l\x1b[<1u\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
-             \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[?1049l\x1b[0 q\x1b[?25h\
+            "\x1b[?2026l\x1b[<1u\x1b[>4;0m\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
+             \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[r\x1b[?1049l\x1b[0 q\x1b[?25h\
              \x1b[23;0t"
         );
         let nothing = Enabled::default();
         assert_eq!(nothing.setup(), b"\x1b[?25l\x1b[?7l");
-        assert_eq!(nothing.reset(), b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[?25h");
+        assert_eq!(
+            nothing.reset(),
+            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[r\x1b[?25h"
+        );
         let motion = Enabled {
-            mouse: Mouse::AnyMotion,
+            mouse: MouseMode::AnyMotion,
             ..Enabled::default()
         };
         assert!(
@@ -618,6 +772,21 @@ mod tests {
                 .unwrap()
                 .ends_with("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h")
         );
+        // Without an alternate screen, the screen is cleared on the way in and out.
+        let console = Enabled {
+            clear: true,
+            ..Enabled::default()
+        };
+        assert_eq!(console.setup(), b"\x1b[?25l\x1b[?7l\x1b[H\x1b[2J");
+        assert_eq!(
+            console.reset(),
+            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[r\x1b[H\x1b[2J\x1b[?25h"
+        );
+        assert_eq!(
+            mouse_switch(MouseMode::ButtonsAndDrags, MouseMode::AnyMotion),
+            b"\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h"
+        );
+        assert!(mouse_switch(MouseMode::Off, MouseMode::Off).is_empty());
     }
 
     /// A handle on a writer to `terminal`, whose resets written without the writer go to
@@ -645,6 +814,9 @@ mod tests {
         until_writing(&writer);
         let direct = Gate::default();
         let (handle, restored) = handle(&writer, &direct);
+        // (A watchdog sees how long the stuck write has waited.)
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(handle.writer_waiting() >= Some(Duration::from_millis(20)));
         let threads: Vec<_> = (0..3)
             .map(|_| {
                 let handle = handle.clone();
@@ -655,7 +827,7 @@ mod tests {
             assert!(thread.join().unwrap());
         }
         assert!(handle.restore_now(LONG));
-        assert_eq!(direct.taken(), b"\x18[reset]");
+        assert_eq!(direct.taken(), b"\x18\x1b\\[reset]");
         assert_eq!(*lock(&restored), 1);
         assert!(handle.is_given_back());
         // The writer writes nothing more.
@@ -690,7 +862,7 @@ mod tests {
         writer.send(b"[frame]".to_vec()).unwrap();
         assert!(writer.wait_idle(LONG));
         assert!(handle.give_back(&writer, b"", LONG));
-        assert_eq!(direct.taken(), b"\x18[reset]");
+        assert_eq!(direct.taken(), b"\x18\x1b\\[reset]");
         assert_eq!(*lock(&restored), 1);
     }
 
@@ -759,19 +931,20 @@ mod tests {
     #[cfg(unix)]
     mod unix {
         use super::super::screen::Screen;
-        use super::super::{Enabled, Mouse, install_panic_hook};
+        use super::super::{Enabled, install_panic_hook};
         use crate::event::{Event, KeyModifiers};
         use crate::layout::Size;
         use crate::sys::Next;
         use crate::sys::unix::Signals;
         use crate::sys::unix::tests::{Bytes, LONG, Pty, find, is_child, key, next, spawn_child};
+        use crate::terminal::MouseMode;
         use std::io::{self, Write};
         use std::time::Duration;
 
         fn enabled() -> Enabled {
             Enabled {
                 alternate_screen: true,
-                mouse: Mouse::ButtonsAndDrags,
+                mouse: MouseMode::ButtonsAndDrags,
                 focus: true,
                 bracketed_paste: true,
                 save_title: true,
@@ -782,14 +955,10 @@ mod tests {
         /// A screen on `pty`, with pipes that stand in for SIGWINCH and SIGCONT.
         fn screen(pty: &Pty) -> (Screen, io::PipeWriter, io::PipeWriter) {
             let (signals, resize, resume) = Signals::unregistered().unwrap();
-            let screen = Screen::open_with(
-                pty.tty(),
-                |_| Bytes::default(),
-                Duration::ZERO,
-                &enabled(),
-                signals,
-            )
-            .unwrap();
+            let screen =
+                Screen::open_with(pty.tty(), |_| Bytes::default(), Duration::ZERO, signals)
+                    .unwrap();
+            screen.enable(&enabled()).unwrap();
             (screen, resize, resume)
         }
 
@@ -820,8 +989,9 @@ mod tests {
             assert_eq!(pty.modes(), before);
         }
 
-        /// After a stop that something else ended, SIGCONT puts raw mode back, sends the setup
-        /// again and queues `Resumed`, and the next frame redraws everything.
+        /// After a stop that something else ended, SIGCONT puts raw mode back, sends the reset and
+        /// then the setup, so the stacks the setup pushes don't grow, queues `Resumed`, and the
+        /// next frame redraws everything.
         #[test]
         fn sigcont_takes_the_terminal_back() {
             let mut pty = Pty::open(Size::new(80, 24));
@@ -845,14 +1015,16 @@ mod tests {
             }
             // (The program turned the mouse off since it opened.)
             let changed = Enabled {
-                mouse: Mouse::Off,
+                mouse: MouseMode::Off,
                 ..enabled()
             };
             screen.set_enabled(&changed);
             resume.write_all(b"X").unwrap();
             assert_eq!(next(screen.shared()), Event::Resumed);
             assert_eq!(pty.modes(), raw);
-            pty.read_until(first + setup.len(), &changed.setup(), LONG);
+            let mut again = changed.reset();
+            again.extend_from_slice(&changed.setup());
+            pty.read_until(first + setup.len(), &again, LONG);
             assert!(screen.shared().take_redraw());
             assert!(screen.close(b"", LONG));
             pty.read_until(first + setup.len(), &changed.reset(), LONG);
@@ -876,13 +1048,14 @@ mod tests {
             for (case, message, _) in PANICS {
                 if is_child(case) {
                     install_panic_hook();
-                    let screen = Screen::open(
+                    let screen = Screen::open_with(
                         crate::sys::unix::Tty::open().unwrap(),
                         |_| Bytes::default(),
                         Duration::ZERO,
-                        &enabled(),
+                        Signals::register(false).unwrap(),
                     )
                     .unwrap();
+                    screen.enable(&enabled()).unwrap();
                     screen.writer().send(b"<ready>".to_vec()).unwrap();
                     assert!(screen.writer().wait_idle(LONG));
                     assert!(case != "panic-opening", "{message}");
@@ -928,73 +1101,145 @@ mod tests {
             }
         }
 
-        /// Suspending gives the terminal back while the process is stopped, and once it runs again
-        /// takes it back, queues `Resumed` and asks for a full redraw.
+        /// Suspending, or a SIGTSTP from outside, gives the terminal back while the process is
+        /// stopped, and once it runs again takes it back, queues one `Resumed` and asks for a full
+        /// redraw.
         #[test]
-        fn suspend_gives_the_terminal_back_until_the_process_runs_again() {
+        fn a_stop_gives_the_terminal_back_until_the_process_runs_again() {
             use rustix::process::{Pid, Signal, WaitOptions, kill_process, waitpid};
-            const TEST: &str = "suspend_gives_the_terminal_back_until_the_process_runs_again";
-            if is_child("suspend") {
-                let screen = Screen::open(
-                    crate::sys::unix::Tty::open().unwrap(),
-                    |_| Bytes::default(),
-                    Duration::ZERO,
-                    &enabled(),
-                )
-                .unwrap();
-                assert!(screen.shared().take_redraw());
-                screen.writer().send(b"<ready>".to_vec()).unwrap();
-                screen.suspend().unwrap();
-                assert_eq!(next(screen.shared()), Event::Resumed);
-                assert!(screen.shared().take_redraw());
-                // (The SIGCONT that ended the stop gives no second `Resumed`.)
-                assert_eq!(
-                    screen
-                        .shared()
-                        .events
-                        .next_timeout(Duration::from_millis(200)),
-                    Next::Empty
-                );
-                let modes = rustix::termios::tcgetattr(rustix::stdio::stdin()).unwrap();
-                assert!(
-                    !modes
-                        .local_modes
-                        .contains(rustix::termios::LocalModes::ICANON)
-                );
-                screen.writer().send(b"<resumed>".to_vec()).unwrap();
-                assert!(screen.writer().wait_idle(LONG));
-                assert!(screen.close(b"", LONG));
-                return;
+            const TEST: &str = "a_stop_gives_the_terminal_back_until_the_process_runs_again";
+            for case in ["suspend", "outside"] {
+                if is_child(case) {
+                    let screen = Screen::open_with(
+                        crate::sys::unix::Tty::open().unwrap(),
+                        |_| Bytes::default(),
+                        Duration::ZERO,
+                        Signals::register(false).unwrap(),
+                    )
+                    .unwrap();
+                    screen.enable(&enabled()).unwrap();
+                    assert!(screen.shared().take_redraw());
+                    screen.writer().send(b"<ready>".to_vec()).unwrap();
+                    if case == "suspend" {
+                        screen.suspend().unwrap();
+                    }
+                    assert_eq!(next(screen.shared()), Event::Resumed);
+                    assert!(screen.shared().take_redraw());
+                    // (The SIGCONT that ended the stop gives no second `Resumed`.)
+                    assert_eq!(
+                        screen
+                            .shared()
+                            .events
+                            .next_timeout(Duration::from_millis(200)),
+                        Next::Empty
+                    );
+                    let modes = rustix::termios::tcgetattr(rustix::stdio::stdin()).unwrap();
+                    assert!(
+                        !modes
+                            .local_modes
+                            .contains(rustix::termios::LocalModes::ICANON)
+                    );
+                    screen.writer().send(b"<resumed>".to_vec()).unwrap();
+                    assert!(screen.writer().wait_idle(LONG));
+                    assert!(screen.close(b"", LONG));
+                    return;
+                }
             }
             let (setup, reset) = (enabled().setup(), enabled().reset());
+            for case in ["suspend", "outside"] {
+                let mut pty = Pty::open(Size::new(80, 24));
+                let before = pty.modes();
+                let mut child = spawn_child(module_path!(), TEST, case, &pty);
+                let pid = Pid::from_child(&child);
+                let ready = pty.read_until(0, b"<ready>", LONG);
+                if case == "outside" {
+                    kill_process(pid, Signal::TSTP).unwrap();
+                }
+                let given_back = pty.read_until(ready, &reset, LONG);
+                let started = std::time::Instant::now();
+                loop {
+                    let status = waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG);
+                    match status.unwrap() {
+                        Some((_, status)) if status.stopped() => break,
+                        Some((_, status)) => panic!("{case}: the child ended, {status:?}"),
+                        None => {
+                            assert!(started.elapsed() < LONG, "{case}: the child never stopped");
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                }
+                assert_eq!(pty.modes(), before, "{case}");
+                kill_process(pid, Signal::CONT).unwrap();
+                let taken_back = pty.read_until(given_back, &setup, LONG);
+                let resumed = pty.read_until(taken_back, b"<resumed>", LONG);
+                let status = child.wait().unwrap();
+                pty.read_ready();
+                let shown = String::from_utf8_lossy(&pty.shown).into_owned();
+                assert!(status.success(), "{case}: {status}: {shown:?}");
+                pty.read_until(resumed, &reset, LONG);
+                assert_eq!(pty.modes(), before, "{case}");
+            }
+        }
+
+        /// With the ending signals asked for, SIGTERM gives the terminal back and then ends the
+        /// program as it would have. Once the terminal closed, SIGTSTP and SIGTERM act as they did
+        /// before it opened.
+        #[test]
+        fn signals_act_as_before_once_the_terminal_closes() {
+            use rustix::process::{Pid, Signal, WaitOptions, kill_process, waitpid};
+            use std::os::unix::process::ExitStatusExt;
+            const TEST: &str = "signals_act_as_before_once_the_terminal_closes";
+            for case in ["term-open", "after-close"] {
+                if is_child(case) {
+                    let screen = Screen::open_with(
+                        crate::sys::unix::Tty::open().unwrap(),
+                        |_| Bytes::default(),
+                        Duration::ZERO,
+                        Signals::register(true).unwrap(),
+                    )
+                    .unwrap();
+                    screen.enable(&enabled()).unwrap();
+                    if case == "after-close" {
+                        assert!(screen.close(b"<closed>", LONG));
+                    } else {
+                        screen.writer().send(b"<ready>".to_vec()).unwrap();
+                    }
+                    std::thread::sleep(Duration::from_secs(10));
+                    return;
+                }
+            }
+            let reset = enabled().reset();
             let mut pty = Pty::open(Size::new(80, 24));
             let before = pty.modes();
-            let mut child = spawn_child(module_path!(), TEST, "suspend", &pty);
-            let pid = Pid::from_child(&child);
+            let child = spawn_child(module_path!(), TEST, "term-open", &pty);
             let ready = pty.read_until(0, b"<ready>", LONG);
-            let given_back = pty.read_until(ready, &reset, LONG);
+            kill_process(Pid::from_child(&child), Signal::TERM).unwrap();
+            let mut child = child;
+            let status = child.wait().unwrap();
+            assert_eq!(status.signal(), Some(Signal::TERM.as_raw()), "{status}");
+            pty.read_until(ready, &reset, LONG);
+            assert_eq!(pty.modes(), before);
+
+            let mut pty = Pty::open(Size::new(80, 24));
+            let mut child = spawn_child(module_path!(), TEST, "after-close", &pty);
+            let pid = Pid::from_child(&child);
+            pty.read_until(0, b"<closed>", LONG);
+            kill_process(pid, Signal::TSTP).unwrap();
             let started = std::time::Instant::now();
             loop {
-                let status = waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG);
-                match status.unwrap() {
+                match waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG).unwrap() {
                     Some((_, status)) if status.stopped() => break,
                     Some((_, status)) => panic!("the child ended, {status:?}"),
                     None => {
-                        assert!(started.elapsed() < LONG, "the child never stopped");
+                        assert!(started.elapsed() < LONG, "SIGTSTP didn't stop it");
                         std::thread::sleep(Duration::from_millis(5));
                     }
                 }
             }
-            assert_eq!(pty.modes(), before);
             kill_process(pid, Signal::CONT).unwrap();
-            let taken_back = pty.read_until(given_back, &setup, LONG);
-            let resumed = pty.read_until(taken_back, b"<resumed>", LONG);
+            kill_process(pid, Signal::TERM).unwrap();
             let status = child.wait().unwrap();
-            pty.read_ready();
-            let shown = String::from_utf8_lossy(&pty.shown).into_owned();
-            assert!(status.success(), "{status}: {shown:?}");
-            pty.read_until(resumed, &reset, LONG);
-            assert_eq!(pty.modes(), before);
+            assert_eq!(status.signal(), Some(Signal::TERM.as_raw()), "{status}");
         }
     }
 }
