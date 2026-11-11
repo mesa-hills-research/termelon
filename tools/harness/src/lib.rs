@@ -26,6 +26,7 @@
 pub mod compare;
 pub mod driver;
 pub mod drivers;
+pub mod expected;
 pub mod input;
 pub mod json;
 pub mod keys;

@@ -5,11 +5,15 @@
 //! harness version TERMINAL
 //! harness smoke TERMINAL
 //! harness run TERMINAL --probe PATH [--scene NAME]... [--size COLSxROWS] [--out DIR]
+//!     [--expected DIR] [--update]
 //! harness keys TERMINAL --probe PATH [--mode NAME]... [--out DIR] [--fixtures DIR] [--update]
 //! ```
 //!
 //! `run` runs each scene (every scene the probe lists, by default) and writes a report, both
-//! screens in the styled-text format and an HTML page per scene into the output directory.
+//! screens in the styled-text format and an HTML page per scene into the output directory. Then
+//! it holds what the terminal answered the probe against the terminal version's expected report,
+//! in `tools/harness/expected` by default, and names each change. `--update` writes the report
+//! as it is now.
 //!
 //! `keys` presses the scripted keys and mouse events in each mode (every mode, by default), holds
 //! what the terminal sent against what `tuiframe-vt` says it sends, and names each change since
@@ -24,7 +28,9 @@ use std::process::ExitCode;
 
 use harness::driver::{Error, clean_command, run};
 use harness::drivers::{self, TERMINALS};
+use harness::expected;
 use harness::input::{self, MODES, run_input};
+use harness::json::Json;
 use harness::run::{run_scene, smoke, write_outcome};
 
 /// Standard output, which results go to.
@@ -48,7 +54,8 @@ fn complain(text: &str) {
 }
 
 const USAGE: &str = "usage: harness list | version TERMINAL | smoke TERMINAL | \
-                     run TERMINAL --probe PATH [--scene NAME]... [--size COLSxROWS] [--out DIR] | \
+                     run TERMINAL --probe PATH [--scene NAME]... [--size COLSxROWS] [--out DIR] \
+                     [--expected DIR] [--update] | \
                      keys TERMINAL --probe PATH [--mode NAME]... [--out DIR] [--fixtures DIR] [--update]";
 
 struct RunOptions {
@@ -58,7 +65,7 @@ struct RunOptions {
     scenes: Vec<String>,
     size: (u16, u16),
     out: PathBuf,
-    /// Where earlier runs kept what they found, the fixtures of `keys`.
+    /// Where earlier runs kept what they found, the expected reports, or the fixtures of `keys`.
     kept: PathBuf,
     update: bool,
 }
@@ -80,11 +87,15 @@ fn parse_run(args: &[String], keys: bool) -> Result<RunOptions, String> {
         scenes: Vec::new(),
         size: (80, 24),
         out: PathBuf::from("harness-out"),
-        kept: input::default_fixtures(),
+        kept: if keys {
+            input::default_fixtures()
+        } else {
+            expected::default_dir()
+        },
         update: false,
     };
     while let Some(flag) = args.next() {
-        if flag == "--update" && keys {
+        if flag == "--update" {
             options.update = true;
             continue;
         }
@@ -98,6 +109,7 @@ fn parse_run(args: &[String], keys: bool) -> Result<RunOptions, String> {
             "--mode" if keys => {
                 return Err(format!("{value} isn't a mode, only {}", MODES.join(", ")));
             }
+            "--expected" if !keys => options.kept = PathBuf::from(value),
             "--fixtures" if keys => options.kept = PathBuf::from(value),
             "--size" if !keys => {
                 options.size =
@@ -176,6 +188,24 @@ fn run_command(options: &RunOptions) -> Result<bool, String> {
             }
         }
     }
+    // Every scene's probe asks the same questions, so the first report that has answers will do.
+    let answers = scenes.iter().find_map(|scene| {
+        let path = out.join(format!("{}-{scene}.probe.json", options.terminal));
+        let text = std::fs::read_to_string(path).ok()?;
+        expected::answers(&Json::parse(&text).ok()?)
+    });
+    if let Some(answers) = answers {
+        let path = expected::path(&options.kept, &options.terminal, &version);
+        let found = answers.to_text();
+        let changes = |kept: &str| match Json::parse(kept) {
+            Ok(before) => expected::changes(&before, &answers),
+            Err(error) => vec![format!("the expected report isn't JSON: {error}")],
+        };
+        all_match &= check_kept(&path, &found, options.update, "answers", changes);
+    } else {
+        // Where the terminal closes as it's read back, as Alacritty does, the probe writes none.
+        say("answers: no probe report has them");
+    }
     Ok(all_match)
 }
 
@@ -241,17 +271,11 @@ fn keys_command(options: &RunOptions) -> Result<bool, String> {
         }
         let path = input::fixture_path(&options.kept, &options.terminal, &version, mode);
         let found = recording.fixture(&options.terminal, &version);
-        all_match &=
-            check_kept(
-                &path,
-                &found,
-                options.update,
-                mode,
-                |kept| match input::parse_fixture(kept) {
-                    Ok(fixture) => input::changes(&fixture, &recording),
-                    Err(error) => vec![format!("the fixture doesn't read: {error}")],
-                },
-            );
+        let changes = |kept: &str| match input::parse_fixture(kept) {
+            Ok(fixture) => input::changes(&fixture, &recording),
+            Err(error) => vec![format!("the fixture doesn't read: {error}")],
+        };
+        all_match &= check_kept(&path, &found, options.update, mode, changes);
     }
     Ok(all_match)
 }
@@ -297,11 +321,11 @@ fn check_kept(
         say(&format!("{what}: as kept in {}", path.display()));
         return true;
     }
-    say(&format!(
-        "{what}: {} changes since {}",
-        changes.len(),
-        path.display()
-    ));
+    let count = match changes.len() {
+        1 => "1 change".to_owned(),
+        n => format!("{n} changes"),
+    };
+    say(&format!("{what}: {count} since {}", path.display()));
     for change in changes {
         say(&format!("  {change}"));
     }

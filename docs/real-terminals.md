@@ -21,7 +21,11 @@ target/debug/harness run tmux --probe target/debug/probe --out harness-out
 failure of the program under test. `run` runs every scene the probe lists (or those named with
 `--scene`) at 80 by 24 (or `--size`). For each scene it writes the probe's bytes and report, a JSON
 report with each difference, both screens in the styled-text format, an HTML page with the two side
-by side, and a screenshot where there's a display. It exits with 1 when a screen differs.
+by side, and a screenshot where there's a display. Then it holds what the terminal answered the
+probe (its name and version, and the capabilities the framework found, widths among them) against
+the expected report for that version in `tools/harness/expected`, and names every change. It exits
+with 1 when a screen differs or an answer changed. A version with no report yet is only noted, and
+`--update` writes its report.
 
 | Terminal | Needs | Read back with | Reports |
 |---|---|---|---|
