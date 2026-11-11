@@ -15,12 +15,14 @@
 //! assert_eq!(line.width(), 21);
 //! ```
 //!
-//! [`graphemes`] and [`width`] measure text as the buffer does, cluster by cluster under a
-//! [`WidthProfile`], so a program's wrapping, cursor columns and alignment agree with the cells it
-//! draws.
+//! [`graphemes`] and [`width`] measure text as the buffer does, cluster by cluster under the
+//! terminal's [`WidthProfile`], so a program's wrapping, cursor columns and alignment agree with
+//! the cells it draws.
 
 use std::borrow::Cow;
+use std::cell::Cell as StdCell;
 use std::fmt;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -94,9 +96,9 @@ impl<'a> Span<'a> {
         self.style(Style::new())
     }
 
-    /// The cells the text takes under the default [`WidthProfile`], as [`width`] measures it.
+    /// The cells the text takes, as [`width`] measures it.
     pub fn width(&self) -> usize {
-        width(&self.content, WidthProfile::default())
+        width(&self.content)
     }
 }
 
@@ -208,9 +210,13 @@ impl<'a> Line<'a> {
         self.alignment(Alignment::Right)
     }
 
-    /// The cells the spans take under the default [`WidthProfile`].
+    /// The cells the spans take, as [`width`] measures them.
     pub fn width(&self) -> usize {
-        self.spans.iter().map(Span::width).sum()
+        let profile = width_profile();
+        self.spans
+            .iter()
+            .map(|span| width_with(&span.content, profile))
+            .sum()
     }
 
     /// The spans, from the left.
@@ -347,7 +353,7 @@ impl<'a> Text<'a> {
         Self::raw(content).style(style)
     }
 
-    /// The cells the widest line takes under the default [`WidthProfile`].
+    /// The cells the widest line takes, as [`width`] measures it.
     pub fn width(&self) -> usize {
         self.lines.iter().map(Line::width).max().unwrap_or(0)
     }
@@ -546,45 +552,140 @@ impl DoubleEndedIterator for Graphemes<'_> {
 
 impl core::iter::FusedIterator for Graphemes<'_> {}
 
-/// The grapheme clusters of `text`, each with the cells it takes in a buffer with `profile`.
+/// The profile every thread measures with unless it set its own, three bits of a
+/// [`WidthProfile`].
+static PROFILE: AtomicU8 = AtomicU8::new(0);
+
+thread_local! {
+    /// The profile this thread measures with, inside [`with_width_profile`].
+    static THREAD_PROFILE: StdCell<Option<WidthProfile>> = const { StdCell::new(None) };
+}
+
+const fn profile_bits(profile: WidthProfile) -> u8 {
+    profile.joins_emoji as u8
+        | (profile.vs16_widens as u8) << 1
+        | (profile.ambiguous_wide as u8) << 2
+}
+
+const fn profile_from_bits(bits: u8) -> WidthProfile {
+    WidthProfile {
+        joins_emoji: bits & 1 != 0,
+        vs16_widens: bits & 2 != 0,
+        ambiguous_wide: bits & 4 != 0,
+    }
+}
+
+/// The width profile text is measured with, which [`width`], [`graphemes`], the `width` methods
+/// of the text types and [`Buffer::empty`](crate::Buffer::empty) use.
+///
+/// It's the terminal's, from the moment the terminal opens, so a program's wrapping, cursor columns
+/// and alignment agree with the cells it draws. Before that, and with no terminal, it's the
+/// default, and [`with_width_profile`] sets one for a thread.
+pub fn width_profile() -> WidthProfile {
+    THREAD_PROFILE
+        .try_with(StdCell::get)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| profile_from_bits(PROFILE.load(Ordering::Relaxed)))
+}
+
+/// Runs `f` with text on this thread measured by `profile`, and the profile before it back
+/// afterwards, even when `f` panics. Tests that draw for a terminal of their own use it, since
+/// tests run on threads side by side.
+///
+/// ```
+/// use tuiframe::caps::WidthProfile;
+/// use tuiframe::text::{self, Span};
+///
+/// let kitty = WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false };
+/// let family = Span::raw("👨\u{200d}👩\u{200d}👧");
+/// assert_eq!(text::with_width_profile(kitty, || family.width()), 2);
+/// assert_eq!(text::with_width_profile(WidthProfile::default(), || family.width()), 6);
+/// ```
+pub fn with_width_profile<R>(profile: WidthProfile, f: impl FnOnce() -> R) -> R {
+    struct Restore(Option<WidthProfile>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let before = self.0;
+            let _ = THREAD_PROFILE.try_with(|p| p.set(before));
+        }
+    }
+    let before = THREAD_PROFILE
+        .try_with(|p| p.replace(Some(profile)))
+        .ok()
+        .flatten();
+    let _restore = Restore(before);
+    f()
+}
+
+/// Makes `profile` the one every thread measures with, unless it set its own. The terminal sets
+/// the one it found when it opens.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "`Terminal::open` sets it, and comes with the terminal API"
+    )
+)]
+pub(crate) fn set_width_profile(profile: WidthProfile) {
+    PROFILE.store(profile_bits(profile), Ordering::Relaxed);
+}
+
+/// The grapheme clusters of `text`, each with the cells it takes in a buffer that measures with
+/// the current [`width_profile`].
 ///
 /// A cluster that holds a control character or has no width takes 0 cells, and the buffer skips
 /// it, so the widths add up to what writing the text takes.
 ///
 /// ```
-/// use tuiframe::caps::WidthProfile;
 /// use tuiframe::text;
 ///
-/// let plain = WidthProfile::default();
-/// let clusters: Vec<_> = text::graphemes("e\u{301}界\t", plain).collect();
+/// let clusters: Vec<_> = text::graphemes("e\u{301}界\t").collect();
 /// assert_eq!(clusters, [("e\u{301}", 1), ("界", 2), ("\t", 0)]);
 /// ```
-pub fn graphemes(text: &str, profile: WidthProfile) -> Graphemes<'_> {
+pub fn graphemes(text: &str) -> Graphemes<'_> {
+    graphemes_with(text, width_profile())
+}
+
+/// [`graphemes`] under `profile`.
+pub fn graphemes_with(text: &str, profile: WidthProfile) -> Graphemes<'_> {
     Graphemes {
         clusters: text.graphemes(true),
         profile,
     }
 }
 
-/// The cells `text` takes in a buffer with `profile`, the widths of [`graphemes`] added up.
+/// The cells `text` takes in a buffer that measures with the current [`width_profile`], the
+/// widths of [`graphemes`] added up.
 ///
-/// A family emoji is three wide emoji to a terminal that doesn't join emoji sequences, and one to
-/// a terminal that does.
+/// ```
+/// use tuiframe::text;
+///
+/// assert_eq!(text::width("a界b"), 4);
+/// ```
+pub fn width(text: &str) -> usize {
+    width_with(text, width_profile())
+}
+
+/// [`width`] under `profile`. A family emoji is three wide emoji to a terminal that doesn't join
+/// emoji sequences, and one to a terminal that does.
 ///
 /// ```
 /// use tuiframe::caps::WidthProfile;
 /// use tuiframe::text;
 ///
 /// let family = "👨\u{200d}👩\u{200d}👧";
-/// assert_eq!(text::width(family, WidthProfile::default()), 6);
+/// assert_eq!(text::width_with(family, WidthProfile::default()), 6);
 /// let joining = WidthProfile { joins_emoji: true, ..WidthProfile::default() };
-/// assert_eq!(text::width(family, joining), 2);
+/// assert_eq!(text::width_with(family, joining), 2);
 /// ```
-pub fn width(text: &str, profile: WidthProfile) -> usize {
+pub fn width_with(text: &str, profile: WidthProfile) -> usize {
     if text.is_ascii() {
         return text.bytes().filter(|b| !b.is_ascii_control()).count();
     }
-    graphemes(text, profile).map(|(_, w)| usize::from(w)).sum()
+    graphemes_with(text, profile)
+        .map(|(_, w)| usize::from(w))
+        .sum()
 }
 
 /// The widest cluster the buffer gives the cells it really takes, beyond which a cluster is cut
@@ -851,7 +952,7 @@ mod tests {
         assert_eq!(measure("\u{200b}", PLAIN).width, 0);
         assert_eq!(measure("\u{301}", PLAIN).width, 0);
         assert_eq!(measure("", PLAIN).width, 0);
-        assert_eq!(width("a\tb\u{1b}c", PLAIN), 3);
+        assert_eq!(width_with("a\tb\u{1b}c", PLAIN), 3);
     }
 
     #[test]
@@ -917,6 +1018,60 @@ mod tests {
     }
 
     #[test]
+    fn profiles_round_trip_through_their_bits() {
+        for bits in 0..8 {
+            let profile = profile_from_bits(bits);
+            assert_eq!(profile_bits(profile), bits);
+        }
+    }
+
+    #[test]
+    fn a_thread_measures_with_its_own_profile_inside_with_width_profile() {
+        let joining = profile(true, true, false);
+        let family = "👨\u{200d}👩\u{200d}👧";
+        let outside = width_profile();
+        let inside = with_width_profile(joining, || {
+            let nested = with_width_profile(PLAIN, || width(family));
+            (
+                width_profile(),
+                width(family),
+                Span::raw(family).width(),
+                nested,
+                width_profile(),
+            )
+        });
+        assert_eq!(inside, (joining, 2, 2, 6, joining));
+        assert_eq!(width_profile(), outside);
+        let other_thread = std::thread::spawn(move || with_width_profile(joining, || 0)).join();
+        assert!(other_thread.is_ok());
+        let after_panic =
+            std::panic::catch_unwind(|| with_width_profile(joining, || panic!("in f")));
+        assert!(after_panic.is_err());
+        assert_eq!(
+            width_profile(),
+            outside,
+            "a panic in f gives the profile back"
+        );
+    }
+
+    #[test]
+    fn the_process_profile_reaches_threads_without_their_own() {
+        // Setting it to what it already is keeps other tests, which run alongside, unaffected.
+        let current = profile_from_bits(PROFILE.load(Ordering::Relaxed));
+        set_width_profile(current);
+        let seen = std::thread::spawn(width_profile).join().ok();
+        assert_eq!(seen, Some(current));
+        let joining = profile(true, false, false);
+        let shadowed =
+            with_width_profile(joining, || std::thread::spawn(width_profile).join().ok());
+        assert_eq!(
+            shadowed,
+            Some(current),
+            "an override belongs to its own thread"
+        );
+    }
+
+    #[test]
     fn clusters_the_two_measures_disagree_on_are_uncertain() {
         let mark = measure("界\u{903}", PLAIN);
         assert_eq!((mark.width, mark.uncertain), (3, true));
@@ -950,10 +1105,10 @@ mod tests {
     fn graphemes_and_width_agree() {
         let text = "a界👍🏽e\u{301}\u{1b}x";
         for p in [PLAIN, profile(true, true, true)] {
-            let sum: usize = graphemes(text, p).map(|(_, w)| usize::from(w)).sum();
-            assert_eq!(width(text, p), sum);
+            let sum: usize = graphemes_with(text, p).map(|(_, w)| usize::from(w)).sum();
+            assert_eq!(width_with(text, p), sum);
         }
-        let back: Vec<_> = graphemes("ab界", PLAIN).rev().collect();
+        let back: Vec<_> = graphemes_with("ab界", PLAIN).rev().collect();
         assert_eq!(back, [("界", 2), ("b", 1), ("a", 1)]);
     }
 }

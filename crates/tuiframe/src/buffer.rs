@@ -470,9 +470,10 @@ struct ClipRegion {
 }
 
 impl Buffer {
-    /// A buffer of blank cells over `area`, measuring text with the default [`WidthProfile`].
+    /// A buffer of blank cells over `area`, measuring text with the current
+    /// [`text::width_profile`], the terminal's once it's open.
     pub fn empty(area: Rect) -> Self {
-        Self::with_width_profile(area, WidthProfile::default())
+        Self::with_width_profile(area, text::width_profile())
     }
 
     /// A buffer of blank cells over `area`, measuring text with `profile`.
@@ -1931,7 +1932,7 @@ mod tests {
                         while x < area.width {
                             let cell = buffer.cell((x, y)).unwrap();
                             prop_assert!(cell.width() > 0, "an orphan continuation at ({}, {}) after {:?}", x, y, op);
-                            prop_assert_eq!(usize::from(cell.width()), text::width(cell.symbol(), WidthProfile::default()));
+                            prop_assert_eq!(usize::from(cell.width()), text::width_with(cell.symbol(), WidthProfile::default()));
                             x += cell.width();
                         }
                         for x in 0..area.width {

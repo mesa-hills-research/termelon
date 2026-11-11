@@ -85,7 +85,10 @@ The trailing cells of a wide character carry a continuation tag, and the buffer 
 which is that a wide character always has all its continuation cells and none is ever without its
 leader.
 
-A cluster's width is decided once, when it's written, by the buffer's `WidthProfile`. Cells whose
+A cluster's width is decided once, when it's written, by the buffer's `WidthProfile`. Programs
+measure with the same one, since `Terminal::open` makes the terminal's the process's profile
+(`text::set_width_profile`), which `text::width`, the text types' `width` and `Buffer::empty`
+read. Tests set one for their own thread with `text::with_width_profile`. Cells whose
 width terminals disagree on (emoji sequences, and emoji newer than many terminals' width tables) are
 marked, and after writing one the encoder positions the next run absolutely, so a terminal that
 measures differently misdraws that cell alone. East Asian ambiguous characters follow the profile
