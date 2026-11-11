@@ -42,7 +42,15 @@ fn styled_text_writes_the_documented_example() {
 #[test]
 fn styled_text_writes_every_attribute_in_order() {
     let bytes = b"\x1b]8;id=1;https://example.com/x\x1b\\\x1b[31;48;5;8;58;2;1;2;3;4:3;1;2;3;5;6;7;8;9;53mA";
-    let term = run(Profile::kitty(), 2, 1, bytes);
+    let term = run(
+        Profile {
+            hyperlinks: true,
+            ..Profile::xterm()
+        },
+        2,
+        1,
+        bytes,
+    );
     assert_eq!(
         term.styled(),
         "size 2 1\ncursor 1 0 visible default\ntext 0 \"A\"\nstyle 0 0 1 fg=red bg=idx:8 ul=#010203 \

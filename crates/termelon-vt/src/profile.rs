@@ -88,6 +88,8 @@ pub struct Profile {
     /// Whether it sets the cursor's shape with DECSCUSR (`CSI n SP q`).
     pub cursor_shape: bool,
     /// Whether it has the kitty keyboard protocol and answers `CSI ? u`.
+    /// The SGR attributes it takes and doesn't draw, such as 53 (overline) for kitty.
+    pub ignored_sgr: Vec<u16>,
     pub kitty_keyboard: bool,
     /// Whether it honours modifyOtherKeys (`CSI > 4 ; n m`).
     pub modify_other_keys: bool,
@@ -144,6 +146,7 @@ impl Profile {
             kitty_keyboard: false,
             modify_other_keys: true,
             linux_console: false,
+            ignored_sgr: Vec::new(),
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?64;1;2;6;9;15;16;17;18;21;22;28c".to_owned()),
             da2: Some("\x1b[>41;390;0c".to_owned()),
@@ -162,8 +165,9 @@ impl Profile {
     }
 
     /// kitty 0.32, as Ubuntu 24.04 ships it. It joins emoji sequences, widens VS16, has the kitty
-    /// keyboard protocol and synchronized output, and answers every query. Its DA2 version field is
-    /// believed, not checked.
+    /// keyboard protocol and synchronized output, and answers every query. It draws no blink,
+    /// hidden text or overline (SGR 5, 6, 8 and 53, from `cursor_from_sgr` in its `cursor.c`), and
+    /// blink comes in 0.43. Its DA2 version field is believed, not checked.
     pub fn kitty() -> Profile {
         let mut modes = XTERM_MODES.to_vec();
         modes.retain(|&m| m != 9);
@@ -184,6 +188,7 @@ impl Profile {
             kitty_keyboard: true,
             modify_other_keys: false,
             linux_console: false,
+            ignored_sgr: vec![5, 6, 8, 53],
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?62;c".to_owned()),
             da2: Some("\x1b[>1;4000;32c".to_owned()),
@@ -221,6 +226,7 @@ impl Profile {
             kitty_keyboard: false,
             modify_other_keys: false,
             linux_console: false,
+            ignored_sgr: Vec::new(),
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?62;1;4c".to_owned()),
             da2: Some("\x1b[>1;115;0c".to_owned()),
@@ -252,6 +258,7 @@ impl Profile {
             kitty_keyboard: true,
             modify_other_keys: false,
             linux_console: false,
+            ignored_sgr: Vec::new(),
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c".to_owned()),
             da2: Some("\x1b[>0;10;1c".to_owned()),
@@ -286,6 +293,7 @@ impl Profile {
             linux_console: false,
             keys: KeyEncoding::Tmux,
             da1: Some("\x1b[?1;2c".to_owned()),
+            ignored_sgr: Vec::new(),
             da2: Some("\x1b[>84;0;0c".to_owned()),
             xtversion: Some("tmux 3.4".to_owned()),
             cursor_report: true,
@@ -315,6 +323,7 @@ impl Profile {
             linux_console: true,
             keys: KeyEncoding::LinuxConsole,
             da1: Some("\x1b[?6c".to_owned()),
+            ignored_sgr: Vec::new(),
             da2: None,
             xtversion: None,
             cursor_report: true,

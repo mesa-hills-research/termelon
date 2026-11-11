@@ -431,6 +431,7 @@ impl Emulator {
                     self.reset_pen();
                     true
                 }
+                _ if self.profile.ignored_sgr.contains(&p) => true,
                 _ => sgr_simple(pen, p),
             };
             known &= ok;

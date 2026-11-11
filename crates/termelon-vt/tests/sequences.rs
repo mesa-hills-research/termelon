@@ -583,6 +583,15 @@ fn sgr_attributes_and_their_resets() {
     assert!(cleared.is_default());
 }
 
+/// kitty takes blink, hidden and overline and draws none of them.
+#[test]
+fn sgr_a_profile_ignores() {
+    let term = run_as(Profile::kitty(), 5, 1, b"\x1b[1;5;8;53mA\x1b[6mB");
+    let style = term.pen();
+    assert!(style.bold);
+    assert!(!style.blink && !style.rapid_blink && !style.hidden && !style.overline);
+}
+
 #[test]
 fn sgr_22_clears_bold_and_dim_together() {
     let style = pen(b"\x1b[1;2m\x1b[22m");

@@ -1435,13 +1435,15 @@ proptest! {
     }
 
     /// The same on kitty with each quirk a terminal may have, with the capabilities a probe of
-    /// that terminal would report, and scroll detection off where it can't scroll a region.
+    /// that terminal would report, and scroll detection off where it can't scroll a region. This
+    /// kitty draws the attributes the real one ignores, since the buffer has them all.
     #[test]
     fn the_terminal_shows_every_frame_whatever_its_quirks(
         frames in prop::collection::vec(frame(), 1..5),
     ) {
         for quirk in Quirk::ALL {
-            let vt = Profile::kitty().with_quirk(quirk);
+            let kitty = Profile { ignored_sgr: Vec::new(), ..Profile::kitty() };
+            let vt = kitty.with_quirk(quirk);
             let profile = WidthProfile {
                 joins_emoji: vt.width.joins_emoji,
                 vs16_widens: vt.width.vs16_widens,
