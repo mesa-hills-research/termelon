@@ -117,6 +117,7 @@ pub(crate) trait Decode: Send + 'static {
     fn has_held(&self) -> bool;
     fn flush_held(&mut self, out: &mut Vec<Decoded>);
     fn expect(&mut self, query: Query);
+    fn cancel_expected(&mut self);
     fn decode_records(&mut self, records: &[InputRecord], out: &mut Vec<Decoded>);
 }
 
@@ -143,6 +144,10 @@ impl Decode for Decoder {
 
     fn expect(&mut self, query: Query) {
         Decoder::expect(self, query);
+    }
+
+    fn cancel_expected(&mut self) {
+        Decoder::cancel_expected(self);
     }
 
     fn decode_records(&mut self, records: &[InputRecord], out: &mut Vec<Decoded>) {

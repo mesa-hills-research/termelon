@@ -551,6 +551,37 @@ fn an_expected_cursor_report_is_no_key() {
     std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     nothing_more(&shared);
+    // A probe that stopped waiting cancels it, and the next report is the key again.
+    reader.expect(crate::event::decode::Query::CursorPosition);
+    reader.cancel_expected();
+    std::thread::sleep(Duration::from_millis(50));
+    fake.type_in(&vt_records("\x1b[1;5R"));
+    assert_eq!(next(&shared), key(KeyCode::F(3), KeyModifiers::CONTROL));
+}
+
+/// Replies go to the reply slot while the probe waits, and nowhere otherwise.
+#[test]
+fn replies_go_to_the_reply_slot_while_it_is_open() {
+    use crate::event::decode::Reply;
+    let fake = Fake::new();
+    let settings = Arc::new(Settings::default());
+    settings.set_mode(InputMode::Vt);
+    let (_reader, shared) = reading(&fake, &settings, Duration::ZERO);
+    shared.replies.open();
+    fake.type_in(&vt_records("\x1b[?1u\x1b[?62;22c"));
+    assert!(shared.replies.wait(LONG, |replies| replies.len() == 2));
+    assert_eq!(
+        shared.replies.close(),
+        [
+            Reply::KittyKeyboard(1),
+            Reply::Da1 {
+                attributes: vec![62, 22]
+            }
+        ]
+    );
+    fake.type_in(&vt_records("\x1b[?62;22c"));
+    nothing_more(&shared);
+    assert!(shared.replies.close().is_empty());
 }
 
 #[test]
@@ -661,6 +692,14 @@ fn a_screen_takes_the_console_and_gives_it_back_exactly() {
     std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     nothing_more(screen.shared());
+    screen.expect(crate::event::decode::Query::CursorPosition);
+    screen.cancel_expected();
+    std::thread::sleep(Duration::from_millis(50));
+    fake.type_in(&vt_records("\x1b[1;5R"));
+    assert_eq!(
+        next(screen.shared()),
+        key(KeyCode::F(3), KeyModifiers::CONTROL)
+    );
     screen.set_input(InputMode::Records).unwrap();
     assert_eq!(fake.saved().input & ENABLE_VIRTUAL_TERMINAL_INPUT, 0);
     assert_eq!(
