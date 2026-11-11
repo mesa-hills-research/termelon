@@ -192,21 +192,24 @@ impl Emulator {
     }
 
     /// modifyOtherKeys, as `CSI 27 ; mods ; code ~`. Level 2 sends it for every key with a
-    /// modifier but shift on a character. Level 1 sends it only where the legacy bytes would lose a
-    /// modifier.
+    /// modifier, Shift on a character too, but Shift+Tab, which stays `CSI Z`, and Ctrl+Backspace,
+    /// which stays BS and is BS's code with other modifiers, as xterm 390 does (`ModifyOtherKeys` in
+    /// its `input.c`, and a run on Ubuntu 24.04). Level 1 sends it only where the legacy bytes would
+    /// lose a modifier.
     fn modify_other_key(&self, key: Key, mods: Mods) -> Option<Vec<u8>> {
         if self.modify_other_keys == 0 || mods.is_empty() {
             return None;
         }
+        let level_2 = self.modify_other_keys >= 2;
         let code = match key {
             Key::Enter => 13,
             Key::Tab => 9,
+            Key::Backspace if level_2 && mods.contains(Mods::CTRL) => 8,
             Key::Backspace => 127,
             Key::Escape => 27,
             Key::Char(c) => u32::from(typed_char(c, mods)),
             _ => return None,
         };
-        let only_shift = mods == Mods::SHIFT;
         let lost = match key {
             Key::Enter => mods != Mods::ALT,
             Key::Tab => mods.contains(Mods::CTRL),
@@ -220,9 +223,11 @@ impl Emulator {
             }
             _ => false,
         };
-        let send = match self.modify_other_keys {
-            1 => lost,
-            _ => !(only_shift && matches!(key, Key::Char(_))),
+        let send = match key {
+            _ if !level_2 => lost,
+            Key::Tab => mods != Mods::SHIFT,
+            Key::Backspace => !mods.without(Mods::CTRL).is_empty(),
+            _ => true,
         };
         send.then(|| format!("\x1b[27;{};{code}~", u32::from(mods.bits()) + 1).into_bytes())
     }
