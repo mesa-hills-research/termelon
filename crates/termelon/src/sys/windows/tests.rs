@@ -1245,23 +1245,30 @@ mod real {
             ],
         )
         .unwrap();
+        // (A console window sends focus records of its own as it gains and loses focus, so the
+        // test looks past them to the last one, which is the test's.)
+        let mut events = Vec::new();
+        while events.last() != Some(&Event::FocusGained)
+            || !events.iter().any(|event| matches!(event, Event::Mouse(_)))
+        {
+            events.push(next(screen.shared()));
+        }
+        let typed: Vec<&Event> = events
+            .iter()
+            .filter(|event| !matches!(event, Event::FocusGained | Event::FocusLost))
+            .collect();
+        assert_eq!(typed.len(), 3, "{events:?}");
+        assert_eq!(typed[0], &key(KeyCode::Enter, KeyModifiers::SHIFT));
+        assert!(matches!(typed[1], Event::Key(release) if release.code == KeyCode::Enter));
         assert_eq!(
-            next(screen.shared()),
-            key(KeyCode::Enter, KeyModifiers::SHIFT)
-        );
-        assert!(
-            matches!(next(screen.shared()), Event::Key(release) if release.code == KeyCode::Enter)
-        );
-        assert_eq!(
-            next(screen.shared()),
-            Event::Mouse(MouseEvent::new(
+            typed[2],
+            &Event::Mouse(MouseEvent::new(
                 MouseEventKind::Down(MouseButton::Left),
                 3,
                 0,
                 KeyModifiers::NONE
             ))
         );
-        assert_eq!(next(screen.shared()), Event::FocusGained);
         assert!(screen.close(b"", LONG));
         assert_eq!(found(&probe), before);
     }
@@ -1301,7 +1308,9 @@ mod real {
     }
 
     /// UTF-8 the writer gets in pieces that end inside characters reaches the screen whole, as
-    /// UTF-16 through `WriteConsoleW`, whatever the code page.
+    /// UTF-16 through `WriteConsoleW`, whatever the code page. `ReadConsoleOutputCharacterW` gives
+    /// a wide character once for its two cells, and U+FFFD for one outside the BMP, so the emoji
+    /// reads back as one U+FFFD, where halves written apart would be two.
     #[test]
     #[ignore = "needs a real console"]
     fn split_utf8_reaches_the_screen_whole() {
@@ -1322,8 +1331,10 @@ mod real {
         let shown = read_text(&conout(), 0, window.bottom, 8).unwrap();
         out.write_all(b"\r\x1b[2K").unwrap();
         modes.restore().unwrap();
-        assert!(shown.starts_with("é日"), "{shown:?}");
-        assert!(shown.contains('😀') && shown.contains('x'), "{shown:?}");
+        let shown: Vec<char> = shown.chars().collect();
+        assert!(shown.starts_with(&['é', '日']), "{shown:?}");
+        assert!(matches!(shown.get(2), Some('😀' | '\u{fffd}')), "{shown:?}");
+        assert_eq!(shown.get(3), Some(&'x'), "{shown:?}");
     }
 
     /// Spike S2: what the console delivers for the probe's queries in each input mode. In virtual
