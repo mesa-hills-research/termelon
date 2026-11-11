@@ -29,6 +29,11 @@ use crate::restore::Enabled;
 use crate::sys::{Next, Shared};
 use crate::terminal::MouseMode;
 
+#[cfg(windows)]
+mod pseudo;
+#[cfg(windows)]
+mod record;
+
 const LONG: Duration = Duration::from_secs(5);
 
 /// A console in memory: its modes and window, the records waiting in its input, and
@@ -1278,5 +1283,18 @@ mod real {
                 "{mode:?}: {decoded:?}"
             );
         }
+    }
+
+    /// What the console gives for each of the probe's queries and for key records typed with
+    /// `WriteConsoleInputW`, in each input mode, and what the library makes of it. It prints the
+    /// report, which says which console it was.
+    #[test]
+    #[ignore = "needs a real console"]
+    fn how_a_console_delivers_replies_and_keys() {
+        let mut steps = record::queries();
+        steps.extend(record::typed());
+        let mut report = record::host();
+        report.push_str(&record::record(&steps));
+        println!("{report}");
     }
 }
