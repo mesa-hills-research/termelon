@@ -258,7 +258,9 @@ pub(crate) struct FocusRecord {
 ```
 
 A key record with a repeat count of n gives n events, AltGr arrives as Ctrl+Alt with a printable
-character and decodes as that character, and a `WindowSizeRecord` gives `Event::Resize`.
+character and decodes as that character, and a `WindowSizeRecord` gives `Event::Resize`. A modifier
+key pressed or released alone gives `KeyCode::Modifier`, and an Alt code (Alt held while digits are
+typed on the keypad) gives its character when Alt comes up.
 
 ### The encoder
 

@@ -25,6 +25,14 @@ use crate::layout::Size;
     )
 )]
 pub(crate) mod decode;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the Windows reader, which fills these, isn't built yet"
+    )
+)]
+pub(crate) mod records;
 
 /// Something the terminal reported.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

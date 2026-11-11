@@ -94,4 +94,68 @@ proptest! {
         let decoded = decode(&bytes);
         prop_assert!(decoded.ends_with(&expected), "{:?} ended {:?}", known, decoded);
     }
+
+    #[test]
+    fn random_windows_records_never_panic(records in prop::collection::vec(record(), 0..64)) {
+        let mut decoder = Decoder::new(DecoderOptions::default());
+        let mut out = Vec::new();
+        decoder.decode_records(&records, &mut out);
+        let presses: usize = records
+            .iter()
+            .map(|record| match record {
+                InputRecord::Key(key) => usize::from(key.repeat.max(1)),
+                _ => 3,
+            })
+            .sum();
+        prop_assert!(out.len() <= presses);
+    }
+}
+
+fn record() -> impl Strategy<Value = InputRecord> {
+    use crate::event::records::{FocusRecord, KeyRecord, MouseRecord, WindowSizeRecord};
+    use crate::layout::Size;
+    prop_oneof![
+        (
+            any::<bool>(),
+            0..4u16,
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u32>()
+        )
+            .prop_map(
+                |(key_down, repeat, virtual_key, scan_code, unicode, control_state)| {
+                    InputRecord::Key(KeyRecord {
+                        key_down,
+                        repeat,
+                        virtual_key,
+                        scan_code,
+                        unicode,
+                        control_state,
+                    })
+                }
+            ),
+        (
+            any::<u16>(),
+            any::<u16>(),
+            any::<u32>(),
+            any::<u32>(),
+            0..16u32
+        )
+            .prop_map(|(column, row, button_state, control_state, event_flags)| {
+                InputRecord::Mouse(MouseRecord {
+                    column,
+                    row,
+                    button_state,
+                    control_state,
+                    event_flags,
+                })
+            }),
+        (any::<u16>(), any::<u16>()).prop_map(|(width, height)| {
+            InputRecord::WindowSize(WindowSizeRecord {
+                size: Size::new(width, height),
+            })
+        }),
+        any::<bool>().prop_map(|focused| InputRecord::Focus(FocusRecord { focused })),
+    ]
 }

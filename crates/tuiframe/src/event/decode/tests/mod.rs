@@ -8,6 +8,7 @@ mod paste;
 mod properties;
 mod replies;
 mod tokens;
+mod windows;
 
 use super::*;
 use crate::event::KeyEventKind;

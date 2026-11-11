@@ -2,6 +2,7 @@
 //! Where the two differ, the row says why.
 
 use super::*;
+use crate::event::records::{InputRecord, KeyRecord, control};
 use crate::event::{MouseButton, MouseEvent, MouseEventKind};
 
 const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -72,6 +73,41 @@ fn a_lone_esc_is_esc_once_nothing_more_is_pending() {
 fn releases_arrive_for_the_program_to_skip() {
     let release = |code| key_kind(code, NONE, KeyEventKind::Release);
     assert_eq!(decode(b"\x1b[97;1:3u"), [release(KeyCode::Char('a'))]);
+    let mut decoder = Decoder::new(DecoderOptions::default());
+    let mut out = Vec::new();
+    let record = |key_down| {
+        InputRecord::Key(KeyRecord {
+            key_down,
+            repeat: 1,
+            virtual_key: 0x0d,
+            scan_code: 0x1c,
+            unicode: 0x0d,
+            control_state: 0,
+        })
+    };
+    decoder.decode_records(&[record(true), record(false)], &mut out);
+    assert_eq!(out, [key(KeyCode::Enter, NONE), release(KeyCode::Enter)]);
+}
+
+#[test]
+fn windows_shift_enter_and_shift_tab() {
+    let mut decoder = Decoder::new(DecoderOptions::default());
+    let mut out = Vec::new();
+    let record = |virtual_key, unicode| {
+        InputRecord::Key(KeyRecord {
+            key_down: true,
+            repeat: 1,
+            virtual_key,
+            scan_code: 0,
+            unicode,
+            control_state: control::SHIFT_PRESSED,
+        })
+    };
+    decoder.decode_records(&[record(0x0d, 0x0d), record(0x09, 0x09)], &mut out);
+    assert_eq!(
+        out,
+        [key(KeyCode::Enter, SHIFT), key(KeyCode::BackTab, SHIFT)]
+    );
 }
 
 /// crossterm's tests of its Unix parser, with the results it gives.

@@ -1,15 +1,19 @@
-//! The decoder, a pure state machine from the terminal's bytes to [`Event`]s and the replies to the
-//! library's queries. It does no I/O, and the reader thread owns one.
+//! The decoder, a pure state machine from the terminal's bytes, or Windows console records, to
+//! [`Event`]s and the replies to the library's queries. It does no I/O, and the reader thread owns
+//! one.
 
 mod keys;
 mod mouse;
 mod replies;
 mod tokenizer;
+mod windows;
 
 #[cfg(test)]
 mod tests;
 
 use self::tokenizer::{Csi, StringKind, Token, Tokenizer};
+use self::windows::WindowsState;
+use super::records::InputRecord;
 use super::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crate::caps::Rgb;
 
@@ -88,11 +92,12 @@ pub(crate) enum ColorSlot {
     Background,
 }
 
-/// The tokenizer's state and the outstanding queries.
+/// The tokenizer's state, the outstanding queries and what Windows records need remembered.
 #[derive(Debug)]
 pub(crate) struct Decoder {
     tokenizer: Tokenizer,
     context: Context,
+    windows: WindowsState,
 }
 
 /// What decoding a token needs besides the token.
@@ -111,6 +116,7 @@ impl Decoder {
                 erase: if options.erase == 0x08 { 0x08 } else { 0x7f },
                 cursor_reports: 0,
             },
+            windows: WindowsState::default(),
         }
     }
 
@@ -147,6 +153,13 @@ impl Decoder {
             Query::CursorPosition => {
                 self.context.cursor_reports = self.context.cursor_reports.saturating_add(1);
             }
+        }
+    }
+
+    /// Decodes Windows console records into the same events as [`Decoder::feed`] gives for bytes.
+    pub(crate) fn decode_records(&mut self, records: &[InputRecord], out: &mut Vec<Decoded>) {
+        for record in records {
+            self.windows.decode(record, self.context.erase, out);
         }
     }
 
