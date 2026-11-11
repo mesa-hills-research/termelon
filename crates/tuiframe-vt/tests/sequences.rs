@@ -1,6 +1,6 @@
 //! One test for each sequence the emulator knows, with the screen it should leave.
 
-use tuiframe_vt::{Color, CursorShape, Emulator, Event, Pos, Profile, Underline};
+use tuiframe_vt::{Color, CursorShape, Emulator, Event, Pos, Profile, Underline, WidthRules};
 
 #[expect(
     clippy::unwrap_used,
@@ -223,6 +223,29 @@ fn a_flag_is_two_cells() {
     let term = run(5, 1, "\u{1f1fa}\u{1f1f8}x".as_bytes());
     assert_eq!(term.cell(0, 0).unwrap().text(), "\u{1f1fa}\u{1f1f8}");
     assert_eq!(term.rows(), ["\u{1f1fa}\u{1f1f8}x"]);
+}
+
+#[test]
+fn ambiguous_characters_take_two_cells_where_the_profile_says() {
+    let wide = Profile {
+        width: WidthRules {
+            ambiguous_wide: true,
+            ..WidthRules::default()
+        },
+        ..Profile::xterm()
+    };
+    let term = run_as(wide, 5, 1, "éa".as_bytes());
+    assert_eq!(term.cell(0, 0).unwrap().width(), 2);
+    assert_eq!(term.rows(), ["éa"]);
+    assert_eq!(at(&term), (3, 0));
+    assert_eq!(at(&run(5, 1, "éa".as_bytes())), (2, 0));
+}
+
+#[test]
+fn halfwidth_sound_marks_take_a_cell() {
+    let term = run(5, 1, "\u{ff76}\u{ff9e}a".as_bytes());
+    assert_eq!(term.rows(), ["\u{ff76}\u{ff9e}a"]);
+    assert_eq!(at(&term), (3, 0));
 }
 
 #[test]

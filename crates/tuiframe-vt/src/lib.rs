@@ -66,6 +66,8 @@
 //! - Erasing part of a wide character blanks all of it. Alacritty leaves the other half.
 //! - An emoji ZWJ sequence or a flag is one cell as wide as the cluster. Alacritty gives each emoji
 //!   a cell of its own, with the same text and cursor.
+//! - U+FF9E and U+FF9F, the halfwidth katakana sound marks, take a cell, as they do in terminals.
+//!   The unicode-width that Alacritty measures with gives them none.
 //! - A combining mark at the left edge, with nothing before it, is dropped. Alacritty joins it to
 //!   the cell under the cursor.
 //! - A wide character that doesn't fit with autowrap off moves left until it fits, as in kitty.
@@ -107,6 +109,7 @@
 //!   ids are one run.
 //! - Every line ends with `\n`, the last one too.
 
+mod ambiguous;
 mod emulator;
 mod event;
 mod grid;

@@ -532,6 +532,13 @@ fn quirk_grapheme_clusters_take_one_cell() {
 }
 
 #[test]
+fn quirk_halfwidth_sound_marks_take_a_cell() {
+    let (ours, theirs) = both(5, 1, "\u{ff76}\u{ff9e}a".as_bytes());
+    assert_eq!(ours.rows, theirs.rows);
+    assert_eq!((ours.cursor, theirs.cursor), ((3, 0), (2, 0)));
+}
+
+#[test]
 fn quirk_a_combining_mark_at_the_left_edge_is_dropped() {
     let (ours, theirs) = rows_of_both(3, 1, "ab\x1b[1;1H\u{301}".as_bytes());
     assert_eq!(ours, ["ab"]);
