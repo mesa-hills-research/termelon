@@ -5,6 +5,8 @@
 mod macos;
 #[cfg(unix)]
 pub(crate) mod unix;
+#[cfg(any(windows, test))]
+pub(crate) mod windows;
 
 use std::collections::VecDeque;
 use std::io;

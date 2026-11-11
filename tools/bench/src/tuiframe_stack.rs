@@ -20,11 +20,7 @@ const OUTPUT_CAPACITY: usize = 4 << 20;
 
 /// Clusters measured as ratatui measures them, by unicode-width's width of the whole cluster, so
 /// both stacks lay out the same frames.
-const PROFILE: WidthProfile = WidthProfile {
-    joins_emoji: true,
-    vs16_widens: true,
-    ambiguous_wide: false,
-};
+const PROFILE: WidthProfile = WidthProfile::new(true, true, false);
 
 /// tuiframe drawing into memory.
 #[derive(Debug)]
@@ -44,18 +40,17 @@ impl TuiframeStack {
         let area = Rect::new(0, 0, width, height);
         let mut encoder = Encoder::new();
         encoder.set_scroll_detection(scroll);
+        // What the ratatui stack writes. It has no hyperlinks or underline shapes.
+        let mut caps = Capabilities::default();
+        caps.colors = ColorDepth::TrueColor;
+        caps.synchronized_output = Support::Yes;
+        caps.underline_color = Support::Yes;
+        caps.cursor_shape = Support::Yes;
         TuiframeStack {
             front: Buffer::with_width_profile(area, PROFILE),
             back: Buffer::with_width_profile(area, PROFILE),
             encoder,
-            // What the ratatui stack writes. It has no hyperlinks or underline shapes.
-            caps: Capabilities {
-                colors: ColorDepth::TrueColor,
-                synchronized_output: Support::Yes,
-                underline_color: Support::Yes,
-                cursor_shape: Support::Yes,
-                ..Capabilities::default()
-            },
+            caps,
             out: Vec::with_capacity(OUTPUT_CAPACITY),
             text: String::new(),
         }

@@ -21,6 +21,8 @@ use crate::event::{
 /// What decoding needs remembered between records.
 #[derive(Debug, Default)]
 pub(super) struct WindowsState {
+    /// The modifier and lock keys alone and the keypad's middle key are reported.
+    all_keys: bool,
     /// The mouse buttons held at the last press or release, to tell which changed.
     buttons: u32,
     /// The first half of a surrogate pair, from a key-down record and from a key-up record.
@@ -106,6 +108,13 @@ mod vk {
 const RIGHT_SHIFT_SCAN: u16 = 0x36;
 
 impl WindowsState {
+    pub(super) fn new(all_keys: bool) -> Self {
+        Self {
+            all_keys,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn decode(&mut self, record: &InputRecord, erase: u8, out: &mut Vec<Decoded>) {
         match record {
             InputRecord::Key(key) => self.key(key, erase, out),
@@ -158,6 +167,17 @@ impl WindowsState {
                 code
             }
         };
+        let alone = matches!(
+            code,
+            KeyCode::Modifier(_)
+                | KeyCode::CapsLock
+                | KeyCode::NumLock
+                | KeyCode::ScrollLock
+                | KeyCode::KeypadBegin
+        );
+        if alone && !self.all_keys {
+            return;
+        }
         let count = if record.key_down {
             record.repeat.max(1)
         } else {

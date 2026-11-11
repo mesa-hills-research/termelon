@@ -32,6 +32,8 @@ pub(crate) struct Row {
     pub(crate) cursor_shape: Support,
     pub(crate) title: Support,
     pub(crate) title_stack: Support,
+    /// xterm's modifyOtherKeys, which the library turns on where the kitty protocol isn't.
+    pub(crate) modify_other_keys: Support,
     pub(crate) width_profile: WidthProfile,
     pub(crate) glyphs: GlyphSupport,
 }
@@ -55,6 +57,7 @@ const CURRENT: Row = Row {
     cursor_shape: Yes,
     title: Yes,
     title_stack: Unknown,
+    modify_other_keys: No,
     width_profile: WidthProfile {
         joins_emoji: false,
         vs16_widens: false,
@@ -74,6 +77,7 @@ pub(crate) const ROWS: &[Row] = &[
         underline_styles: No,
         underline_color: Unknown,
         title_stack: Yes,
+        modify_other_keys: Yes,
         ..CURRENT
     },
     Row {
@@ -113,6 +117,7 @@ pub(crate) const ROWS: &[Row] = &[
         source: "WezTerm's docs and a measured run of a 2026-10-10 nightly, which joins emoji \
                  sequences",
         grapheme_clustering: Yes,
+        modify_other_keys: Yes,
         width_profile: WidthProfile {
             joins_emoji: true,
             vs16_widens: false,
@@ -130,8 +135,9 @@ pub(crate) const ROWS: &[Row] = &[
     Row {
         name: "tmux",
         source: "tmux's CHANGES and man page. It passes true colour, styled underlines and \
-                 underline colour on only where the outer terminal's features say so, and OSC 52 \
-                 only with set-clipboard on",
+                 underline colour on only where the outer terminal's features say so, OSC 52 only \
+                 with set-clipboard on, and modified keys only with extended-keys on",
+        modify_other_keys: Unknown,
         colors: ColorDepth::Ansi256,
         synchronized_output: No,
         underline_styles: Unknown,
@@ -143,6 +149,7 @@ pub(crate) const ROWS: &[Row] = &[
         name: "tmux",
         since: Some("3.7"),
         source: "tmux's CHANGES, which add mode 2026 in 3.7",
+        modify_other_keys: Unknown,
         colors: ColorDepth::Ansi256,
         underline_styles: Unknown,
         underline_color: Unknown,
@@ -209,6 +216,7 @@ pub(crate) const ROWS: &[Row] = &[
         name: "iterm2",
         source: "iTerm2's docs and a measured run of iTerm2 3.6.11, which joins emoji sequences \
                  and widens VS16",
+        modify_other_keys: Yes,
         width_profile: WidthProfile {
             joins_emoji: true,
             vs16_widens: true,

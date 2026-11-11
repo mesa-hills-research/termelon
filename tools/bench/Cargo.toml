@@ -23,5 +23,9 @@ stats_alloc = "0.1.10"
 # The stack under test, its buffer and its encoder, which the feature makes reachable here.
 tuiframe = { workspace = true, features = ["unstable-encoder"] }
 
+[dev-dependencies]
+# The widgets the tests draw beside ratatui's, to check that they draw the same.
+tuiframe.workspace = true
+
 [lints]
 workspace = true

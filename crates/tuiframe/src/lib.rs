@@ -8,6 +8,7 @@
 //! | [`text`] | [`Span`], [`Line`] and [`Text`], and the measure of text in cells |
 //! | [`style`] | [`Color`], [`Modifier`], [`UnderlineStyle`] and [`Style`] |
 //! | [`layout`] | [`Position`], [`Size`], [`Rect`], and [`Layout`] by [`Constraint`]s |
+//! | [`widgets`] | [`Widget`], and the [`Clear`], [`Block`] and [`Paragraph`] widgets |
 //! | [`event`] | [`Event`] and the key and mouse types in it |
 //! | [`caps`] | [`Capabilities`], what the terminal supports |
 //! | [`terminal`] | `Terminal`, opened with [`Options`], and its [`Events`] |
@@ -41,6 +42,7 @@ pub mod text;
 #[cfg(feature = "unstable-encoder")]
 #[doc(hidden)]
 pub mod unstable;
+pub mod widgets;
 
 pub use buffer::Buffer;
 pub use caps::{Capabilities, WidthProfile};
@@ -54,3 +56,4 @@ pub use terminal::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Re
 #[cfg(unix)]
 pub use terminal::{Terminal, terminal_size};
 pub use text::{Line, Span, Text};
+pub use widgets::{Block, BorderSet, Borders, Clear, Padding, Paragraph, Widget, Wrap};

@@ -17,7 +17,7 @@
 //!
 //! [`graphemes`] and [`width`] measure text as the buffer does, cluster by cluster under the
 //! terminal's [`WidthProfile`], so a program's wrapping, cursor columns and alignment agree with
-//! the cells it draws.
+//! the cells it draws. [`wrap()`] breaks a line into rows by words with the same measure.
 
 use std::borrow::Cow;
 use std::cell::Cell as StdCell;
@@ -32,6 +32,9 @@ use crate::layout::Alignment;
 use crate::style::Style;
 
 mod tables;
+pub(crate) mod wrap;
+
+pub use wrap::{wrap, wrap_with};
 
 /// A piece of text in one style.
 ///
@@ -597,7 +600,7 @@ pub fn width_profile() -> WidthProfile {
 /// use tuiframe::caps::WidthProfile;
 /// use tuiframe::text::{self, Span};
 ///
-/// let kitty = WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false };
+/// let kitty = WidthProfile::new(true, true, false);
 /// let family = Span::raw("👨\u{200d}👩\u{200d}👧");
 /// assert_eq!(text::with_width_profile(kitty, || family.width()), 2);
 /// assert_eq!(text::with_width_profile(WidthProfile::default(), || family.width()), 6);
@@ -669,7 +672,7 @@ pub fn width(text: &str) -> usize {
 ///
 /// let family = "👨\u{200d}👩\u{200d}👧";
 /// assert_eq!(text::width_with(family, WidthProfile::default()), 6);
-/// let joining = WidthProfile { joins_emoji: true, ..WidthProfile::default() };
+/// let joining = WidthProfile::new(true, false, false);
 /// assert_eq!(text::width_with(family, joining), 2);
 /// ```
 pub fn width_with(text: &str, profile: WidthProfile) -> usize {

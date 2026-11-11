@@ -8,11 +8,13 @@ use std::fmt;
 use std::io;
 use std::time::Duration;
 
-use crate::caps::Capabilities;
+use crate::caps::{Capabilities, KeyboardSupport, Support};
 use crate::output::CompletedFrame;
+use crate::restore::Enabled;
 
 /// What [`Terminal::draw`] did.
 #[derive(Debug)]
+#[non_exhaustive]
 #[must_use = "a held frame is drawn again once the terminal takes the last one"]
 pub enum Drawn<'a> {
     /// The terminal hasn't taken the last frame yet, so this one wasn't drawn. Draw again once
@@ -43,16 +45,30 @@ pub enum MouseMode {
 pub enum KeyboardRequest {
     /// The legacy encodings, where Shift+Enter arrives as Enter.
     Legacy,
-    /// The protocol's first flag, which tells apart keys the legacy encodings merge, such as
-    /// Shift+Enter and Enter, or Ctrl+I and Tab.
+    /// The protocol's flags 1 and 4, which tell apart keys the legacy encodings merge, such as
+    /// Shift+Enter and Enter, or Ctrl+I and Tab, and give the character a shifted key types.
+    /// Where the terminal lacks the protocol and is known to take xterm's modifyOtherKeys, that
+    /// is turned on instead.
     #[default]
     Disambiguate,
     /// These flags, of those the terminal has, as in kitty's `CSI > flags u`.
     Flags(u8),
 }
 
-/// The choices made at open. The defaults suit most full-screen programs.
+/// The choices made at open. The defaults suit most full-screen programs, and each field has a
+/// builder method of its name.
+///
+/// ```
+/// use std::time::Duration;
+/// use tuiframe::{MouseMode, Options};
+///
+/// let options = Options::default()
+///     .mouse(MouseMode::Off)
+///     .escape_timeout(Duration::from_millis(25));
+/// assert!(options.bracketed_paste);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Options {
     /// Which mouse reports to turn on. `ButtonsAndDrags` by default.
     pub mouse: MouseMode,
@@ -65,16 +81,26 @@ pub struct Options {
     pub keyboard: KeyboardRequest,
     /// Saves the window's title on xterm's title stack and puts it back at close. On by default.
     pub save_title: bool,
-    /// How long the startup probe waits for a terminal that doesn't answer. 300 ms by default.
-    pub probe_timeout: Duration,
+    /// How long the startup probe waits for a terminal that doesn't answer. By default 500 ms,
+    /// or 1.5 s over ssh (`SSH_CONNECTION` or `SSH_TTY` set), where a round trip takes longer.
+    pub probe_timeout: Option<Duration>,
     /// Measures how the terminal draws emoji sequences and East Asian ambiguous characters, which
     /// costs a second round trip at open. Off by default.
     pub width_probes: bool,
-    /// How long a lone ESC waits for a following byte before it's the Esc key. Zero by default,
-    /// which makes it Esc once nothing more is ready.
-    pub escape_timeout: Duration,
+    /// How long a lone ESC waits for a following byte before it's the Esc key. By default 20 ms,
+    /// or 100 ms where the kitty keyboard protocol is on, since the Esc key then sends a sequence
+    /// of its own and a lone ESC is most likely the start of one that came split.
+    pub escape_timeout: Option<Duration>,
     /// Skips the probe and uses these, for tests and setups the probe gets wrong.
     pub capabilities: Option<Capabilities>,
+    /// Installs [`install_panic_hook`](crate::install_panic_hook) at open, so a panic gives the
+    /// terminal back before its message prints. On by default. A program with its own rules for
+    /// which panics end it turns this off and builds its hook on [`RestoreHandle`](crate::RestoreHandle).
+    pub panic_hook: bool,
+    /// Gives the terminal back on SIGTERM, SIGHUP, SIGINT and SIGQUIT, then lets the signal end
+    /// the program as it would have. Off by default, since a program usually has its own policy
+    /// for these. Once the terminal closes, they act as they did before.
+    pub restore_on_signals: bool,
 }
 
 impl Default for Options {
@@ -85,11 +111,70 @@ impl Default for Options {
             focus_events: true,
             keyboard: KeyboardRequest::Disambiguate,
             save_title: true,
-            probe_timeout: Duration::from_millis(300),
+            probe_timeout: None,
             width_probes: false,
-            escape_timeout: Duration::ZERO,
+            escape_timeout: None,
             capabilities: None,
+            panic_hook: true,
+            restore_on_signals: false,
         }
+    }
+}
+
+macro_rules! builders {
+    ($($(#[$doc:meta])* $field:ident: $ty:ty,)*) => {
+        impl Options {
+            $(
+                $(#[$doc])*
+                #[must_use]
+                pub fn $field(mut self, $field: $ty) -> Self {
+                    self.$field = $field;
+                    self
+                }
+            )*
+        }
+    };
+}
+
+builders! {
+    /// Sets [`mouse`](Options::mouse).
+    mouse: MouseMode,
+    /// Sets [`bracketed_paste`](Options::bracketed_paste).
+    bracketed_paste: bool,
+    /// Sets [`focus_events`](Options::focus_events).
+    focus_events: bool,
+    /// Sets [`keyboard`](Options::keyboard).
+    keyboard: KeyboardRequest,
+    /// Sets [`save_title`](Options::save_title).
+    save_title: bool,
+    /// Sets [`width_probes`](Options::width_probes).
+    width_probes: bool,
+    /// Sets [`panic_hook`](Options::panic_hook).
+    panic_hook: bool,
+    /// Sets [`restore_on_signals`](Options::restore_on_signals).
+    restore_on_signals: bool,
+}
+
+impl Options {
+    /// Sets [`escape_timeout`](Options::escape_timeout).
+    #[must_use]
+    pub fn escape_timeout(mut self, timeout: Duration) -> Self {
+        self.escape_timeout = Some(timeout);
+        self
+    }
+
+    /// Sets [`probe_timeout`](Options::probe_timeout).
+    #[must_use]
+    pub fn probe_timeout(mut self, timeout: Duration) -> Self {
+        self.probe_timeout = Some(timeout);
+        self
+    }
+
+    /// Sets [`capabilities`](Options::capabilities), which skips the probe.
+    #[must_use]
+    pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
+        self.capabilities = Some(capabilities);
+        self
     }
 }
 
@@ -137,6 +222,37 @@ impl From<io::Error> for Error {
 /// A result with an [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// What to turn on for `options` in a terminal with `caps`. Private modes go out where support
+/// is unknown, since terminals ignore modes they don't know.
+pub(crate) fn enabled(options: &Options, caps: &Capabilities) -> Enabled {
+    let has = |support: Support| support != Support::No;
+    let keyboard = match (options.keyboard, caps.keyboard) {
+        (KeyboardRequest::Disambiguate, KeyboardSupport::Kitty { flags }) => Some(flags & 0b101),
+        (KeyboardRequest::Flags(asked), KeyboardSupport::Kitty { flags }) => Some(flags & asked),
+        _ => None,
+    };
+    Enabled {
+        alternate_screen: has(caps.alternate_screen),
+        clear: !has(caps.alternate_screen),
+        mouse: if has(caps.mouse) {
+            options.mouse
+        } else {
+            MouseMode::Off
+        },
+        focus: options.focus_events && has(caps.focus_events),
+        bracketed_paste: options.bracketed_paste && has(caps.bracketed_paste),
+        grapheme_clusters: caps.grapheme_clustering == Support::Yes,
+        theme_reports: false,
+        keyboard: keyboard.filter(|flags| *flags != 0),
+        modify_other_keys: options.keyboard != KeyboardRequest::Legacy
+            && caps.keyboard == KeyboardSupport::ModifyOtherKeys,
+        save_title: options.save_title && has(caps.title_stack),
+        hyperlinks: caps.hyperlinks == Support::Yes,
+        // (Until a frame asks for a shape.)
+        cursor_shape: false,
+    }
+}
+
 #[cfg(unix)]
 pub use unix::{Terminal, terminal_size};
 
@@ -147,19 +263,30 @@ mod unix {
     use std::os::fd::AsFd;
     use std::time::Duration;
 
-    use super::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Result, base64, crlf};
-    use crate::buffer::Buffer;
+    use super::{Drawn, Error, Events, MouseMode, Options, Result, base64, crlf, enabled};
     use crate::caps::env::Environment;
-    use crate::caps::{self, Capabilities, KeyboardSupport, Support, probe};
+    use crate::caps::{self, Capabilities, Support, probe};
     use crate::event::decode::{Decoder, DecoderOptions, Query, Reply};
-    use crate::frame::Frame;
+    use crate::frame::{Frame, Frames};
     use crate::layout::Rect;
     use crate::layout::Size;
-    use crate::output::encode::Encoder;
-    use crate::output::{CompletedFrame, Cursor, CursorShape};
+    use crate::output::writer::Hold;
+    use crate::output::{Cursor, CursorShape};
     use crate::restore::screen::Screen;
     use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
     use crate::sys::unix::{Signals, Tty, window_size};
+
+    /// How long the probe waits for a terminal that doesn't answer, by default.
+    const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+
+    /// The same over ssh, where a round trip takes longer.
+    const SSH_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
+    /// How long a lone ESC waits for more before it's Esc, by default.
+    const ESCAPE_TIMEOUT: Duration = Duration::from_millis(20);
+
+    /// The same where the kitty keyboard protocol is on, under which the Esc key sends a sequence.
+    const KITTY_ESCAPE_TIMEOUT: Duration = Duration::from_millis(100);
 
     /// The terminal while a program has it.
     ///
@@ -172,13 +299,9 @@ mod unix {
         caps: Capabilities,
         options: Options,
         enabled: Enabled,
-        encoder: Encoder,
-        /// What the terminal shows once every packet so far is written.
-        front: Buffer,
-        /// What the next frame draws into.
-        back: Buffer,
-        /// Where the last frame put the cursor.
-        cursor: Option<Cursor>,
+        frames: Frames,
+        /// The size to take when the terminal says 0x0 or nothing.
+        fallback: Size,
     }
 
     impl std::fmt::Debug for Terminal {
@@ -205,7 +328,11 @@ mod unix {
         /// failed. The terminal is then as it was.
         pub fn open(options: Options) -> Result<Self> {
             let tty = Tty::open().map_err(Error::NoTerminal)?;
-            let terminal = Self::open_on(tty, options, &caps::env::Process, Signals::register()?)?;
+            if options.panic_hook {
+                crate::install_panic_hook();
+            }
+            let signals = Signals::register(options.restore_on_signals)?;
+            let terminal = Self::open_on(tty, options, &caps::env::Process, signals)?;
             // (Text measures as the terminal draws it from now on.)
             crate::text::set_width_profile(terminal.caps.width_profile);
             Ok(terminal)
@@ -227,11 +354,17 @@ mod unix {
                         ..DecoderOptions::default()
                     })
                 },
-                options.escape_timeout,
+                // (The probe's replies may come split, so its lone ESC waits longer.)
+                options.escape_timeout.unwrap_or(KITTY_ESCAPE_TIMEOUT),
                 signals,
             )?;
             let overrides = env.var("TUIFRAME_CAPS");
             let hints = caps::env::hints(env);
+            let probe_timeout = options.probe_timeout.unwrap_or(if hints.ssh {
+                SSH_PROBE_TIMEOUT
+            } else {
+                PROBE_TIMEOUT
+            });
             // (The alternate screen first, so what a terminal prints of a query it can't parse lands
             // on a screen the first frame clears. The Linux console has none.)
             let early = Enabled {
@@ -245,7 +378,7 @@ mod unix {
                 caps.clone()
             } else {
                 let queries = probe::queries(hints.linux_console);
-                let replies = ask(&screen, &queries, 0, options.probe_timeout)?;
+                let replies = ask(&screen, &queries, 0, probe_timeout)?;
                 let answers = probe::answers(&replies);
                 caps::detect(&answers, &hints, overrides.as_deref())
             };
@@ -255,6 +388,13 @@ mod unix {
                 enabled.clear = false;
             }
             screen.set_enabled(&enabled);
+            screen.set_escape_timeout(options.escape_timeout.unwrap_or(
+                if enabled.keyboard.is_some() {
+                    KITTY_ESCAPE_TIMEOUT
+                } else {
+                    ESCAPE_TIMEOUT
+                },
+            ));
             screen
                 .writer()
                 .send(enabled.setup_after(&early))
@@ -262,15 +402,10 @@ mod unix {
             // (So the first frame isn't held behind the setup.)
             let _ = screen
                 .writer()
-                .wait(screen.writer().ticket(), options.probe_timeout);
+                .wait(screen.writer().ticket(), probe_timeout);
             if options.width_probes && options.capabilities.is_none() && !hints.linux_console {
                 let samples = probe::WIDTH_SAMPLES.len();
-                let replies = ask(
-                    &screen,
-                    &probe::width_queries(),
-                    samples,
-                    options.probe_timeout,
-                )?;
+                let replies = ask(&screen, &probe::width_queries(), samples, probe_timeout)?;
                 if let Some(profile) = probe::width_profile(&replies) {
                     caps.width_profile = profile;
                     if let Some(overrides) = &overrides {
@@ -278,12 +413,13 @@ mod unix {
                     }
                 }
             }
-            let area = Rect::from(screen.shared().size());
+            let fallback = fallback_size(env);
+            let size = screen.window_size().unwrap_or(fallback);
+            screen.shared().set_size(size);
+            let area = Rect::from(size);
             Ok(Self {
-                front: Buffer::with_width_profile(area, caps.width_profile),
-                back: Buffer::with_width_profile(area, caps.width_profile),
-                encoder: Encoder::new(),
-                cursor: None,
+                fallback,
+                frames: Frames::new(area, caps.width_profile),
                 screen,
                 caps,
                 options,
@@ -311,29 +447,14 @@ mod unix {
                 return Ok(Drawn::Held);
             }
             self.screen.draw_here();
-            let area = Rect::from(self.screen.shared().size());
-            if area != self.front.area() {
-                self.front.resize(area);
-                self.back.resize(area);
+            if self.frames.resize(Rect::from(self.size_now())) {
                 self.screen.shared().request_redraw();
             }
-            self.back.reset();
-            let mut frame = Frame::new(&mut self.back, None);
-            render(&mut frame);
-            let cursor = frame.into_cursor();
+            let cursor = self.frames.render(render);
             note_shape(&mut self.enabled, &self.caps, &self.screen, cursor);
             let full = self.screen.shared().take_redraw();
-            if full {
-                self.encoder.redraw();
-            }
             let mut packet = writer.spare_buffer();
-            let stats = self.encoder.encode(
-                &self.front,
-                &self.back,
-                cursor.as_ref(),
-                &self.caps,
-                &mut packet,
-            );
+            let stats = self.frames.encode(full, cursor, &self.caps, &mut packet);
             if !packet.is_empty()
                 && let Err(failure) = writer.send(packet)
             {
@@ -342,13 +463,7 @@ mod unix {
                 }
                 return Err(Error::Io(failure.into()));
             }
-            std::mem::swap(&mut self.front, &mut self.back);
-            self.cursor = cursor;
-            Ok(Drawn::Written(CompletedFrame::new(
-                &self.front,
-                cursor,
-                stats,
-            )))
+            Ok(Drawn::Written(self.frames.commit(cursor, stats)))
         }
 
         /// Draws a partial frame, which changes `regions` alone, for something that moves while
@@ -375,29 +490,18 @@ mod unix {
             if !writer.is_idle() {
                 return Ok(Drawn::Held);
             }
-            let shared = self.screen.shared();
-            if shared.redraw_pending() || Rect::from(shared.size()) != self.front.area() {
+            if Rect::from(self.size_now()) != self.frames.area()
+                || self.screen.shared().redraw_pending()
+            {
                 return Ok(Drawn::FullFrameDue);
             }
             self.screen.draw_here();
-            // (The back buffer keeps the regions' rows as they were, and the next full frame resets
-            // it.)
-            self.back.copy_rows_from(&self.front, regions);
-            self.front.set_clip(regions);
-            let mut frame = Frame::new(&mut self.front, self.cursor);
-            render(&mut frame);
-            let cursor = frame.into_cursor();
+            let cursor = self.frames.render_regions(regions, render);
             note_shape(&mut self.enabled, &self.caps, &self.screen, cursor);
-            self.front.clear_clip();
             let mut packet = writer.spare_buffer();
-            let stats = self.encoder.encode_regions(
-                &self.back,
-                &self.front,
-                regions,
-                cursor.as_ref(),
-                &self.caps,
-                &mut packet,
-            );
+            let stats = self
+                .frames
+                .encode_regions(regions, cursor, &self.caps, &mut packet);
             if !packet.is_empty()
                 && let Err(failure) = writer.send(packet)
             {
@@ -405,12 +509,7 @@ mod unix {
                 self.screen.shared().request_redraw();
                 return Err(Error::Io(failure.into()));
             }
-            self.cursor = cursor;
-            Ok(Drawn::Written(CompletedFrame::new(
-                &self.front,
-                cursor,
-                stats,
-            )))
+            Ok(Drawn::Written(self.frames.commit_regions(cursor, stats)))
         }
 
         /// Completes once the terminal took every frame and command so far, so a frame
@@ -442,7 +541,9 @@ mod unix {
         }
 
         /// Sets the window's title with OSC 0, where the terminal is known to take it, and does
-        /// nothing elsewhere. Control characters in `title` are left out.
+        /// nothing elsewhere. Control characters in `title` are left out. Like the bell and a
+        /// copy, it goes with the next packet the terminal takes, at once while it's idle, and a
+        /// later title replaces one still waiting.
         ///
         /// # Errors
         ///
@@ -452,16 +553,16 @@ mod unix {
                 return Ok(());
             }
             let title: String = title.chars().filter(|c| !c.is_control()).collect();
-            self.send(format!("\x1b]0;{title}\x1b\\").into_bytes())
+            self.hold(Hold::Title, format!("\x1b]0;{title}\x1b\\").into_bytes())
         }
 
-        /// Rings the bell.
+        /// Rings the bell, once however many times it's rung while the terminal is busy.
         ///
         /// # Errors
         ///
         /// [`Error::Io`] once the terminal stopped taking output.
         pub fn bell(&mut self) -> Result<()> {
-            self.send(vec![0x07])
+            self.hold(Hold::Bell, vec![0x07])
         }
 
         /// Copies `text` to the clipboard with OSC 52, where the terminal is known to take it, and
@@ -476,7 +577,10 @@ mod unix {
                 return Ok(());
             }
             let encoded = base64(text.as_bytes());
-            self.send(format!("\x1b]52;c;{encoded}\x1b\\").into_bytes())
+            self.hold(
+                Hold::Copy,
+                format!("\x1b]52;c;{encoded}\x1b\\").into_bytes(),
+            )
         }
 
         /// Switches the mouse reports to `mode`. A terminal known to have no mouse reports gets
@@ -500,6 +604,18 @@ mod unix {
             self.send(switch)
         }
 
+        /// The terminal's size as it says now. SIGWINCH reaches only the terminal's foreground
+        /// process group, so a frame asks rather than counting on it.
+        fn size_now(&self) -> Size {
+            let size = self.screen.window_size().unwrap_or(self.fallback);
+            let shared = self.screen.shared();
+            if size != shared.size() {
+                shared.set_size(size);
+                shared.request_redraw();
+            }
+            size
+        }
+
         /// Makes the next frame redraw everything, for a screen something else wrote over. Nothing
         /// asks the terminal where its cursor is.
         pub fn clear(&mut self) {
@@ -516,6 +632,27 @@ mod unix {
         /// [`Error::Io`] when the terminal couldn't be given back or taken back.
         pub fn suspend(&mut self) -> Result<()> {
             Ok(self.screen.suspend()?)
+        }
+
+        /// Gives the terminal back as closing does and stops reading it, for running another
+        /// program on it, such as an editor or a pager, until [`reacquire`](Self::reacquire).
+        /// Frames drawn meanwhile reach the terminal, so draw none.
+        ///
+        /// # Errors
+        ///
+        /// [`Error::Io`] when the terminal couldn't be given back.
+        pub fn release(&mut self) -> Result<()> {
+            Ok(self.screen.release()?)
+        }
+
+        /// Takes the terminal back after [`release`](Self::release). The next frame redraws
+        /// everything.
+        ///
+        /// # Errors
+        ///
+        /// [`Error::Io`] when the terminal couldn't be taken back.
+        pub fn reacquire(&mut self) -> Result<()> {
+            Ok(self.screen.reacquire()?)
         }
 
         /// Why the terminal takes no more output, once it doesn't. A write that failed gives its
@@ -567,6 +704,13 @@ mod unix {
             }
         }
 
+        fn hold(&self, kind: Hold, command: Vec<u8>) -> Result<()> {
+            self.screen
+                .writer()
+                .hold(kind, command)
+                .map_err(|failure| Error::Io(failure.into()))
+        }
+
         fn send(&self, packet: Vec<u8>) -> Result<()> {
             self.screen
                 .writer()
@@ -584,6 +728,19 @@ mod unix {
     pub fn terminal_size() -> Result<Size> {
         let tty = Tty::open().map_err(Error::NoTerminal)?;
         Ok(window_size(tty.output.as_fd())?.cells)
+    }
+
+    /// The size to take when the terminal gives none, from `COLUMNS` and `LINES`, or 80x24.
+    fn fallback_size(env: &dyn Environment) -> Size {
+        let number = |name| {
+            env.var(name)
+                .and_then(|value| value.trim().parse::<u16>().ok())
+                .filter(|&n| n > 0)
+        };
+        match (number("COLUMNS"), number("LINES")) {
+            (Some(width), Some(height)) => Size::new(width, height),
+            _ => Size::new(80, 24),
+        }
     }
 
     /// Makes the reset put the cursor's default shape back once a frame asks for another, and not
@@ -620,37 +777,6 @@ mod unix {
             screen.cancel_expected();
         }
         Ok(slot.close())
-    }
-
-    /// What to turn on for `options` in a terminal with `caps`. Private modes go out where support
-    /// is unknown, since terminals ignore modes they don't know.
-    fn enabled(options: &Options, caps: &Capabilities) -> Enabled {
-        let has = |support: Support| support != Support::No;
-        let keyboard = match (options.keyboard, caps.keyboard) {
-            (KeyboardRequest::Disambiguate, KeyboardSupport::Kitty { flags }) => Some(flags & 1),
-            (KeyboardRequest::Flags(asked), KeyboardSupport::Kitty { flags }) => {
-                Some(flags & asked)
-            }
-            _ => None,
-        };
-        Enabled {
-            alternate_screen: has(caps.alternate_screen),
-            clear: !has(caps.alternate_screen),
-            mouse: if has(caps.mouse) {
-                options.mouse
-            } else {
-                MouseMode::Off
-            },
-            focus: options.focus_events && has(caps.focus_events),
-            bracketed_paste: options.bracketed_paste && has(caps.bracketed_paste),
-            grapheme_clusters: caps.grapheme_clustering == Support::Yes,
-            theme_reports: false,
-            keyboard: keyboard.filter(|flags| *flags != 0),
-            save_title: options.save_title && has(caps.title_stack),
-            hyperlinks: caps.hyperlinks == Support::Yes,
-            // (Until a frame asks for a shape.)
-            cursor_shape: false,
-        }
     }
 }
 

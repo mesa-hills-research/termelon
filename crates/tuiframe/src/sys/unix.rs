@@ -1,9 +1,11 @@
 //! The terminal on Unix. Finding it, raw mode, its size, and the reader thread, which waits on the
 //! terminal's input, a pipe for each signal it handles and a wake pipe.
 
+use std::ffi::c_int;
 use std::fs::File;
 use std::io::{self, PipeReader, PipeWriter, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -109,8 +111,10 @@ impl Modes {
         }
     }
 
-    /// Puts the modes back as the program found them, exactly.
+    /// Puts the modes back as the program found them, exactly. Input not read yet is dropped
+    /// first, such as mouse reports in flight, so the shell doesn't get it.
     pub(crate) fn restore(&self) -> io::Result<()> {
+        let _ = termios::tcflush(&self.fd, termios::QueueSelector::IFlush);
         Ok(termios::tcsetattr(
             &self.fd,
             OptionalActions::Now,
@@ -145,42 +149,125 @@ pub(crate) fn window_size(fd: BorrowedFd<'_>) -> io::Result<WindowSize> {
     })
 }
 
-/// Stops the process as Ctrl+Z does in a shell, with SIGTSTP, and returns once it runs again.
-///
-/// The signal goes to this thread, which stops with the rest before the call returns. Sent to the
-/// process, it could reach another thread, and this one would run on while the stop begins.
-pub(crate) fn stop_process() -> io::Result<()> {
-    signal_hook::low_level::raise(signal_hook::consts::SIGTSTP)
+/// Stops the process as SIGTSTP's default action does, and returns once it runs again. It raises
+/// SIGSTOP on this thread, which stops with the rest before the call returns, since the library
+/// handles SIGTSTP itself while it has the terminal.
+pub(crate) fn stop_now() -> io::Result<()> {
+    signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGTSTP)
 }
 
-/// The pipes the signal handlers write to, one for each signal, so the reader learns which came.
+/// Sends SIGTSTP to the process's group, as Ctrl+Z does in a shell, so the program's children
+/// stop with it.
+pub(crate) fn stop_group() -> io::Result<()> {
+    use rustix::process::{Signal, kill_current_process_group};
+    Ok(kill_current_process_group(Signal::TSTP)?)
+}
+
+/// The signals that end a program, which the library gives the terminal back on where the program
+/// asks it to, before their default action.
+pub(crate) const ENDING: [c_int; 4] = [
+    signal_hook::consts::SIGTERM,
+    signal_hook::consts::SIGHUP,
+    signal_hook::consts::SIGINT,
+    signal_hook::consts::SIGQUIT,
+];
+
+/// The signals whose default action is held off while a terminal holds them, each with the
+/// condition that lets it run again and how many hold it. signal-hook leaves its handler in place
+/// once installed, so without the condition a signal would do nothing after the terminal closed.
+static DEFAULTS: Mutex<Vec<(c_int, Arc<AtomicBool>, usize)>> = Mutex::new(Vec::new());
+
+/// Holds off `signal`'s default action until [`release_default`].
+fn hold_default(signal: c_int) -> io::Result<()> {
+    let mut defaults = lock(&DEFAULTS);
+    if let Some(entry) = defaults.iter_mut().find(|(held, ..)| *held == signal) {
+        entry.2 += 1;
+        entry.1.store(false, Ordering::SeqCst);
+        return Ok(());
+    }
+    let run_default = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register_conditional_default(signal, run_default.clone())?;
+    defaults.push((signal, run_default, 1));
+    Ok(())
+}
+
+/// Lets `signal`'s default action run again once nothing else holds it off.
+fn release_default(signal: c_int) {
+    let mut defaults = lock(&DEFAULTS);
+    if let Some(entry) = defaults.iter_mut().find(|(held, ..)| *held == signal) {
+        entry.2 = entry.2.saturating_sub(1);
+        if entry.2 == 0 {
+            entry.1.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// The pipes the signal handlers write to, so the reader learns which came.
 #[derive(Debug)]
 pub(crate) struct Signals {
     resize: PipeReader,
     resume: PipeReader,
+    /// SIGTSTP, from Ctrl+Z in another program's raw terminal, `kill`, or the program's suspend.
+    stop: PipeReader,
+    /// The ending signals, where the program asked for them, with a flag for each that says which
+    /// came.
+    end: PipeReader,
+    ends: Vec<(c_int, Arc<AtomicBool>)>,
     registered: Vec<signal_hook::SigId>,
+    /// The signals whose default this holds off.
+    held: Vec<c_int>,
+    /// The writing ends of pipes no signal writes to, for tests, kept so the pipes stay open.
+    #[cfg(test)]
+    _kept: Vec<PipeWriter>,
 }
 
 impl Signals {
-    /// Registers SIGWINCH and SIGCONT, whose handlers write to the pipes.
-    pub(crate) fn register() -> io::Result<Self> {
-        use signal_hook::consts::{SIGCONT, SIGWINCH};
+    /// Registers SIGWINCH, SIGCONT and SIGTSTP, whose handlers write to the pipes, and with
+    /// `ending` SIGTERM, SIGHUP, SIGINT and SIGQUIT too.
+    pub(crate) fn register(ending: bool) -> io::Result<Self> {
+        use signal_hook::consts::{SIGCONT, SIGTSTP, SIGWINCH};
+        use signal_hook::low_level::pipe;
         let (resize, resize_end) = io::pipe()?;
         let (resume, resume_end) = io::pipe()?;
+        let (stop, stop_end) = io::pipe()?;
+        let (end, end_end) = io::pipe()?;
         let mut signals = Self {
             resize,
             resume,
+            stop,
+            end,
+            ends: Vec::new(),
             registered: Vec::new(),
+            held: Vec::new(),
+            #[cfg(test)]
+            _kept: Vec::new(),
         };
-        // (Each registration owns its pipe's end, and closes it when unregistered.)
+        // (Each registration owns its pipe's end, and closes it when unregistered. Dropping
+        // `signals` on an error unregisters what was registered.)
         signals
             .registered
-            .push(signal_hook::low_level::pipe::register(
-                SIGWINCH, resize_end,
-            )?);
+            .push(pipe::register(SIGWINCH, resize_end)?);
         signals
             .registered
-            .push(signal_hook::low_level::pipe::register(SIGCONT, resume_end)?);
+            .push(pipe::register(SIGCONT, resume_end)?);
+        hold_default(SIGTSTP)?;
+        signals.held.push(SIGTSTP);
+        signals.registered.push(pipe::register(SIGTSTP, stop_end)?);
+        if ending {
+            for signal in ENDING {
+                hold_default(signal)?;
+                signals.held.push(signal);
+                let came = Arc::new(AtomicBool::new(false));
+                signals
+                    .registered
+                    .push(signal_hook::flag::register(signal, came.clone())?);
+                signals.ends.push((signal, came));
+                signals
+                    .registered
+                    .push(pipe::register(signal, end_end.try_clone()?)?);
+            }
+        }
+        drop(end_end);
         Ok(signals)
     }
 
@@ -189,12 +276,27 @@ impl Signals {
     pub(crate) fn unregistered() -> io::Result<(Self, PipeWriter, PipeWriter)> {
         let (resize, resize_end) = io::pipe()?;
         let (resume, resume_end) = io::pipe()?;
+        let (stop, stop_end) = io::pipe()?;
+        let (end, end_end) = io::pipe()?;
         let signals = Self {
             resize,
             resume,
+            stop,
+            end,
+            ends: Vec::new(),
             registered: Vec::new(),
+            held: Vec::new(),
+            _kept: vec![stop_end, end_end],
         };
         Ok((signals, resize_end, resume_end))
+    }
+
+    /// The ending signal that came, if one did.
+    fn ending(&self) -> Option<c_int> {
+        self.ends
+            .iter()
+            .find(|(_, came)| came.swap(false, Ordering::SeqCst))
+            .map(|(signal, _)| *signal)
     }
 }
 
@@ -202,6 +304,9 @@ impl Drop for Signals {
     fn drop(&mut self) {
         for id in self.registered.drain(..) {
             signal_hook::low_level::unregister(id);
+        }
+        for signal in self.held.drain(..) {
+            release_default(signal);
         }
     }
 }
@@ -298,9 +403,34 @@ enum Ask {
     Cancel,
 }
 
-/// What the reader does on SIGCONT, before it queues [`Event::Resumed`], to take the terminal
-/// back after something else had it.
-pub(crate) type Resume = Box<dyn FnMut() + Send>;
+/// What the reader does on the signals that concern the terminal.
+pub(crate) struct Hooks {
+    /// On SIGCONT that the reader didn't stop for, before it queues [`Event::Resumed`], to take
+    /// the terminal back after something else had it.
+    pub(crate) resume: Box<dyn FnMut() + Send>,
+    /// On SIGTSTP, to give the terminal back, stop, and take it back once the process runs again.
+    pub(crate) stop: Box<dyn FnMut() + Send>,
+    /// On an ending signal, to give the terminal back before the signal's default action.
+    pub(crate) end: Box<dyn FnMut(c_int) + Send>,
+}
+
+impl Hooks {
+    /// Hooks that do nothing.
+    #[cfg(test)]
+    pub(crate) fn none() -> Self {
+        Self {
+            resume: Box::new(|| {}),
+            stop: Box::new(|| {}),
+            end: Box::new(|_| {}),
+        }
+    }
+}
+
+impl std::fmt::Debug for Hooks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hooks").finish_non_exhaustive()
+    }
+}
 
 /// The reader thread's handle.
 #[derive(Debug)]
@@ -322,14 +452,18 @@ struct Requests {
     park: bool,
     /// The reader holds still.
     parked: bool,
-    /// The program runs again after a suspend, whose SIGCONT the reader then takes as that.
-    resumed: bool,
     stop: bool,
+    /// The reader is handling a SIGTSTP.
+    stopping: bool,
+    /// How many SIGTSTPs it handled.
+    stops: u64,
     /// The reader's thread ended.
     ended: bool,
     /// Queries whose answers are outstanding, and their cancelling, for the decoder to learn of
     /// before it decodes more.
     asks: Vec<Ask>,
+    /// A new escape timeout.
+    escape_timeout: Option<Duration>,
 }
 
 impl Control {
@@ -363,7 +497,7 @@ impl Reader {
         shared: Arc<Shared>,
         escape_timeout: Duration,
         signals: Signals,
-        resume: Resume,
+        hooks: Hooks,
     ) -> io::Result<Self> {
         let (wake_end, wake) = io::pipe()?;
         let control = Arc::new(Control::default());
@@ -372,7 +506,7 @@ impl Reader {
             decoder,
             escape_timeout,
             signals,
-            resume,
+            hooks,
             wake: wake_end,
             decoded: Vec::new(),
             ended: Ended {
@@ -396,6 +530,12 @@ impl Reader {
         lock(&self.control.state).asks.push(Ask::Expect(query));
     }
 
+    /// Makes a kept sequence wait `timeout` for the rest from now on.
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+        lock(&self.control.state).escape_timeout = Some(timeout);
+        self.wake();
+    }
+
     /// Tells the decoder to forget the queries whose answers are outstanding, for a probe that
     /// stopped waiting, before it decodes what the reader reads next.
     pub(crate) fn cancel_expected(&self) {
@@ -412,16 +552,40 @@ impl Reader {
             .wait_until(|requests| requests.parked || requests.ended)
     }
 
-    /// Lets the reader go on. With `resumed`, the program runs again after a suspend and took the
-    /// terminal back, so the reader takes the SIGCONT that came meanwhile as that, queues
-    /// [`Event::Resumed`] and leaves the terminal as it is.
-    pub(crate) fn unpark(&self, resumed: bool) {
-        {
-            let mut requests = lock(&self.control.state);
-            requests.park = false;
-            requests.resumed = resumed;
-        }
+    /// Lets the reader go on.
+    pub(crate) fn unpark(&self) {
+        lock(&self.control.state).park = false;
         self.control.changed.notify_all();
+    }
+
+    /// How many SIGTSTPs the reader handled.
+    pub(crate) fn stops(&self) -> u64 {
+        lock(&self.control.state).stops
+    }
+
+    /// Waits until the reader handled a SIGTSTP after the `since`th, for at most `start` for it
+    /// to begin, then as long as it takes, the stop included. Whether one came.
+    pub(crate) fn wait_for_stop(&self, since: u64, start: Duration) -> bool {
+        let until = Instant::now() + start;
+        let mut requests = lock(&self.control.state);
+        while requests.stops <= since && !requests.ended {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() && !requests.stopping {
+                return false;
+            }
+            let wait = if requests.stopping {
+                CONTROL_WAIT
+            } else {
+                left
+            };
+            requests = self
+                .control
+                .changed
+                .wait_timeout(requests, wait)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        requests.stops > since
     }
 
     /// Ends the reader's thread, waiting a second at most.
@@ -474,7 +638,7 @@ struct Loop<D> {
     decoder: D,
     escape_timeout: Duration,
     signals: Signals,
-    resume: Resume,
+    hooks: Hooks,
     wake: PipeReader,
     /// What the decoder found and the reader hasn't routed yet.
     decoded: Vec<Decoded>,
@@ -500,9 +664,11 @@ impl<D: Decode> Loop<D> {
                 self.input.as_fd(),
                 self.signals.resize.as_fd(),
                 self.signals.resume.as_fd(),
+                self.signals.stop.as_fd(),
+                self.signals.end.as_fd(),
                 self.wake.as_fd(),
             ];
-            let [input, resize, resume, wake] = match wait(fds, timeout) {
+            let [input, resize, resume, stop, end, wake] = match wait(fds, timeout) {
                 Ok(ready) => ready,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => {
@@ -517,9 +683,18 @@ impl<D: Decode> Loop<D> {
                 drain(&self.signals.resize);
                 self.resized(&mut events);
             }
-            if resume {
+            if end {
+                drain(&self.signals.end);
+                if let Some(signal) = self.signals.ending() {
+                    (self.hooks.end)(signal);
+                }
+            }
+            if stop {
+                drain(&self.signals.stop);
+                self.stopped(&mut events);
+            } else if resume {
                 drain(&self.signals.resume);
-                (self.resume)();
+                (self.hooks.resume)();
                 self.ended.shared.request_redraw();
                 events.push(Event::Resumed);
             }
@@ -558,7 +733,7 @@ impl<D: Decode> Loop<D> {
                         break;
                     }
                 }
-            } else if !(wake || resize || resume) {
+            } else if !(wake || resize || resume || stop || end) {
                 if pending_since.is_some_and(|since| since.elapsed() >= self.escape_timeout) {
                     // (The escape timeout passed with nothing more.)
                     pending_since = None;
@@ -592,6 +767,9 @@ impl<D: Decode> Loop<D> {
     fn obey(&mut self) -> bool {
         let control = self.ended.control.clone();
         let mut requests = lock(&control.state);
+        if let Some(timeout) = requests.escape_timeout.take() {
+            self.escape_timeout = timeout;
+        }
         if !requests.park {
             return !requests.stop;
         }
@@ -604,19 +782,29 @@ impl<D: Decode> Loop<D> {
                 .unwrap_or_else(PoisonError::into_inner);
         }
         requests.parked = false;
-        let resumed = std::mem::take(&mut requests.resumed);
-        let stop = requests.stop;
-        drop(requests);
-        if resumed {
-            // (The SIGCONT that ended the suspend is this, and the program took the terminal back.
-            // Its handler may run on another thread a moment after the program runs again.)
-            if let Ok([true]) = wait([self.signals.resume.as_fd()], Some(RESUME_WAIT)) {
-                drain(&self.signals.resume);
-            }
-            self.ended.shared.request_redraw();
-            self.ended.shared.events.push(&mut vec![Event::Resumed]);
+        !requests.stop
+    }
+
+    /// Handles a SIGTSTP. The hook gives the terminal back, stops the process and takes the
+    /// terminal back once it runs again, and then the SIGCONT that ended the stop is taken as
+    /// that, with [`Event::Resumed`] queued.
+    fn stopped(&mut self, events: &mut Vec<Event>) {
+        let control = self.ended.control.clone();
+        lock(&control.state).stopping = true;
+        control.changed.notify_all();
+        (self.hooks.stop)();
+        // (SIGCONT's handler may run on another thread a moment after the process runs again.)
+        if let Ok([true]) = wait([self.signals.resume.as_fd()], Some(RESUME_WAIT)) {
+            drain(&self.signals.resume);
         }
-        !stop
+        self.ended.shared.request_redraw();
+        events.push(Event::Resumed);
+        {
+            let mut requests = lock(&control.state);
+            requests.stopping = false;
+            requests.stops += 1;
+        }
+        control.changed.notify_all();
     }
 
     fn resized(&mut self, events: &mut Vec<Event>) {
@@ -845,10 +1033,13 @@ pub(crate) mod tests {
             shared.clone(),
             escape_timeout,
             signals,
-            Box::new(move || {
-                let _ = modes.apply_raw();
-                *lock(&counted) += 1;
-            }),
+            Hooks {
+                resume: Box::new(move || {
+                    let _ = modes.apply_raw();
+                    *lock(&counted) += 1;
+                }),
+                ..Hooks::none()
+            },
         )
         .unwrap();
         Reading {
@@ -1001,8 +1192,7 @@ pub(crate) mod tests {
         assert!(reading.shared.take_redraw());
     }
 
-    /// A parked reader reads nothing until it goes on, and after a suspend it takes the SIGCONT
-    /// that came meanwhile as the resume, without taking the terminal back again.
+    /// A parked reader reads nothing and handles no signal until it goes on.
     #[test]
     fn a_parked_reader_holds_still() {
         let mut reading = reading(Duration::ZERO);
@@ -1016,10 +1206,11 @@ pub(crate) mod tests {
                 .next_timeout(Duration::from_millis(100)),
             Next::Empty
         );
-        reading.reader.unpark(true);
+        assert_eq!(*lock(&reading.resumed), 0);
+        reading.reader.unpark();
         assert_eq!(next(&reading.shared), Event::Resumed);
         assert_eq!(next(&reading.shared), key('e', KeyModifiers::NONE));
-        assert_eq!(*lock(&reading.resumed), 0);
+        assert_eq!(*lock(&reading.resumed), 1);
         assert_eq!(
             reading
                 .shared
@@ -1109,8 +1300,8 @@ pub(crate) mod tests {
                 Bytes::default(),
                 shared.clone(),
                 Duration::ZERO,
-                Signals::register().unwrap(),
-                Box::new(|| {}),
+                Signals::register(false).unwrap(),
+                Hooks::none(),
             )
             .unwrap();
             (&File::from(tty.output)).write_all(b"<ready>").unwrap();

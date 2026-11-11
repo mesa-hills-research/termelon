@@ -124,9 +124,10 @@ A frame that changes no cell writes only a cursor move when the cursor moved, an
 
 Closing gives the terminal back in every way a program can end. The reset packet is built at open
 from what was enabled. It ends any synchronized update, pops the kitty keyboard flags, turns off the
-reports that were on, resets the pen, turns autowrap back on, leaves the alternate screen, shows the
-cursor and restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now`
-writes CAN and the reset from a thread of its own, once.
+reports that were on, resets the pen, turns autowrap back on, resets the scroll region, leaves the
+alternate screen, shows the cursor and restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now`
+writes CAN, ST and the reset from a thread of its own, once, and the writer stops within the 4 KiB
+chunk it was writing.
 
 ## Input
 
@@ -163,6 +164,7 @@ thread owns one.
 pub(crate) struct DecoderOptions {
     pub(crate) erase: u8,        // termios VERASE, 0x7f or 0x08
     pub(crate) max_paste: usize, // 64 MiB by default
+    pub(crate) all_keys: bool,   // Windows keys alone too, as kitty's flag 8 reports them
 }
 
 pub(crate) struct Decoder { /* the tokenizer's state and the outstanding queries */ }
@@ -281,7 +283,8 @@ pub(crate) struct FocusRecord {
 
 A key record with a repeat count of n gives n events, AltGr arrives as Ctrl+Alt with a printable
 character and decodes as that character, and a `WindowSizeRecord` gives `Event::Resize`. A modifier
-key pressed or released alone gives `KeyCode::Modifier`, and an Alt code (Alt held while digits are
+or lock key pressed or released alone, and the keypad's middle key, are dropped as crossterm drops
+them, and with `all_keys` they give their key codes. An Alt code (Alt held while digits are
 typed on the keypad) gives its character when Alt comes up.
 
 ### The encoder
@@ -379,8 +382,8 @@ impl Writer {
 - `ticket` stands for everything sent so far, and `wait` says what became of it within the timeout.
 - `close` drops the packets not yet started, then queues the reset and the program's `tail`, and says
   whether this call ended the output. Its ticket counts as written only once the reset is.
-- `takeover` gives what writes CAN and the reset from a thread of its own when the writer is stuck
-  or died, with a record outside the writer's lock, so the reset is never written twice.
+- `takeover` gives what writes CAN, ST and the reset from a thread of its own when the writer is
+  stuck or died, with a record outside the writer's lock, so the reset is never written twice.
   `RestoreHandle` (`Clone + Send + Sync`) keeps one, and its `restore_now(timeout)` uses it.
 - `failure` is set once a write fails or the thread ends. The terminal ends the event stream then.
 
@@ -405,19 +408,23 @@ impl Reader {
         decoder: impl Decode, // feed, has_pending, flush_pending and expect, as Decoder has
         shared: Arc<Shared>,
         escape_timeout: Duration,
-        signals: Signals,     // a pipe each for SIGWINCH and SIGCONT
-        resume: Resume,       // takes the terminal back on SIGCONT
+        signals: Signals,     // pipes for SIGWINCH, SIGCONT, SIGTSTP and the ending signals
+        hooks: Hooks,         // what to do on SIGCONT, SIGTSTP and an ending signal
     ) -> io::Result<Self>;
     pub(crate) fn expect(&self, query: Query);
+    pub(crate) fn cancel_expected(&self);
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration);
     pub(crate) fn park(&self) -> bool;
-    pub(crate) fn unpark(&self, resumed: bool);
+    pub(crate) fn unpark(&self);
+    pub(crate) fn wait_for_stop(&self, since: u64, start: Duration) -> bool;
     pub(crate) fn stop(self);
 }
 ```
 
 On Unix, `restore::screen::Screen` puts these together. `Screen::open_with` takes the terminal
 (raw mode, the writer, the reader) and `enable` sends the setup the probe's answers decided on. It
-also closes the terminal and suspends it. A writer that fails ends the events.
+also closes the terminal, suspends it, and lends it to another program with `release` and
+`reacquire`. A writer that fails ends the events.
 
 Each turn of the reader's loop does these steps.
 
@@ -427,13 +434,18 @@ Each turn of the reader's loop does these steps.
    `expect` queued since the last turn, then decode.
 3. Queue the events, notifying the condvar and waking every stored waker. Put replies in the reply
    slot when it's open, and drop them otherwise.
-4. When no more input is ready, call `flush_pending` if the escape timeout is zero or has passed.
+4. When no more input is ready, call `flush_pending` once the escape timeout has passed, and
+   `flush_held` once the input has been silent for a second with something held.
 5. On SIGWINCH or a window size record, store the new size, ask for a full redraw and queue
-   `Event::Resize`. On SIGCONT, call `resume`, which applies raw mode and the screen's modes again,
-   ask for a full redraw and queue `Event::Resumed`.
+   `Event::Resize`. On SIGTSTP, call the `stop` hook, which gives the terminal back, stops the
+   process with SIGSTOP and takes the terminal back once it runs again, then queue
+   `Event::Resumed`. On a SIGCONT that came without it, call `resume`, which sends the reset and
+   the setup again and applies raw mode, and queue `Event::Resumed`. Either asks for a full
+   redraw. On an ending signal, call `end`, which gives the terminal back and lets the signal end
+   the program.
 6. When the input closes or fails, or the thread ends, mark the queue closed, so `Events` ends.
 
 `expect` queues the query for the reader's next turn, so calling it before the query is written is
-enough. `park` and `unpark` hold the reader still while the program is suspended. After a suspend,
-`unpark(true)` takes the SIGCONT that ended it as the resume the program already did, and queues
-`Event::Resumed`. `stop` ends the thread at close.
+enough. `park` and `unpark` hold the reader still while another program has the terminal.
+`wait_for_stop` is how a suspend, which sends SIGTSTP to the process group, waits for the reader to
+handle it. `stop` ends the thread at close.

@@ -172,12 +172,13 @@ fn dotted(version: u32) -> String {
 pub(crate) const WIDTH_SAMPLES: [&str; 3] =
     ["\u{1f469}\u{200d}\u{1f4bb}", "\u{2764}\u{fe0f}", "\u{a7}"];
 
-/// The width probes, inside a synchronized update. Each sample goes at the top-left, followed by a
-/// cursor report, and the screen is cleared after, so nothing shows. DA1 ends them.
+/// The width probes, inside a synchronized update. Each sample goes at the start of the second
+/// row, followed by a cursor report, and the screen is cleared after, so nothing shows. DA1 ends
+/// them. (A report from the first row, `CSI 1 ; n R`, would read as F3 if it came late.)
 pub(crate) fn width_queries() -> Vec<u8> {
     let mut out = b"\x1b[?2026h".to_vec();
     for sample in WIDTH_SAMPLES {
-        out.extend_from_slice(b"\x1b[H");
+        out.extend_from_slice(b"\x1b[2H");
         out.extend_from_slice(sample.as_bytes());
         out.extend_from_slice(b"\x1b[6n");
     }
@@ -347,7 +348,7 @@ mod tests {
         ] {
             let mut terminal = Emulator::with_profile(profile, 80, 24);
             terminal.feed(&width_queries()).unwrap();
-            assert_eq!(terminal.row_text(0).as_deref(), Some(""));
+            assert_eq!(terminal.row_text(1).as_deref(), Some(""));
             for _ in WIDTH_SAMPLES {
                 decoder.expect(crate::event::decode::Query::CursorPosition);
             }
