@@ -301,6 +301,12 @@ pub trait Driver {
     /// When the readback fails or can't be understood.
     fn read(&mut self) -> Result<Readback, Error>;
 
+    /// Whether a readback ends the program and the terminal, as Alacritty's does, so the harness
+    /// can't wait for a marker by reading the screen.
+    fn readback_ends_it(&self) -> bool {
+        false
+    }
+
     /// Saves a screenshot as PNG. Returns false where there's no display to take one of.
     ///
     /// # Errors

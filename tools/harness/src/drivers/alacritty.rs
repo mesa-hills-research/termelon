@@ -323,6 +323,10 @@ impl Driver for Alacritty {
         Ok(parse(&text)?.with_raw("json", text))
     }
 
+    fn readback_ends_it(&self) -> bool {
+        true
+    }
+
     fn wait_for(&mut self, marker: &str, _timeout: Duration) -> Result<Readback, Error> {
         std::thread::sleep(SETTLE);
         let readback = self.read()?;

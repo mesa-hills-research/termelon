@@ -273,6 +273,8 @@ jobs:
       - run: target/debug/harness smoke alacritty
       - run: target/debug/harness run alacritty --probe target/debug/probe --out harness-out
       - if: always()
+        run: target/debug/harness keys alacritty --probe target/debug/probe --out harness-out
+      - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alacritty-ubuntu-24.04

@@ -243,9 +243,14 @@ pub fn run_input(
     ];
     let (cols, rows) = (80, 24);
     driver.start(&Launch::new(cols, rows, &args))?;
-    let pressed = driver
-        .wait_for(READY, SCENE_TIMEOUT)
-        .and_then(|_| press(driver, mode == "legacy"))
+    let ready = if driver.readback_ends_it() {
+        // The probe saves the mode's bytes just before it sets the mode and shows the marker.
+        wait_for_file(&record, SCENE_TIMEOUT).map(|()| std::thread::sleep(SETTLE))
+    } else {
+        driver.wait_for(READY, SCENE_TIMEOUT).map(drop)
+    };
+    let pressed = ready
+        .and_then(|()| press(driver, mode == "legacy"))
         .and_then(|names| {
             wait_for_separators(&input, names.len())?;
             Ok(names)
@@ -332,6 +337,25 @@ fn press(driver: &mut dyn Driver, mouse: bool) -> Result<Vec<(String, Event)>, E
         return Err(Error::Unsupported("take synthetic keys or mouse events"));
     }
     Ok(pressed)
+}
+
+/// How long a terminal that can't be read without ending it gets to take the mode, once the probe
+/// has saved it.
+const SETTLE: Duration = Duration::from_millis(700);
+
+/// Waits until a file is there.
+fn wait_for_file(path: &Path, timeout: Duration) -> Result<(), Error> {
+    let deadline = Instant::now() + timeout;
+    while !path.exists() {
+        if Instant::now() >= deadline {
+            return Err(Error::Missing(format!(
+                "{}, which the probe writes when it starts,",
+                path.display()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Ok(())
 }
 
 /// Waits until the probe has saved `count` separators.
