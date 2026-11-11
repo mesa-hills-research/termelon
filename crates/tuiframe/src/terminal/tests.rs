@@ -143,6 +143,13 @@ fn open(
     Terminal::open_on(played.tty(), options.clone(), &Vars(vars), signals).unwrap()
 }
 
+fn rung(emulator: &Emulator) -> bool {
+    emulator
+        .events()
+        .iter()
+        .any(|event| matches!(event, tuiframe_vt::Event::Bell))
+}
+
 fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
     Event::Key(KeyEvent::new(code, modifiers))
 }
@@ -165,10 +172,12 @@ fn end_to_end(
     let name = profile.name.clone();
     let (mut played, signals) = Played::new(profile);
     let before = played.pty.modes();
-    let terminal = open(&played, signals, vars, &Options::default());
+    let mut terminal = open(&played, signals, vars, &Options::default());
     assert!(played.pty.is_raw(), "{name}");
     let caps = terminal.capabilities().clone();
-    played.until("set up", |emulator| !emulator.mode(25));
+    // (The bell goes out after the setup.)
+    terminal.bell().unwrap();
+    played.until("set up", rung);
     check(&caps, &lock(&played.emulator));
     assert_eq!(terminal.size(), Size::new(80, 24));
     // Nothing the probe asked shows on the screen.
@@ -770,4 +779,33 @@ fn the_cursor_keeps_the_users_shape_until_a_frame_sets_one() {
     assert!(find(&shaped[bar..], b"\x1b[0 q").is_some());
     drop(write);
     reading.join().unwrap();
+}
+
+/// The alternate screen comes before the probe, so what a terminal prints of a query it can't
+/// parse never reaches the main screen.
+#[test]
+fn what_a_terminal_prints_of_the_probe_stays_off_the_main_screen() {
+    let prints_strings = Profile {
+        linux_console: true,
+        ..Profile::kitty()
+    };
+    let (played, signals) = Played::new(prints_strings);
+    let mut terminal = open(&played, signals, &[], &Options::default());
+    played.until("printed", |emulator| {
+        emulator.alternate_screen() && emulator.rows().iter().any(|row| !row.is_empty())
+    });
+    let drawn = terminal.draw(|_| {});
+    assert!(matches!(drawn, Ok(Drawn::Written(_))));
+    played.until("cleared", |emulator| {
+        emulator.rows().iter().all(String::is_empty)
+    });
+    terminal.close().unwrap();
+    played.until("given back", |emulator| emulator.mode(25));
+    let emulator = lock(&played.emulator);
+    assert!(!emulator.alternate_screen());
+    assert!(
+        emulator.rows().iter().all(String::is_empty),
+        "{:?}",
+        emulator.rows()
+    );
 }

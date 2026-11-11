@@ -109,6 +109,17 @@ impl Enabled {
         out
     }
 
+    /// What takes the terminal after `done` took it, which is [`setup`](Self::setup) without
+    /// entering the alternate screen again, since entering it twice loses the main screen's
+    /// cursor.
+    pub(crate) fn setup_after(&self, done: &Enabled) -> Vec<u8> {
+        let mut rest = self.clone();
+        if done.alternate_screen {
+            rest.alternate_screen = false;
+        }
+        rest.setup()
+    }
+
     /// What gives the terminal back. It ends a synchronized update a frame left open, pops the
     /// keyboard flags, turns the reports off, resets the pen and any open hyperlink, turns
     /// autowrap back on, leaves the alternate screen, shows the cursor with its default shape and

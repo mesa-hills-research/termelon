@@ -231,23 +231,39 @@ mod unix {
                 signals,
             )?;
             let overrides = env.var("TUIFRAME_CAPS");
-            let (mut caps, linux_console) = if let Some(caps) = &options.capabilities {
-                (caps.clone(), false)
+            let hints = caps::env::hints(env);
+            // (The alternate screen first, so what a terminal prints of a query it can't parse lands
+            // on a screen the first frame clears. The Linux console has none.)
+            let early = Enabled {
+                alternate_screen: !hints.linux_console,
+                ..Enabled::default()
+            };
+            if early.alternate_screen {
+                screen.enable(&early)?;
+            }
+            let mut caps = if let Some(caps) = &options.capabilities {
+                caps.clone()
             } else {
-                let hints = caps::env::hints(env);
                 let queries = probe::queries(hints.linux_console);
                 let replies = ask(&screen, &queries, 0, options.probe_timeout)?;
                 let answers = probe::answers(&replies);
-                let caps = caps::detect(&answers, &hints, overrides.as_deref());
-                (caps, hints.linux_console)
+                caps::detect(&answers, &hints, overrides.as_deref())
             };
-            let enabled = enabled(&options, &caps);
-            screen.enable(&enabled)?;
+            let mut enabled = enabled(&options, &caps);
+            if early.alternate_screen {
+                enabled.alternate_screen = true;
+                enabled.clear = false;
+            }
+            screen.set_enabled(&enabled);
+            screen
+                .writer()
+                .send(enabled.setup_after(&early))
+                .map_err(|failure| Error::Io(failure.into()))?;
             // (So the first frame isn't held behind the setup.)
             let _ = screen
                 .writer()
                 .wait(screen.writer().ticket(), options.probe_timeout);
-            if options.width_probes && options.capabilities.is_none() && !linux_console {
+            if options.width_probes && options.capabilities.is_none() && !hints.linux_console {
                 let samples = probe::WIDTH_SAMPLES.len();
                 let replies = ask(
                     &screen,
