@@ -33,6 +33,8 @@ env:
   WT_SHA256: bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc043cdf831852e796
 
 # Actions are pinned to commits of releases published at least 30 days before they were chosen.
+# Each job starts non-blocking (continue-on-error), as in the terminals workflow, and becomes
+# required after two weeks of green nightly runs.
 
 jobs:
   console:
