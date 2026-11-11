@@ -250,6 +250,30 @@ impl<C: Console> ScreenOn<C> {
             "windows has no job control to suspend with",
         ))
     }
+
+    /// Lending the console to another program isn't there on Windows yet.
+    #[expect(
+        clippy::unused_self,
+        reason = "the same call as on Unix, where releasing needs the screen"
+    )]
+    pub(crate) fn release(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the console can't be lent to another program on windows",
+        ))
+    }
+
+    /// The other half of [`release`](Self::release), which isn't there on Windows yet.
+    #[expect(
+        clippy::unused_self,
+        reason = "the same call as on Unix, where reacquiring needs the screen"
+    )]
+    pub(crate) fn reacquire(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the console can't be lent to another program on windows",
+        ))
+    }
 }
 
 impl<C> ScreenOn<C> {
