@@ -119,8 +119,13 @@ fn a_cursor_move_cancels_a_pending_wrap() {
 fn without_autowrap_the_last_column_is_overwritten() {
     let term = run(3, 2, b"\x1b[?7labcde");
     assert_eq!(term.rows(), ["abe", ""]);
-    assert!(!term.cursor().pending_wrap);
+    assert!(term.cursor().pending_wrap);
     assert!(!term.mode(7));
+}
+
+#[test]
+fn turning_autowrap_on_after_the_last_column_wraps_the_next_character() {
+    assert_eq!(run(3, 2, b"\x1b[?7labc\x1b[?7hX").rows(), ["abc", "X"]);
 }
 
 #[test]
@@ -148,6 +153,13 @@ fn a_wide_character_takes_two_cells() {
 #[test]
 fn a_wide_character_that_doesnt_fit_wraps() {
     assert_eq!(run(3, 2, "ab字".as_bytes()).rows(), ["ab", "字"]);
+}
+
+#[test]
+fn a_wide_character_that_wraps_leaves_a_blank_in_the_pen() {
+    let term = run(3, 2, "abc\x1b[1;3H\x1b[41m字".as_bytes());
+    assert_eq!(term.rows(), ["ab", "字"]);
+    assert_eq!(term.cell(2, 0).unwrap().style().bg, Color::Red);
 }
 
 #[test]

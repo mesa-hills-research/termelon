@@ -41,8 +41,8 @@ pub struct Cursor {
     pub shape: CursorShape,
     /// Whether it blinks, from DECSCUSR or mode 12.
     pub blinking: bool,
-    /// Whether a character was just drawn in the last column, so the next one wraps first (with
-    /// autowrap on).
+    /// Whether a character was just drawn in the last column, so the next one wraps first if
+    /// autowrap is on, and overwrites the last column if it's off.
     pub pending_wrap: bool,
 }
 
@@ -631,6 +631,11 @@ impl Emulator {
         }
         if self.x + width16 > self.cols {
             if self.autowrap {
+                // The cells left on the row become blanks in the pen's style, as Alacritty
+                // leaves them.
+                let (x, y, cols) = (self.x, self.y, self.cols);
+                let blank = Cell::blank(self.pen.clone());
+                self.grid_mut().erase(y, x, cols, &blank);
                 self.wrap();
             } else {
                 self.x = self.cols - width16;
@@ -649,12 +654,13 @@ impl Emulator {
         self.advance_past(x, width);
     }
 
-    /// Puts the cursor after a cluster drawn at `x`, or in the last column with a wrap pending.
+    /// Puts the cursor after a cluster drawn at `x`, or in the last column with a wrap pending,
+    /// whether autowrap is on or not, as xterm and Alacritty keep it.
     fn advance_past(&mut self, x: u16, width: u8) {
         let next = x + u16::from(width);
         if next >= self.cols {
             self.x = self.cols - 1;
-            self.pending_wrap = self.autowrap;
+            self.pending_wrap = true;
         } else {
             self.x = next;
             self.pending_wrap = false;
@@ -904,6 +910,7 @@ impl Perform for Emulator {
 /// drawing.
 fn line_drawing(c: char) -> char {
     match c {
+        '_' => ' ',
         '`' => '◆',
         'a' => '▒',
         'b' => '␉',
