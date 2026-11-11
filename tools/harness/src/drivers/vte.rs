@@ -76,6 +76,7 @@ pub fn parse(reply: &Json, cols: u16, rows: u16) -> Result<Readback, Error> {
         foreground: FOREGROUND,
         background: BACKGROUND,
         blink: None,
+        bold_brightens: false,
     };
     let attributes = Attributes {
         bold: true,

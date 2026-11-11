@@ -62,6 +62,9 @@ pub enum Colors {
         /// The foreground and background a blinking cell has instead of its own, before reverse
         /// video, where the readback gives blink that way, as xterm's dump does.
         blink: Option<(Rgb, Rgb)>,
+        /// Whether bold text in the eight basic colours (SGR 30 to 37) shows their bright versions,
+        /// as xterm's `boldColors` draws it by default.
+        bold_brightens: bool,
     },
 }
 

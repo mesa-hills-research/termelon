@@ -60,7 +60,13 @@ pub fn start_command(launch: &Launch, dir: &Path, tty_file: &Path) -> Command {
         .arg("-geometry")
         .arg(format!("{}x{}", launch.cols, launch.rows));
     command.args(["-fn", "9x15", "-fg", "black", "-bg", "white", "+sb", "-u8"]);
-    for resource in ["allowWindowOps: true", "allowSendEvents: true"] {
+    // Alt sends ESC before the key, rather than setting its eighth bit, as termelon-vt's xterm
+    // profile has it.
+    for resource in [
+        "allowWindowOps: true",
+        "allowSendEvents: true",
+        "metaSendsEscape: true",
+    ] {
         command.arg("-xrm").arg(format!("XTerm*{resource}"));
     }
     for (key, value) in &launch.env {
@@ -79,7 +85,8 @@ pub fn start_command(launch: &Launch, dir: &Path, tty_file: &Path) -> Command {
 
 /// Rebuilds a screen from xterm's XHTML dump, which `html.c` in its source writes. Every cell has
 /// its colours as `rgb()`, bold, italic, underline and strike are classes, each space is a U+00A0
-/// (so a U+00A0 on the screen reads back as a space), and a blinking cell is white on red.
+/// (so a U+00A0 on the screen reads back as a space), and a blinking cell is white on red. Bold
+/// text in the eight basic colours shows their bright versions.
 ///
 /// # Errors
 ///
@@ -91,6 +98,7 @@ pub fn parse(html: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
         foreground: dump.foreground.unwrap_or(FOREGROUND),
         background: dump.background.unwrap_or(BACKGROUND),
         blink: Some(((0xff, 0xff, 0xff), (0xff, 0, 0))),
+        bold_brightens: true,
     };
     let attributes = Attributes {
         bold: true,

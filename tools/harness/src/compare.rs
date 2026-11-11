@@ -151,9 +151,14 @@ fn compare_colors(
             foreground,
             background,
             blink,
+            bold_brightens,
         } => {
             let rgb = |color: Color, default: (u8, u8, u8)| color.rgb().unwrap_or(default);
-            let (mut fg, mut bg) = (rgb(e.fg, foreground), rgb(e.bg, background));
+            let shown_fg = match e.fg.named_index() {
+                Some(n @ 0..8) if bold_brightens && e.bold => Color::named(n + 8).unwrap_or(e.fg),
+                _ => e.fg,
+            };
+            let (mut fg, mut bg) = (rgb(shown_fg, foreground), rgb(e.bg, background));
             if let Some(colors) = blink.filter(|_| e.blink || e.rapid_blink) {
                 (fg, bg) = colors;
             }
