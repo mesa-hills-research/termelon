@@ -83,6 +83,10 @@ struct Requests {
     asks: Vec<Ask>,
     /// A new escape timeout, from the next turn.
     escape_timeout: Option<Duration>,
+    /// The program asks the reader to hold still.
+    park: bool,
+    /// The reader holds still.
+    parked: bool,
     stop: bool,
     /// The reader's thread ended.
     ended: bool,
@@ -146,20 +150,28 @@ impl Reader {
         self.wake.wake();
     }
 
-    /// Ends the reader's thread, waiting a second at most.
-    pub(crate) fn stop(mut self) {
-        self.end();
+    /// Holds the reader still, reading nothing until [`unpark`](Self::unpark), for while another
+    /// program has the console. Returns whether it held still within a second.
+    pub(crate) fn park(&self) -> bool {
+        lock(&self.control.state).park = true;
+        self.wake.wake();
+        self.wait_until(|requests| requests.parked || requests.ended)
     }
 
-    fn end(&mut self) {
-        lock(&self.control.state).stop = true;
-        self.wake.wake();
+    /// Lets the reader go on.
+    pub(crate) fn unpark(&self) {
+        lock(&self.control.state).park = false;
+        self.control.changed.notify_all();
+    }
+
+    /// Waits a second at most until `done` holds of the requests, and says whether it did.
+    fn wait_until(&self, done: impl Fn(&Requests) -> bool) -> bool {
         let until = Instant::now() + CONTROL_WAIT;
         let mut requests = lock(&self.control.state);
-        while !requests.ended {
+        while !done(&requests) {
             let left = until.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return;
+                return false;
             }
             requests = self
                 .control
@@ -168,8 +180,22 @@ impl Reader {
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
         }
-        drop(requests);
-        if let Some(thread) = self.thread.take() {
+        true
+    }
+
+    /// Ends the reader's thread, waiting a second at most.
+    pub(crate) fn stop(mut self) {
+        self.end();
+    }
+
+    fn end(&mut self) {
+        lock(&self.control.state).stop = true;
+        self.control.changed.notify_all();
+        self.wake.wake();
+        let ended = self.wait_until(|requests| requests.ended);
+        if let Some(thread) = self.thread.take()
+            && ended
+        {
             let _ = thread.join();
         }
     }
@@ -219,7 +245,19 @@ impl<I: Input, D: Decode> Loop<I, D> {
         let mut waiting: Option<(Instant, Duration)> = None;
         loop {
             {
-                let mut requests = lock(&self.ended.control.state);
+                let control = self.ended.control.clone();
+                let mut requests = lock(&control.state);
+                if requests.park && !requests.stop {
+                    requests.parked = true;
+                    control.changed.notify_all();
+                    while requests.park && !requests.stop {
+                        requests = control
+                            .changed
+                            .wait(requests)
+                            .unwrap_or_else(PoisonError::into_inner);
+                    }
+                    requests.parked = false;
+                }
                 if requests.stop {
                     break;
                 }

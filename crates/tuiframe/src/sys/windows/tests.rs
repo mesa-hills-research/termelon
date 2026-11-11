@@ -732,6 +732,50 @@ fn a_screen_takes_the_console_and_gives_it_back_exactly() {
     assert_eq!(shared.events.next_timeout(LONG), Next::Closed);
 }
 
+/// Releasing gives the console back as it was found and reads nothing of what the program that
+/// has it meanwhile gets. Reacquiring sets the program's modes again, sends its setup, reads on,
+/// and makes the next frame a full redraw.
+#[test]
+fn a_released_console_is_left_alone_until_reacquired() {
+    let fake = Fake::new();
+    let before = fake.saved();
+    let screen = ScreenOn::open(
+        FakeConsole(fake.clone()),
+        |erase| {
+            Decoder::new(DecoderOptions {
+                erase,
+                ..DecoderOptions::default()
+            })
+        },
+        Duration::ZERO,
+    )
+    .unwrap();
+    screen.enable(&enabled()).unwrap();
+    fake.wait_written(&enabled().setup());
+    let taken = fake.saved();
+    assert!(screen.shared().take_redraw());
+    screen.release().unwrap();
+    fake.wait_written(&enabled().reset());
+    assert_eq!(fake.saved(), before);
+    // (What the editor reads meanwhile isn't the program's.)
+    fake.type_in(&[key_record(true, 0x41, u16::from(b'e'), 0)]);
+    nothing_more(screen.shared());
+    assert_eq!(fake.with(|state| state.records.len()), 1);
+    fake.with(|state| state.records.clear());
+    fake.with(|state| state.written.clear());
+    screen.reacquire().unwrap();
+    assert_eq!(fake.saved(), taken);
+    fake.wait_written(&enabled().setup());
+    assert!(screen.shared().take_redraw());
+    fake.type_in(&[key_record(true, 0x51, u16::from(b'q'), 0)]);
+    assert_eq!(
+        next(screen.shared()),
+        key(KeyCode::Char('q'), KeyModifiers::NONE)
+    );
+    assert!(screen.close(b"", LONG));
+    assert_eq!(fake.saved(), before);
+}
+
 #[test]
 fn a_screen_that_cant_open_leaves_the_console_as_it_was() {
     let fake = Fake::new();

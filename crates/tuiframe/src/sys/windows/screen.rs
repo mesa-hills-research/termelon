@@ -239,6 +239,35 @@ impl<C: Console> ScreenOn<C> {
         restore_on_console_events(&self.console_events)
     }
 
+    /// Gives the console back as closing does, its modes as the program found them, and holds the
+    /// reader still, for running another program on it, such as an editor, until
+    /// [`reacquire`](Self::reacquire). Fails when the console couldn't be given back.
+    pub(crate) fn release(&self) -> io::Result<()> {
+        if let Some(reader) = &self.reader {
+            reader.park();
+        }
+        self.writer.send(self.writer.reset().to_vec())?;
+        let _ = self.writer.wait(self.writer.ticket(), CLOSE_WAIT);
+        self.modes.restore()
+    }
+
+    /// Takes the console back after [`release`](Self::release). It sets the program's modes
+    /// again, sends what the program turned on, lets the reader go on, and makes the next frame a
+    /// full redraw. Fails when the console couldn't be taken back.
+    pub(crate) fn reacquire(&self) -> io::Result<()> {
+        let taken_back = self.modes.apply().and_then(|()| {
+            let enabled = lock(&self.enabled).clone();
+            let setup = effective(&enabled, self.modes.input().mode).setup();
+            self.writer.send(setup)?;
+            self.shared.request_redraw();
+            Ok(())
+        });
+        if let Some(reader) = &self.reader {
+            reader.unpark();
+        }
+        taken_back
+    }
+
     /// Windows has no job control, so a program can't be suspended there.
     #[expect(
         clippy::unused_self,
