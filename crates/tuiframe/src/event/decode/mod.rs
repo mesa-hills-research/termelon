@@ -145,8 +145,8 @@ impl Decoder {
         self.tokenizer.has_pending()
     }
 
-    /// Decodes what [`Decoder::has_pending`] counts as keys typed, since no more input follows, so a
-    /// lone ESC becomes Esc and `ESC [` becomes Alt+[. Afterwards nothing is pending. A sequence
+    /// Decodes what [`Decoder::has_pending`] counts as keys typed, since no more input follows, so
+    /// a lone ESC becomes Esc and `ESC [` becomes Alt+[. Afterwards nothing is pending. A sequence
     /// with more of it (`ESC [ 1 ;`), a string, a paste or part of a UTF-8 character stays for the
     /// next read, since only a split read leaves those unfinished.
     pub(crate) fn flush_pending(&mut self, out: &mut Vec<Decoded>) {

@@ -1,6 +1,7 @@
 //! Round trips through tuiframe-vt's encoders. Each profile's emulator, in each mode a program can
-//! set, encodes every key with every modifier, and the decoder gives back the key. Where an encoding
-//! can't carry a modifier or an event type, the expectation drops it, as `legacy` spells out.
+//! set, encodes every key with every modifier, and the decoder gives back the key. Where an
+//! encoding can't carry a modifier or an event type, the expectation drops it, as `legacy` spells
+//! out.
 
 use tuiframe_vt::{Emulator, Key, KeyEncoding, KeyKind, Mods, Mouse, MouseKind, Profile};
 

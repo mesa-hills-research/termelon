@@ -1,5 +1,6 @@
 //! Windows console input records as plain structs, so the decoder and its tests build on every
-//! system. The Windows reader copies each `INPUT_RECORD`'s fields into these and drops menu records.
+//! system. The Windows reader copies each `INPUT_RECORD`'s fields into these and drops menu
+//! records.
 
 use crate::layout::Size;
 
