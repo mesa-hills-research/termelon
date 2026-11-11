@@ -3,7 +3,7 @@
 //! The packet that takes the terminal and the reset that gives it back are built from one
 //! [`Enabled`], so the reset undoes exactly what was done. A [`RestoreHandle`] gives the terminal
 //! back from any thread, and [`install_panic_hook`] does it before a panic's message prints. On
-//! Unix, [`Screen`](screen::Screen) holds the terminal while a program has it.
+//! Unix, [`Screen`](screen::Screen) holds the terminal while a program has it, and suspends it.
 
 use std::fmt;
 use std::io::Write;
@@ -359,7 +359,9 @@ pub(crate) mod screen {
 
     use crate::layout::Size;
     use crate::sys::Shared;
-    use crate::sys::unix::{Decode, Modes, Reader, Resume, Signals, Tty, window_size};
+    use crate::sys::unix::{
+        Decode, Modes, Reader, Resume, Signals, Tty, stop_process, window_size,
+    };
 
     /// The terminal while a program has it, with its writer, its reader and its modes.
     #[derive(Debug)]
@@ -368,6 +370,7 @@ pub(crate) mod screen {
         shared: Arc<Shared>,
         reader: Option<Reader>,
         restore: RestoreHandle,
+        modes: Arc<Modes>,
         /// What takes the terminal, sent again when the program runs again after a stop.
         setup: Arc<Mutex<Vec<u8>>>,
         closed: bool,
@@ -467,6 +470,7 @@ pub(crate) mod screen {
                     shared,
                     reader: Some(reader),
                     restore,
+                    modes,
                     setup,
                     closed: false,
                 }),
@@ -500,6 +504,41 @@ pub(crate) mod screen {
         pub(crate) fn set_enabled(&self, enabled: &Enabled) {
             self.writer.set_reset(enabled.reset());
             *lock(&self.setup) = enabled.setup();
+        }
+
+        /// Suspends the program as Ctrl+Z does in a shell. It holds the reader still, gives the
+        /// terminal back as closing does, and stops the process with SIGTSTP. When the process
+        /// runs again, it takes the terminal back and queues [`Event::Resumed`], and the next
+        /// frame redraws everything. Fails when the terminal couldn't be given back or taken back.
+        ///
+        /// [`Event::Resumed`]: crate::event::Event::Resumed
+        pub(crate) fn suspend(&self) -> io::Result<()> {
+            if let Some(reader) = &self.reader {
+                reader.park();
+            }
+            let given_back = self.give_back_for_now();
+            let resumed = given_back.is_ok();
+            let stopped = given_back.and_then(|()| stop_process());
+            let taken_back = self.take_back();
+            if let Some(reader) = &self.reader {
+                reader.unpark(resumed);
+            }
+            stopped.and(taken_back)
+        }
+
+        /// Gives the terminal back until [`take_back`](Self::take_back), with the program's output
+        /// still open.
+        fn give_back_for_now(&self) -> io::Result<()> {
+            self.writer.send(self.writer.reset().to_vec())?;
+            let _ = self.writer.wait(self.writer.ticket(), CLOSE_WAIT);
+            self.modes.restore()
+        }
+
+        fn take_back(&self) -> io::Result<()> {
+            self.modes.apply_raw()?;
+            self.writer.send(lock(&self.setup).clone())?;
+            self.shared.request_redraw();
+            Ok(())
         }
 
         /// Gives the terminal back, with `tail` after the reset, waiting at most `wait` for it.
@@ -887,6 +926,75 @@ mod tests {
                 assert_eq!(after.is_some(), !gives_back, "{case}: {shown:?}");
                 assert_eq!(pty.modes(), before, "{case}");
             }
+        }
+
+        /// Suspending gives the terminal back while the process is stopped, and once it runs again
+        /// takes it back, queues `Resumed` and asks for a full redraw.
+        #[test]
+        fn suspend_gives_the_terminal_back_until_the_process_runs_again() {
+            use rustix::process::{Pid, Signal, WaitOptions, kill_process, waitpid};
+            const TEST: &str = "suspend_gives_the_terminal_back_until_the_process_runs_again";
+            if is_child("suspend") {
+                let screen = Screen::open(
+                    crate::sys::unix::Tty::open().unwrap(),
+                    |_| Bytes::default(),
+                    Duration::ZERO,
+                    &enabled(),
+                )
+                .unwrap();
+                assert!(screen.shared().take_redraw());
+                screen.writer().send(b"<ready>".to_vec()).unwrap();
+                screen.suspend().unwrap();
+                assert_eq!(next(screen.shared()), Event::Resumed);
+                assert!(screen.shared().take_redraw());
+                // (The SIGCONT that ended the stop gives no second `Resumed`.)
+                assert_eq!(
+                    screen
+                        .shared()
+                        .events
+                        .next_timeout(Duration::from_millis(200)),
+                    Next::Empty
+                );
+                let modes = rustix::termios::tcgetattr(rustix::stdio::stdin()).unwrap();
+                assert!(
+                    !modes
+                        .local_modes
+                        .contains(rustix::termios::LocalModes::ICANON)
+                );
+                screen.writer().send(b"<resumed>".to_vec()).unwrap();
+                assert!(screen.writer().wait_idle(LONG));
+                assert!(screen.close(b"", LONG));
+                return;
+            }
+            let (setup, reset) = (enabled().setup(), enabled().reset());
+            let mut pty = Pty::open(Size::new(80, 24));
+            let before = pty.modes();
+            let mut child = spawn_child(module_path!(), TEST, "suspend", &pty);
+            let pid = Pid::from_child(&child);
+            let ready = pty.read_until(0, b"<ready>", LONG);
+            let given_back = pty.read_until(ready, &reset, LONG);
+            let started = std::time::Instant::now();
+            loop {
+                let status = waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG);
+                match status.unwrap() {
+                    Some((_, status)) if status.stopped() => break,
+                    Some((_, status)) => panic!("the child ended, {status:?}"),
+                    None => {
+                        assert!(started.elapsed() < LONG, "the child never stopped");
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
+            }
+            assert_eq!(pty.modes(), before);
+            kill_process(pid, Signal::CONT).unwrap();
+            let taken_back = pty.read_until(given_back, &setup, LONG);
+            let resumed = pty.read_until(taken_back, b"<resumed>", LONG);
+            let status = child.wait().unwrap();
+            pty.read_ready();
+            let shown = String::from_utf8_lossy(&pty.shown).into_owned();
+            assert!(status.success(), "{status}: {shown:?}");
+            pty.read_until(resumed, &reset, LONG);
+            assert_eq!(pty.modes(), before);
         }
     }
 }

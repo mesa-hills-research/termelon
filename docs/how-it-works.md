@@ -376,8 +376,8 @@ impl Reader {
 ```
 
 The reply slot and `expect` come with the decoder's replies. On Unix, `restore::screen::Screen` puts
-these together. It takes the terminal (raw mode, the writer, the setup packet, the reader) and
-closes it.
+these together. It takes the terminal (raw mode, the writer, the setup packet, the reader), closes
+it, and suspends it.
 
 Each turn of the reader's loop does these steps.
 

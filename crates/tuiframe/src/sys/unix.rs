@@ -22,6 +22,9 @@ const READ_SIZE: usize = 4096;
 /// How long [`Reader::park`] and [`Reader::stop`] wait for the reader's thread.
 const CONTROL_WAIT: Duration = Duration::from_secs(1);
 
+/// How long the reader waits for the SIGCONT that ended a suspend, once the program runs again.
+const RESUME_WAIT: Duration = Duration::from_millis(100);
+
 /// The terminal, a descriptor of the library's own for each of its ends.
 #[derive(Debug)]
 pub(crate) struct Tty {
@@ -135,6 +138,14 @@ pub(crate) fn window_size(fd: BorrowedFd<'_>) -> io::Result<WindowSize> {
     })
 }
 
+/// Stops the process as Ctrl+Z does in a shell, with SIGTSTP, and returns once it runs again.
+///
+/// The signal goes to this thread, which stops with the rest before the call returns. Sent to the
+/// process, it could reach another thread, and this one would run on while the stop begins.
+pub(crate) fn stop_process() -> io::Result<()> {
+    signal_hook::low_level::raise(signal_hook::consts::SIGTSTP)
+}
+
 /// The pipes the signal handlers write to, one for each signal, so the reader learns which came.
 #[derive(Debug)]
 pub(crate) struct Signals {
@@ -216,13 +227,6 @@ pub(crate) fn timespec(duration: Duration) -> Timespec {
 /// Reads what a pipe that is ready holds, to empty it. Each byte only says the pipe was written.
 fn drain(pipe: &PipeReader) {
     let _ = (&*pipe).read(&mut [0; 64]);
-}
-
-/// Empties `pipe` if anything is in it, without waiting.
-fn drain_if_ready(pipe: &PipeReader) {
-    if let Ok([true]) = wait([pipe.as_fd()], Some(Duration::ZERO)) {
-        drain(pipe);
-    }
 }
 
 /// The decoding the reader does on what it reads.
@@ -488,8 +492,11 @@ impl<D: Decode> Loop<D> {
         let stop = requests.stop;
         drop(requests);
         if resumed {
-            // (The SIGCONT that ended the suspend is this, and the program took the terminal back.)
-            drain_if_ready(&self.signals.resume);
+            // (The SIGCONT that ended the suspend is this, and the program took the terminal back.
+            // Its handler may run on another thread a moment after the program runs again.)
+            if let Ok([true]) = wait([self.signals.resume.as_fd()], Some(RESUME_WAIT)) {
+                drain(&self.signals.resume);
+            }
             self.ended.shared.request_redraw();
             self.ended.shared.events.push(&mut vec![Event::Resumed]);
         }
