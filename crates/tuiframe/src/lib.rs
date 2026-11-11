@@ -4,6 +4,7 @@
 //!
 //! | Module | Holds |
 //! |---|---|
+//! | [`buffer`] | [`Buffer`], the cells a frame draws into |
 //! | [`text`] | [`Span`], [`Line`] and [`Text`], and the measure of text in cells |
 //! | [`style`] | [`Color`], [`Modifier`], [`UnderlineStyle`] and [`Style`] |
 //! | [`layout`] | [`Position`], [`Size`], [`Rect`], and [`Layout`] by [`Constraint`]s |
@@ -12,6 +13,7 @@
 //!
 //! The types used most are also at the crate's root.
 
+pub mod buffer;
 pub mod caps;
 pub mod event;
 mod flags;
@@ -19,6 +21,7 @@ pub mod layout;
 pub mod style;
 pub mod text;
 
+pub use buffer::Buffer;
 pub use caps::{Capabilities, WidthProfile};
 pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 pub use layout::{Alignment, Constraint, Layout, Position, Rect, Size};

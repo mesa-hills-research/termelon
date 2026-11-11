@@ -9,7 +9,10 @@
 
 use std::collections::HashSet;
 
+use tuiframe::buffer::Buffer;
 use tuiframe::caps::WidthProfile;
+use tuiframe::layout::Rect;
+use tuiframe::style::Style;
 use tuiframe::text;
 
 const EMOJI_TEST: &str = include_str!("data/emoji-test.txt");
@@ -323,4 +326,17 @@ fn every_emoji_test_sequence() {
         failures.len(),
         failures[..failures.len().min(60)].join("\n")
     );
+}
+
+#[test]
+fn emoji_sequences_are_written_as_uncertain() {
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 8, 1));
+    for s in emoji_sequences().iter().filter(|s| s.chars.len() > 1) {
+        let string: String = s.chars.iter().collect();
+        buffer.reset();
+        buffer.set_string(0, 0, &string, Style::new());
+        let cell = buffer.cell((0, 0)).unwrap();
+        assert_eq!(cell.symbol(), string);
+        assert!(cell.has_uncertain_width(), "{:X?}", s.chars);
+    }
 }
