@@ -20,7 +20,7 @@ const CONTROL_WAIT: Duration = Duration::from_secs(1);
 
 /// How long the input may be silent while the decoder holds a sequence, a string or a paste, before
 /// it's given up on.
-const HELD_WAIT: Duration = Duration::from_secs(1);
+pub(super) const HELD_WAIT: Duration = Duration::from_secs(1);
 
 /// What the program changes while the reader runs, read at each turn.
 #[derive(Debug, Default)]

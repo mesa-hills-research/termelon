@@ -134,13 +134,19 @@ impl Drop for Played {
 }
 
 /// Opens a terminal on `played` with `options`, the variables `vars` and `TUIFRAME_CAPS` unset.
+/// Unless `options` sets a probe timeout, the probe waits as long as a test does, since the
+/// emulator answers it however busy the machine.
 fn open(
     played: &Played,
     signals: Signals,
     vars: &'static [(&'static str, &'static str)],
     options: &Options,
 ) -> Terminal {
-    Terminal::open_on(played.tty(), options.clone(), &Vars(vars), signals).unwrap()
+    let options = Options {
+        probe_timeout: options.probe_timeout.or(Some(LONG)),
+        ..options.clone()
+    };
+    Terminal::open_on(played.tty(), options, &Vars(vars), signals).unwrap()
 }
 
 fn rung(emulator: &Emulator) -> bool {
@@ -736,8 +742,6 @@ fn the_cursor_keeps_the_users_shape_until_a_frame_sets_one() {
     use crate::output::writer::tests::block_on;
     use crate::output::{Cursor, CursorShape};
     let pty = Pty::open(Size::new(80, 24));
-    let (mut read, write) = std::io::pipe().unwrap();
-    let write = std::os::fd::OwnedFd::from(write);
     let caps = Capabilities {
         cursor_shape: Support::Yes,
         ..Capabilities::default()
@@ -746,23 +750,17 @@ fn the_cursor_keeps_the_users_shape_until_a_frame_sets_one() {
         capabilities: Some(caps),
         ..Options::default()
     };
-    let shown = Arc::new(Mutex::new(Vec::new()));
-    let reading = {
-        let shown = shown.clone();
-        std::thread::spawn(move || {
-            let mut buffer = [0; 4096];
-            while let Ok(count) = read.read(&mut buffer) {
-                if count == 0 {
-                    return;
-                }
-                lock(&shown).extend_from_slice(&buffer[..count]);
-            }
-        })
-    };
+    // What a terminal opened, drawn on twice and closed was shown, all of it.
     let run = |shape: Option<CursorShape>| {
+        let (mut read, write) = std::io::pipe().unwrap();
+        let shown = std::thread::spawn(move || {
+            let mut shown = Vec::new();
+            read.read_to_end(&mut shown).unwrap();
+            shown
+        });
         let tty = Tty {
             input: pty.slave.try_clone().unwrap(),
-            output: write.try_clone().unwrap(),
+            output: write.into(),
         };
         let (signals, _resize, _resume) = Signals::unregistered().unwrap();
         let mut terminal = Terminal::open_on(tty, options.clone(), &Vars(&[]), signals).unwrap();
@@ -778,10 +776,10 @@ fn the_cursor_keeps_the_users_shape_until_a_frame_sets_one() {
             assert!(matches!(drawn, Ok(Drawn::Written(_))));
         }
         terminal.close().unwrap();
+        // (The pipe ends once the closed terminal let go of it.)
+        shown.join().unwrap()
     };
-    run(None);
-    std::thread::sleep(Duration::from_millis(50));
-    let unshaped = lock(&shown).split_off(0);
+    let unshaped = run(None);
     assert!(find(&unshaped, b"\x1b[?25h").is_some());
     assert_eq!(
         find(&unshaped, b" q"),
@@ -789,13 +787,9 @@ fn the_cursor_keeps_the_users_shape_until_a_frame_sets_one() {
         "{:?}",
         String::from_utf8_lossy(&unshaped)
     );
-    run(Some(CursorShape::Bar));
-    std::thread::sleep(Duration::from_millis(50));
-    let shaped = lock(&shown).split_off(0);
+    let shaped = run(Some(CursorShape::Bar));
     let bar = find(&shaped, b"\x1b[6 q").expect("the bar");
     assert!(find(&shaped[bar..], b"\x1b[0 q").is_some());
-    drop(write);
-    reading.join().unwrap();
 }
 
 /// The alternate screen comes before the probe, so what a terminal prints of a query it can't

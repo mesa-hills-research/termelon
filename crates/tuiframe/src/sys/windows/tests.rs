@@ -12,7 +12,7 @@ use super::modes::bits::{
     ENABLE_VIRTUAL_TERMINAL_PROCESSING, ENABLE_WINDOW_INPUT,
 };
 use super::modes::{InputSettings, Modes, OUTPUT_MODE, Saved};
-use super::reader::{Reader, Settings, vt_bytes};
+use super::reader::{HELD_WAIT, Reader, Settings, vt_bytes};
 use super::screen::ScreenOn;
 use super::{
     Console, Input, InputMode, READ_RECORDS, Ready, Utf16Writer, Wake, Window, WriteUnits,
@@ -522,15 +522,18 @@ fn vt_input_decodes_the_bytes_the_records_carry() {
 /// With an escape timeout, a lone ESC waits for what follows it.
 #[test]
 fn vt_input_waits_the_escape_timeout() {
-    let fake = Fake::new();
     let settings = Arc::new(Settings::default());
     settings.set_mode(InputMode::Vt);
-    let timeout = Duration::from_millis(200);
-    let (_reader, shared) = reading(&fake, &settings, timeout);
+    // (The rest comes 50 ms later, well within a long timeout however busy the machine.)
+    let fake = Fake::new();
+    let (_reader, shared) = reading(&fake, &settings, LONG);
     fake.type_in(&vt_records("\x1b"));
     std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("x"));
     assert_eq!(next(&shared), key(KeyCode::Char('x'), KeyModifiers::ALT));
+    let timeout = Duration::from_millis(200);
+    let fake = Fake::new();
+    let (_reader, shared) = reading(&fake, &settings, timeout);
     let typed = Instant::now();
     fake.type_in(&vt_records("\x1b"));
     assert_eq!(next(&shared), key(KeyCode::Esc, KeyModifiers::NONE));
@@ -914,14 +917,19 @@ fn keys_typed_during_the_probe_are_the_same_keys_afterwards() {
     assert_eq!(next(&shared), key(KeyCode::Enter, KeyModifiers::SHIFT));
 }
 
-/// A sequence cut short, then silence, is given up on, so what's typed next is itself.
+/// What a terminal left unfinished, then silence, is given up on, so what's typed next is itself.
+/// A paste whose end never comes is delivered as it stands. (The reader's second starts when it
+/// reads, which on a busy machine can be well after the records came, so the test waits for the
+/// paste rather than for a second.)
 #[test]
-fn a_reply_cut_short_is_given_up_on_after_silence() {
+fn held_input_is_given_up_on_after_silence() {
     let fake = Fake::new();
     let settings = Arc::new(Settings::default());
     let (_reader, shared) = reading(&fake, &settings, Duration::ZERO);
-    fake.type_in(&reply_records("\x1b]11;rgb:00", 0));
-    std::thread::sleep(Duration::from_millis(1300));
+    let typed = Instant::now();
+    fake.type_in(&reply_records("\x1b[200~left open", 0));
+    assert_eq!(next(&shared), Event::Paste("left open".into()));
+    assert!(typed.elapsed() >= HELD_WAIT);
     fake.type_in(&[key_record(true, 0x41, u16::from(b'a'), 0)]);
     assert_eq!(next(&shared), key(KeyCode::Char('a'), KeyModifiers::NONE));
 }

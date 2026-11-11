@@ -1053,7 +1053,7 @@ pub(crate) mod tests {
     }
 
     /// With the library's decoder, replies go to the reply slot while it's open and nowhere
-    /// otherwise, a cursor report is one only while it's expected, and a sequence a terminal left
+    /// otherwise, a cursor report is one only while it's expected, and what a terminal left
     /// unfinished is given up after a second of silence.
     #[test]
     fn the_decoder_routes_replies_and_gives_up_on_what_it_holds() {
@@ -1085,9 +1085,14 @@ pub(crate) mod tests {
         reading.reader.cancel_expected();
         reading.pty.type_in(b"\x1b[1;5R");
         assert_eq!(next(&reading.shared), ctrl_f3);
-        // A sequence cut short holds nothing back once the input was silent a while.
-        reading.pty.type_in(b"\x1b[1;");
-        std::thread::sleep(HELD_WAIT + Duration::from_millis(200));
+        // A paste whose end never comes is delivered as it stands once the input was silent a
+        // while, and what's typed next is itself. (The reader's second starts when it reads, which
+        // on a busy machine can be well after the bytes were typed, so the test waits for the
+        // paste rather than for a second.)
+        let typed = Instant::now();
+        reading.pty.type_in(b"\x1b[200~left open");
+        assert_eq!(next(&reading.shared), Event::Paste("left open".into()));
+        assert!(typed.elapsed() >= HELD_WAIT);
         reading.pty.type_in(b"a");
         assert_eq!(next(&reading.shared), key('a', KeyModifiers::NONE));
     }
@@ -1153,16 +1158,18 @@ pub(crate) mod tests {
     /// timeout passes with nothing more.
     #[test]
     fn a_kept_sequence_waits_for_the_escape_timeout() {
-        let timeout = Duration::from_millis(200);
-        let mut reading = reading(timeout);
-        reading.pty.type_in(b"\x1b");
+        // (The rest comes 50 ms later, well within a long timeout however busy the machine.)
+        let mut waiting = reading(LONG);
+        waiting.pty.type_in(b"\x1b");
         std::thread::sleep(Duration::from_millis(50));
-        reading.pty.type_in(b"d");
-        assert_eq!(next(&reading.shared), key('d', KeyModifiers::ALT));
+        waiting.pty.type_in(b"d");
+        assert_eq!(next(&waiting.shared), key('d', KeyModifiers::ALT));
+        let timeout = Duration::from_millis(200);
+        let mut alone = reading(timeout);
         let typed = Instant::now();
-        reading.pty.type_in(b"\x1b");
+        alone.pty.type_in(b"\x1b");
         assert_eq!(
-            next(&reading.shared),
+            next(&alone.shared),
             Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         );
         assert!(typed.elapsed() >= timeout);
