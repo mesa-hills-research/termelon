@@ -129,6 +129,9 @@ pub struct Reports {
     pub cursor: bool,
     /// Text past U+00FF. GNU screen's hardcopy keeps one byte per cell.
     pub wide_text: bool,
+    /// Whether it drops the blank cells at the end of each row, background colour and all, as
+    /// VTE's HTML does.
+    pub trims_rows: bool,
 }
 
 /// A terminal's screen as it reported it, rebuilt in an emulator, so it can be compared with
@@ -303,6 +306,7 @@ pub fn clean_command(program: impl AsRef<OsStr>) -> Command {
         "XDG_RUNTIME_DIR",
         "WAYLAND_DISPLAY",
         "LIBGL_ALWAYS_SOFTWARE",
+        "DBUS_SESSION_BUS_ADDRESS",
     ] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);

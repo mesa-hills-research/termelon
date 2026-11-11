@@ -1,5 +1,5 @@
-//! What the drivers of X terminals share: the display, spawning, finding the window, and keys
-//! through xdotool.
+//! What the drivers of windowed terminals share: the display, spawning and waiting, and for X,
+//! finding the window and pressing keys through xdotool.
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -13,17 +13,20 @@ use crate::keys;
 /// How long a terminal may take to open its window.
 pub const START_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Fails unless there's an X display, on systems where terminals need one.
+/// Fails unless there's a display, on systems where terminals need one.
 ///
 /// # Errors
 ///
-/// When `DISPLAY` isn't set on Linux and the BSDs.
+/// When neither `DISPLAY` nor `WAYLAND_DISPLAY` is set on Linux and the BSDs.
 pub fn require_display() -> Result<(), Error> {
-    if cfg!(any(target_os = "macos", windows)) || std::env::var_os("DISPLAY").is_some() {
+    let display = ["DISPLAY", "WAYLAND_DISPLAY"]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some());
+    if cfg!(any(target_os = "macos", windows)) || display {
         Ok(())
     } else {
         Err(Error::Missing(
-            "an X display (DISPLAY, such as Xvfb's)".to_owned(),
+            "a display (DISPLAY, such as Xvfb's, or WAYLAND_DISPLAY)".to_owned(),
         ))
     }
 }

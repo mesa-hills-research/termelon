@@ -16,6 +16,8 @@
 //! | kitty | `--listen-on` with remote control, under X | `kitten @ send-key`, bytes with `send-text` | `kitten @ get-text --ansi --add-cursor` |
 //! | xterm | `-geometry` and a bitmap font, under X | xdotool | the `CSI 10 i` XHTML dump |
 //! | WezTerm | `start --always-new-process`, under X | xdotool, bytes with `cli send-text` | `cli get-text --escapes` and `cli list` |
+//! | xterm.js | `@xterm/headless` on `node-pty`, by a node script | bytes only | the buffer, as SGR rows |
+//! | VTE | a `Vte.Terminal` in an offscreen GTK window, by a Python script | GTK key events, bytes with `feed_child` | `get_text_format(HTML)` |
 
 pub mod compare;
 pub mod driver;

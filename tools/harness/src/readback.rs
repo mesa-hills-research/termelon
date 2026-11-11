@@ -136,9 +136,10 @@ pub fn hardcopy_screen(bytes: &[u8], cols: u16, rows: u16) -> Result<Emulator, E
     ansi_screen(cells.as_bytes(), cols, rows, WidthRules::default())
 }
 
-/// The default colours and the rows of xterm's `CSI 10 i` XHTML dump.
+/// The default colours and the rows of an HTML screen dump, xterm's `CSI 10 i` or VTE's
+/// `get_text_format`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct XtermDump {
+pub struct HtmlDump {
     /// The default foreground, from the dump's outer style, if it gives one.
     pub foreground: Option<(u8, u8, u8)>,
     /// The default background.
@@ -147,14 +148,15 @@ pub struct XtermDump {
     pub ansi: Vec<u8>,
 }
 
-/// Reads xterm's XHTML dump: the text inside `<pre>`, with `<span style>` runs giving colours as
-/// `#rrggbb` and attributes as CSS. The runs become SGR with RGB colours, and a colour equal to the
-/// dump's default becomes the default.
+/// Reads an HTML screen dump: the text inside `<pre>`, with colours as `#rrggbb` and attributes as
+/// CSS in `<span style>` (xterm) or as `<b>`, `<i>`, `<u>`, `<strike>`, `<blink>` and
+/// `<font color>` (VTE). The runs become SGR with RGB colours, and a colour equal to the dump's
+/// default becomes the default.
 ///
 /// # Errors
 ///
 /// When the dump has no `<pre>`.
-pub fn xterm_html(html: &str) -> Result<XtermDump, Error> {
+pub fn html_dump(html: &str) -> Result<HtmlDump, Error> {
     let pre_start = html
         .find("<pre")
         .ok_or_else(|| Error::Parse("the dump has no <pre>".to_owned()))?;
@@ -176,21 +178,18 @@ pub fn xterm_html(html: &str) -> Result<XtermDump, Error> {
     let mut stack: Vec<Css> = Vec::new();
     let mut rest = body.strip_prefix('\n').unwrap_or(body);
     while !rest.is_empty() {
-        if let Some(tag) = rest.strip_prefix("<span") {
-            let end = tag.find('>').unwrap_or(tag.len());
-            let style = tag[..end]
-                .find("style=")
-                .map(|i| css(attribute_value(&tag[i + 6..end])))
-                .unwrap_or_default();
-            let inherited = stack.last().cloned().unwrap_or_default();
-            stack.push(inherited.with(&style));
-            rest = tag.get(end + 1..).unwrap_or("");
-        } else if let Some(after) = rest.strip_prefix("</span>") {
+        if rest.starts_with("</") {
             stack.pop();
-            rest = after;
+            rest = rest.find('>').map_or("", |end| &rest[end + 1..]);
         } else if rest.starts_with('<') {
-            let end = rest.find('>').map_or(rest.len(), |i| i + 1);
-            rest = &rest[end..];
+            let end = rest.find('>').unwrap_or(rest.len());
+            let tag = &rest[1..end];
+            rest = rest.get(end + 1..).unwrap_or("");
+            if tag.ends_with('/') || tag.starts_with('!') || tag.starts_with('?') {
+                continue;
+            }
+            let inherited = stack.last().cloned().unwrap_or_default();
+            stack.push(inherited.with(&tag_css(tag)));
         } else {
             let end = rest.find('<').unwrap_or(rest.len());
             let text = unescape(&rest[..end]);
@@ -207,11 +206,46 @@ pub fn xterm_html(html: &str) -> Result<XtermDump, Error> {
             rest = &rest[end..];
         }
     }
-    Ok(XtermDump {
+    Ok(HtmlDump {
         foreground,
         background,
         ansi,
     })
+}
+
+/// What an opening tag says about the text inside it: its `style`, and for VTE's tags, `<b>`,
+/// `<i>`, `<u>`, `<strike>`, `<blink>` and `<font color>`.
+fn tag_css(tag: &str) -> Css {
+    let name = tag
+        .split(|c: char| c.is_whitespace() || c == '/')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mut out = attribute(tag, "style").map(css).unwrap_or_default();
+    match name.as_str() {
+        "b" | "strong" => out.bold = true,
+        "i" | "em" => out.italic = true,
+        "u" => out.underline = true,
+        "s" | "strike" | "del" => out.strike = true,
+        "blink" => out.blink = true,
+        "font" => out.fg = attribute(tag, "color").and_then(hex_color).or(out.fg),
+        _ => {}
+    }
+    out
+}
+
+/// An attribute's value in a tag's text, in single or double quotes.
+fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let mut rest = tag;
+    loop {
+        let at = rest.find(name)?;
+        let before = rest[..at].chars().next_back();
+        let after = &rest[at + name.len()..];
+        if before.is_some_and(char::is_whitespace) && after.starts_with('=') {
+            return Some(attribute_value(&after[1..]));
+        }
+        rest = &rest[at + name.len()..];
+    }
 }
 
 /// The value of an HTML attribute, in single or double quotes, at the start of `text`.
@@ -231,6 +265,9 @@ struct Css {
     bold: bool,
     italic: bool,
     underline: bool,
+    /// The underline's style, SGR 4's sub-parameter.
+    underline_style: Option<u8>,
+    underline_color: Option<(u8, u8, u8)>,
     strike: bool,
     overline: bool,
     blink: bool,
@@ -244,6 +281,8 @@ impl Css {
             bold: self.bold || inner.bold,
             italic: self.italic || inner.italic,
             underline: self.underline || inner.underline,
+            underline_style: inner.underline_style.or(self.underline_style),
+            underline_color: inner.underline_color.or(self.underline_color),
             strike: self.strike || inner.strike,
             overline: self.overline || inner.overline,
             blink: self.blink || inner.blink,
@@ -261,13 +300,18 @@ impl Css {
         for (on, p) in [
             (self.bold, "1"),
             (self.italic, "3"),
-            (self.underline, "4"),
             (self.blink, "5"),
             (self.strike, "9"),
             (self.overline, "53"),
         ] {
             if on {
                 params.push(p.to_owned());
+            }
+        }
+        if self.underline {
+            params.push(format!("4:{}", self.underline_style.unwrap_or(1)));
+            if let Some((r, g, b)) = self.underline_color {
+                params.push(format!("58;2;{r};{g};{b}"));
             }
         }
         format!("\x1b[{}m", params.join(";"))
@@ -299,6 +343,17 @@ fn css(style: &str) -> Css {
                     }
                 }
             }
+            "text-decoration-style" => {
+                out.underline_style = match value {
+                    "solid" => Some(1),
+                    "double" => Some(2),
+                    "wavy" => Some(3),
+                    "dotted" => Some(4),
+                    "dashed" => Some(5),
+                    _ => None,
+                };
+            }
+            "text-decoration-color" => out.underline_color = hex_color(value),
             _ => {}
         }
     }

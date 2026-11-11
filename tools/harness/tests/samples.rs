@@ -1,12 +1,14 @@
 //! Each driver's parser on saved readbacks, so they're tested where the terminals can't run.
 //!
-//! The tmux and GNU screen samples were recorded from tmux 3.6 and screen 4.9.1 running the probe's
-//! scenes. The kitty, xterm and WezTerm samples are written by hand in the formats their docs
-//! describe, for the small screen in `small.bytes`, until a run on CI records real ones.
+//! The tmux, GNU screen, xterm.js and VTE samples were recorded from tmux 3.6, screen 4.9.1,
+//! `@xterm/headless` 6.0.0 and VTE 0.84 running the probe's scenes. The kitty, xterm and WezTerm
+//! samples are written by hand in the formats their docs describe, for the small screen in
+//! `small.bytes`, until a run on CI records real ones.
 
 use std::path::PathBuf;
 
-use harness::drivers::{kitty, screen, tmux, wezterm, xterm};
+use harness::drivers::{kitty, screen, tmux, vte, wezterm, xterm, xtermjs};
+use harness::json::Json;
 use harness::{Readback, compare};
 use tuiframe_vt::{Color, Emulator, Profile, WidthRules};
 
@@ -202,4 +204,39 @@ fn wezterm_starts_at_the_size_in_a_new_process() {
     let start = args.iter().position(|arg| arg == "start").unwrap();
     assert_eq!(args[start + 1], "--always-new-process");
     assert_eq!(args[args.len() - 4..], ["--", "probe", "--scene", "text"]);
+}
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "a helper of tests, which fail on an error"
+)]
+fn json(name: &str) -> Json {
+    Json::parse(&String::from_utf8(sample(name)).unwrap()).unwrap()
+}
+
+#[test]
+fn xtermjs_screens() {
+    for scene in ["styles", "text"] {
+        let readback =
+            xtermjs::parse(&json(&format!("xtermjs-6.0.0-{scene}.json")), 80, 24).unwrap();
+        let profile = Profile {
+            hyperlinks: true,
+            ..Profile::xterm()
+        };
+        assert_same(
+            &expected(profile, 80, 24, &format!("{scene}.bytes")),
+            &readback,
+        );
+    }
+}
+
+#[test]
+fn vte_screens() {
+    for scene in ["styles", "text"] {
+        let readback = vte::parse(&json(&format!("vte-0.84-{scene}.json")), 80, 24).unwrap();
+        assert_same(
+            &expected(Profile::xterm(), 80, 24, &format!("{scene}.bytes")),
+            &readback,
+        );
+    }
 }

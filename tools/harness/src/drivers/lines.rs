@@ -1,0 +1,99 @@
+//! A helper program that runs the terminal and answers JSON requests, one per line, on its
+//! standard input and output. The xterm.js and VTE drivers talk to theirs this way.
+
+use std::io::{BufRead as _, BufReader, Write as _};
+use std::path::Path;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, channel};
+use std::time::Duration;
+
+use crate::driver::{Error, describe};
+use crate::json::Json;
+
+/// How long the helper may take to answer.
+pub const REPLY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A running helper.
+#[derive(Debug)]
+pub struct Helper {
+    name: &'static str,
+    child: Child,
+    stdin: ChildStdin,
+    replies: Receiver<String>,
+}
+
+impl Helper {
+    /// Starts a helper, its standard error going to `log`, and waits for its first line, which
+    /// must be `{"ready":true}`.
+    ///
+    /// # Errors
+    ///
+    /// When it can't start, or begins with anything else.
+    pub fn start(name: &'static str, mut command: Command, log: &Path) -> Result<Helper, Error> {
+        let described = describe(&command);
+        let log =
+            std::fs::File::create(log).map_err(|error| Error::Io(described.clone(), error))?;
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(log);
+        let mut child = command
+            .spawn()
+            .map_err(|error| Error::Io(described, error))?;
+        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            return Err(Error::Missing(format!("{name}'s pipes")));
+        };
+        let (sender, replies) = channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut helper = Helper {
+            name,
+            child,
+            stdin,
+            replies,
+        };
+        let ready = helper.reply()?;
+        if ready.get("ready").and_then(Json::as_bool) != Some(true) {
+            return Err(Error::Parse(format!(
+                "{name} began with {}",
+                ready.to_text().trim()
+            )));
+        }
+        Ok(helper)
+    }
+
+    /// Sends a request and returns the answer.
+    ///
+    /// # Errors
+    ///
+    /// When the helper is gone or doesn't answer in time.
+    pub fn request(&mut self, request: &Json) -> Result<Json, Error> {
+        let mut line = request.to_text().replace('\n', "");
+        line.push('\n');
+        self.stdin
+            .write_all(line.as_bytes())
+            .map_err(|error| Error::Io(self.name.to_owned(), error))?;
+        self.reply()
+    }
+
+    fn reply(&mut self) -> Result<Json, Error> {
+        let line = self
+            .replies
+            .recv_timeout(REPLY_TIMEOUT)
+            .map_err(|_| Error::Parse(format!("{} didn't answer", self.name)))?;
+        Json::parse(&line)
+            .map_err(|error| Error::Parse(format!("{} wrote {line:?}: {error}", self.name)))
+    }
+
+    /// Asks the helper to quit, then makes sure it has.
+    pub fn stop(mut self) {
+        let _ = self.stdin.write_all(b"{\"quit\":true}\n");
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}

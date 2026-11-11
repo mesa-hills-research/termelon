@@ -129,6 +129,7 @@ pub fn parse(
         attributes: Attributes::ALL,
         cursor: true,
         wide_text: true,
+        trims_rows: false,
     };
     Ok(Readback { screen, reports })
 }

@@ -1,18 +1,23 @@
 //! One driver per terminal.
 
 pub mod kitty;
+pub mod lines;
 pub mod screen;
 pub mod tmux;
+pub mod vte;
 pub mod wezterm;
 pub mod x11;
 pub mod xterm;
+pub mod xtermjs;
 
 use tuiframe_vt::{Profile, WidthRules};
 
 use crate::driver::{Driver, Error};
 
 /// The terminals the harness has drivers for.
-pub const TERMINALS: [&str; 5] = ["tmux", "screen", "kitty", "xterm", "wezterm"];
+pub const TERMINALS: [&str; 7] = [
+    "tmux", "screen", "kitty", "xterm", "wezterm", "xtermjs", "vte",
+];
 
 /// A driver for a terminal by name.
 ///
@@ -30,6 +35,8 @@ pub fn driver(name: &str) -> Result<Box<dyn Driver>, Error> {
         "kitty" => Box::new(kitty::Kitty::new()?),
         "xterm" => Box::new(xterm::Xterm::new()?),
         "wezterm" => Box::new(wezterm::Wezterm::new()?),
+        "xtermjs" => Box::new(xtermjs::XtermJs::new()?),
+        "vte" => Box::new(vte::Vte::new()?),
         _ => return Err(Error::Missing(format!("a driver for {name}"))),
     })
 }
@@ -68,6 +75,16 @@ pub fn profile(name: &str) -> Option<Profile> {
             profile.modes.extend([2026, 2027]);
             Some(profile)
         }
+        "xtermjs" => Some(Profile {
+            name: "xtermjs".to_owned(),
+            hyperlinks: true,
+            ..Profile::xterm()
+        }),
+        "vte" => Some(Profile {
+            name: "vte".to_owned(),
+            hyperlinks: true,
+            ..Profile::xterm()
+        }),
         _ => None,
     }
 }
