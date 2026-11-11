@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::{Child, Command};
 
-use tuiframe_vt::{Key, Mods, Profile, WidthRules};
+use termelon_vt::{Key, Mods, Profile, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
@@ -82,7 +82,7 @@ pub const GET_TEXT: [&str; 5] = ["get-text", "--extent", "screen", "--ansi", "--
 ///
 /// # Errors
 ///
-/// When the output holds a sequence `tuiframe-vt` doesn't know.
+/// When the output holds a sequence `termelon-vt` doesn't know.
 pub fn parse(text: &[u8], cols: u16, rows: u16, width: WidthRules) -> Result<Readback, Error> {
     let reports = Reports {
         colors: Colors::AsWritten,

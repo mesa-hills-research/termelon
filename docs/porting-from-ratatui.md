@@ -1,32 +1,32 @@
 # Porting from ratatui and crossterm
 
-tuiframe takes the place of both. Its text, style and layout types and its widgets keep ratatui's
+Termelon takes the place of both. Its text, style and layout types and its widgets keep ratatui's
 names, fields and builders, so most drawing code ports by changing its imports. The terminal,
 events and tests change more, and this page goes through them.
 
 ```toml
 [dependencies]
-tuiframe = "0.1"
+termelon = "0.1"
 
 [dev-dependencies]
-tuiframe = { version = "0.1", features = ["testing"] }
+termelon = { version = "0.1", features = ["testing"] }
 ```
 
 ## Imports
 
-| ratatui and crossterm | tuiframe |
+| ratatui and crossterm | termelon |
 |---|---|
-| `ratatui::text::{Span, Line, Text}` | `tuiframe::text::{Span, Line, Text}` |
-| `ratatui::style::{Style, Color, Modifier}` | `tuiframe::style::{Style, Color, Modifier}` |
-| `ratatui::layout::{Rect, Position, Size, Layout, Constraint, Alignment}` | `tuiframe::layout::{...}`, the same names |
-| `ratatui::buffer::Buffer` | `tuiframe::buffer::Buffer` |
-| `ratatui::widgets::{Widget, Block, Borders, Clear, Paragraph, Wrap, Padding}` | `tuiframe::widgets::{...}`, the same names |
-| `ratatui::symbols::border::{Set, PLAIN, ROUNDED, ...}` | `tuiframe::widgets::BorderSet`, with `BorderSet::PLAIN`, `ROUNDED`, `THICK`, `DOUBLE` and `ASCII` |
-| `ratatui::{Terminal, Frame}` | `tuiframe::{Terminal, Frame}` |
-| `crossterm::event::{Event, KeyEvent, KeyCode, KeyModifiers, KeyEventKind, MouseEvent, MouseEventKind}` | `tuiframe::event::{...}`, the same names |
-| `ratatui::backend::TestBackend` | `tuiframe::testing::TestTerminal` |
+| `ratatui::text::{Span, Line, Text}` | `termelon::text::{Span, Line, Text}` |
+| `ratatui::style::{Style, Color, Modifier}` | `termelon::style::{Style, Color, Modifier}` |
+| `ratatui::layout::{Rect, Position, Size, Layout, Constraint, Alignment}` | `termelon::layout::{...}`, the same names |
+| `ratatui::buffer::Buffer` | `termelon::buffer::Buffer` |
+| `ratatui::widgets::{Widget, Block, Borders, Clear, Paragraph, Wrap, Padding}` | `termelon::widgets::{...}`, the same names |
+| `ratatui::symbols::border::{Set, PLAIN, ROUNDED, ...}` | `termelon::widgets::BorderSet`, with `BorderSet::PLAIN`, `ROUNDED`, `THICK`, `DOUBLE` and `ASCII` |
+| `ratatui::{Terminal, Frame}` | `termelon::{Terminal, Frame}` |
+| `crossterm::event::{Event, KeyEvent, KeyCode, KeyModifiers, KeyEventKind, MouseEvent, MouseEventKind}` | `termelon::event::{...}`, the same names |
+| `ratatui::backend::TestBackend` | `termelon::testing::TestTerminal` |
 
-The most used types are also at the crate's root, as in `use tuiframe::{Line, Span, Style}`.
+The most used types are also at the crate's root, as in `use termelon::{Line, Span, Style}`.
 
 ## The terminal
 
@@ -35,9 +35,9 @@ focus reports, the kitty keyboard flags and the backend. Closing, dropping or a 
 it back.
 
 ```rust
-use tuiframe::{Drawn, Options, Terminal};
+use termelon::{Drawn, Options, Terminal};
 
-tuiframe::install_panic_hook();
+termelon::install_panic_hook();
 let mut terminal = Terminal::open(Options::default())?;
 match terminal.draw(|frame| ui(frame, &app))? {
     Drawn::Written(done) => { /* done.buffer(), done.cursor(), done.stats() */ }
@@ -47,7 +47,7 @@ match terminal.draw(|frame| ui(frame, &app))? {
 terminal.close()?;
 ```
 
-| ratatui and crossterm | tuiframe |
+| ratatui and crossterm | termelon |
 |---|---|
 | `enable_raw_mode`, `EnterAlternateScreen`, `EnableMouseCapture`, `EnableBracketedPaste`, `EnableFocusChange`, `PushKeyboardEnhancementFlags` | `Terminal::open(options)`, with `Options` choosing the mouse mode, paste, focus and keyboard |
 | `disable_raw_mode`, `LeaveAlternateScreen` and the rest | `terminal.close()`, or dropping it |
@@ -75,7 +75,7 @@ frame that sets no cursor hides it.
 
 The buffer can't be indexed, since a cell alone can't say its text when it holds a grapheme cluster.
 
-| ratatui | tuiframe |
+| ratatui | termelon |
 |---|---|
 | `buf[(x, y)].symbol()` | `buf.symbol((x, y))`, or `buf.cell((x, y))?.symbol()` |
 | `buf[(x, y)].fg`, `.bg`, `.modifier` | `buf.cell((x, y))?.fg()`, `.bg()`, `.modifier()` |
@@ -106,14 +106,14 @@ by a cell. `BorderType` and `border_type` aren't there, and `border_set(BorderSe
 what `border_type(BorderType::Rounded)` did.
 
 List, Table, Tabs, Gauge, Scrollbar, Sparkline, Chart, Canvas and the stateful widgets aren't in
-tuiframe. A widget of your own ports with the `Widget` trait, whose `render(self, area, buf)` has
+termelon. A widget of your own ports with the `Widget` trait, whose `render(self, area, buf)` has
 ratatui's shape.
 
 ## Events
 
 `terminal.events()` gives an `Events`, which every call shares.
 
-| crossterm | tuiframe |
+| crossterm | termelon |
 |---|---|
 | `event::poll(timeout)` and `event::read()` | `events.next_timeout(timeout)`, `Ok(None)` when nothing came |
 | `event::read()` in a loop until `poll` says empty | `events.batch()`, everything already queued |
@@ -133,7 +133,7 @@ redraws everything.
 `TestTerminal` replaces `TestBackend` with `Terminal::new`. It runs the real encoder and feeds a
 terminal emulator, so a test sees what a terminal would show.
 
-| ratatui | tuiframe |
+| ratatui | termelon |
 |---|---|
 | `Terminal::new(TestBackend::new(80, 24))` | `TestTerminal::new(80, 24)` |
 | `terminal.draw(...)` | `term.draw(...)`, never held |

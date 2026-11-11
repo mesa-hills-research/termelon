@@ -14,7 +14,7 @@ pub mod x11;
 pub mod xterm;
 pub mod xtermjs;
 
-use tuiframe_vt::{KeyEncoding, Profile, WidthRules};
+use termelon_vt::{KeyEncoding, Profile, WidthRules};
 
 use crate::driver::{Driver, Error};
 
@@ -59,7 +59,7 @@ pub fn driver(name: &str) -> Result<Box<dyn Driver>, Error> {
     })
 }
 
-/// The `tuiframe-vt` profile that computes what a terminal should show.
+/// The `termelon-vt` profile that computes what a terminal should show.
 pub fn profile(name: &str) -> Option<Profile> {
     match name {
         "tmux" => Some(Profile::tmux_3_4()),

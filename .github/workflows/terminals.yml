@@ -1,7 +1,7 @@
 name: Terminals
 
 # Runs the harness in real terminals. Each starts with the probe, shows its scenes, and is read back
-# and compared with tuiframe-vt. tmux, xterm.js and a kitty smoke test run on every push to main, and
+# and compared with termelon-vt. tmux, xterm.js and a kitty smoke test run on every push to main, and
 # the rest nightly, on demand, and on pull requests labelled `terminals`.
 
 on:

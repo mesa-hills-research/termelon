@@ -1,6 +1,6 @@
 //! The keys and mouse events the harness presses in each terminal, and how a fixture names them.
 
-use tuiframe_vt::{Key, Mods, Mouse, MouseButton, MouseKind};
+use termelon_vt::{Key, Mods, Mouse, MouseButton, MouseKind};
 
 const NONE: Mods = Mods::NONE;
 const SHIFT: Mods = Mods::SHIFT;

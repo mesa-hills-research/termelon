@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tuiframe_vt::{Key, Mods, Mouse, WidthRules};
+use termelon_vt::{Key, Mods, Mouse, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, work_dir,

@@ -9,13 +9,13 @@ use harness::compare;
 use harness::driver::{Driver, Launch, installed, work_dir};
 use harness::drivers::{vte, xtermjs};
 use harness::run::smoke;
-use tuiframe_vt::{Emulator, Mouse, MouseButton, MouseKind, Profile};
+use termelon_vt::{Emulator, Mouse, MouseButton, MouseKind, Profile};
 
 const SCENE: &str = "\x1b[1;1Hplain \x1b[1mbold\x1b[0m \x1b[38;5;196mred\x1b[0m \x1b[4:3mcurly\x1b[0m\
                      \x1b[2;3H字幕 é e\u{301} ⣷…\x1b[3;1H\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\
                      \x1b[4;1H\x1b[44mblue\x1b[0m";
 
-/// Runs [`SCENE`] with `cat` and compares the readback with `tuiframe-vt`'s screen.
+/// Runs [`SCENE`] with `cat` and compares the readback with `termelon-vt`'s screen.
 #[expect(
     clippy::unwrap_used,
     reason = "a helper of tests, which fail on an error"
@@ -61,7 +61,7 @@ fn read_until(file: &Path, len: usize) -> Vec<u8> {
 }
 
 /// Clicks and turns the wheel over a program that asked for SGR mouse reports, and checks it got
-/// what `tuiframe-vt` sends.
+/// what `termelon-vt` sends.
 #[expect(
     clippy::unwrap_used,
     reason = "a helper of tests, which fail on an error"

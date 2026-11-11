@@ -7,7 +7,7 @@ use harness::compare;
 use harness::driver::{Driver, Launch, installed, work_dir};
 use harness::drivers::screen::Screen;
 use harness::run::smoke;
-use tuiframe_vt::{Emulator, Key, Mods, Profile};
+use termelon_vt::{Emulator, Key, Mods, Profile};
 
 #[expect(
     clippy::expect_used,

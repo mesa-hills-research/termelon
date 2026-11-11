@@ -7,7 +7,7 @@ unsafe attribute has a comment directly above it that starts with `// SAFETY: [i
 and the id names its entry here, a `## id` heading such as `## win-read-input`. Ids are lowercase
 letters, digits and hyphens. Blocks that make the same call for the same reason may share an entry.
 
-The test `crates/tuiframe/tests/unsafe_inventory.rs` lists every `unsafe` in the workspace and fails
+The test `crates/termelon/tests/unsafe_inventory.rs` lists every `unsafe` in the workspace and fails
 when one is in any other file, when a block has no `SAFETY` comment, when an id has no entry, or when
 an entry has no code that names it. Every `##` heading in this file is an entry.
 
@@ -20,7 +20,7 @@ against a console played in memory.
 
 ## macos-select
 
-`crates/tuiframe/src/sys/macos.rs`, in `wait`, the reader thread's wait for input on macOS, whose
+`crates/termelon/src/sys/macos.rs`, in `wait`, the reader thread's wait for input on macOS, whose
 `poll` doesn't work on `/dev/tty`.
 
 `rustix::event::select` is unsafe because it can't check that every descriptor in its sets is open.
@@ -43,7 +43,7 @@ the highest of them. Never put a raw descriptor in a set that nothing borrows.
 
 ## win-console-mode
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `mode` and `set_mode`, which read and set the
+`crates/termelon/src/sys/windows/console.rs`, in `mode` and `set_mode`, which read and set the
 console's input and output modes.
 
 `GetConsoleMode` needs an open console handle and a place for a `u32`, and `SetConsoleMode` an open
@@ -59,7 +59,7 @@ call.
 
 ## win-screen-buffer-info
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `window`, which reads the window's rectangle.
+`crates/termelon/src/sys/windows/console.rs`, in `window`, which reads the window's rectangle.
 
 `GetConsoleScreenBufferInfo` needs an open screen buffer handle and a `CONSOLE_SCREEN_BUFFER_INFO`
 to write.
@@ -73,7 +73,7 @@ must keep the structure the call's own type, so its size is right.
 
 ## win-pending-input
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `pending`, which counts the records waiting.
+`crates/termelon/src/sys/windows/console.rs`, in `pending`, which counts the records waiting.
 
 `GetNumberOfConsoleInputEvents` needs an open input handle and a place for a `u32`. The handle is
 borrowed from a `File` for the call, and the count is a local written through `&raw mut`. A failed
@@ -81,7 +81,7 @@ call returns the system's error, which ends the reader.
 
 ## win-read-input
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `read_records`, the reader's read of input
+`crates/termelon/src/sys/windows/console.rs`, in `read_records`, the reader's read of input
 records.
 
 `ReadConsoleInputW` writes up to `nLength` records into the buffer and the number it wrote into the
@@ -100,7 +100,7 @@ change here must keep `nLength` the buffer's own length.
 
 ## win-record-union
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `copy_record`, which reads an `INPUT_RECORD`'s
+`crates/termelon/src/sys/windows/console.rs`, in `copy_record`, which reads an `INPUT_RECORD`'s
 union.
 
 Reading a union field is defined only for the field the union holds. `EventType` says which, and
@@ -113,14 +113,14 @@ A change here must keep each read inside the arm of its event type.
 
 ## win-create-event
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `WakeEvent::new`, the event that wakes the reader.
+`crates/termelon/src/sys/windows/console.rs`, in `WakeEvent::new`, the event that wakes the reader.
 
 `CreateEventW` takes optional security attributes and an optional name, and returns a new handle or
 null. Both are null, which the call allows, and a null result returns the system's error.
 
 ## win-own-event
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `WakeEvent::new`.
+`crates/termelon/src/sys/windows/console.rs`, in `WakeEvent::new`.
 
 `OwnedHandle::from_raw_handle` needs a handle that nothing else owns, since it closes the handle
 when dropped. The handle is the one `CreateEventW` just returned, checked not to be null, and
@@ -128,7 +128,7 @@ nothing else has seen it.
 
 ## win-set-event
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `WakeEvent::wake`.
+`crates/termelon/src/sys/windows/console.rs`, in `WakeEvent::wake`.
 
 `SetEvent` needs an open event handle. The handle is the event's own, owned by the `WakeEvent`
 that `self` borrows, so it's open for the call. A failure is ignored, since the reader also ends on
@@ -136,7 +136,7 @@ its own once the program stops it.
 
 ## win-wait
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `wait`, the reader's wait on the console's input
+`crates/termelon/src/sys/windows/console.rs`, in `wait`, the reader's wait on the console's input
 and the wake event.
 
 `WaitForMultipleObjects` reads `nCount` handles from the array and needs each to be open, and
@@ -152,7 +152,7 @@ the call.
 
 ## win-write-console
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `write_units`, the writer's write to the screen.
+`crates/termelon/src/sys/windows/console.rs`, in `write_units`, the writer's write to the screen.
 
 `WriteConsoleW` reads `nNumberOfCharsToWrite` UTF-16 units from the buffer, writes the count it
 wrote, and needs its reserved pointer null.
@@ -166,7 +166,7 @@ the slice's own length.
 
 ## win-ctrl-handler
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `set_ctrl_handler`, which a program's
+`crates/termelon/src/sys/windows/console.rs`, in `set_ctrl_handler`, which a program's
 `restore_on_console_events` installs once.
 
 `SetConsoleCtrlHandler` keeps the function to call it on a thread of the system's for each console
@@ -180,7 +180,7 @@ lives as long as the process.
 
 ## win-write-input
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `testing::write_input`, which tests that need a
+`crates/termelon/src/sys/windows/console.rs`, in `testing::write_input`, which tests that need a
 real console use to type into it.
 
 `WriteConsoleInputW` reads `nLength` records from the buffer and writes the count it wrote. The
@@ -189,7 +189,7 @@ from a `File`. The records are built whole, each union holding the field its eve
 
 ## win-read-output
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `testing::read_text`, which tests that need a real
+`crates/termelon/src/sys/windows/console.rs`, in `testing::read_text`, which tests that need a real
 console use to read back the screen.
 
 `ReadConsoleOutputCharacterW` writes up to `nLength` UTF-16 units into the buffer and the count it
@@ -198,7 +198,7 @@ units are read back. The handle is borrowed from a `File`.
 
 ## win-code-page
 
-`crates/tuiframe/src/sys/windows/console.rs`, in `testing::code_pages`, which a test that needs a
+`crates/termelon/src/sys/windows/console.rs`, in `testing::code_pages`, which a test that needs a
 real console uses to check that the code pages stay as the library found them.
 
 `GetConsoleCP` and `GetConsoleOutputCP` take nothing and read the console of the process. Zero

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use tuiframe_vt::{Emulator, Key, Mods, Mouse};
+use termelon_vt::{Emulator, Key, Mods, Mouse};
 
 /// How long `wait_for` polls between readbacks.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -135,7 +135,7 @@ pub struct Reports {
 }
 
 /// A terminal's screen as it reported it, rebuilt in an emulator, so it can be compared with
-/// `tuiframe-vt`'s screen for the same bytes cell by cell.
+/// `termelon-vt`'s screen for the same bytes cell by cell.
 #[derive(Debug)]
 pub struct Readback {
     /// The screen. Its colours, attributes and cursor mean something only where `reports` says so.

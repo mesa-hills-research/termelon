@@ -1,4 +1,4 @@
-//! The frame model both stacks draw from. It knows nothing of ratatui, crossterm or tuiframe.
+//! The frame model both stacks draw from. It knows nothing of ratatui, crossterm or termelon.
 //!
 //! A frame is a grid of cells. A cell holds one grapheme cluster and a resolved style, so a cell the
 //! program never styled is the same as one styled with the terminal's defaults.

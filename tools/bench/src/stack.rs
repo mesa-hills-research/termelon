@@ -3,7 +3,7 @@
 
 use crate::model::{Cursor, Frame};
 use crate::ratatui_stack::RatatuiStack;
-use crate::tuiframe_stack::TuiframeStack;
+use crate::termelon_stack::TermelonStack;
 
 /// A terminal stack under test. The output goes to memory.
 pub(crate) trait Stack {
@@ -21,7 +21,7 @@ pub(crate) trait Stack {
 }
 
 /// The names of the stacks.
-pub(crate) const NAMES: [&str; 3] = ["ratatui", "tuiframe", "tuiframe-scroll"];
+pub(crate) const NAMES: [&str; 3] = ["ratatui", "termelon", "termelon-scroll"];
 
 /// A stack by name for a screen of `width` by `height`.
 pub(crate) fn make(name: &str, width: u16, height: u16) -> Result<Box<dyn Stack>, String> {
@@ -29,8 +29,8 @@ pub(crate) fn make(name: &str, width: u16, height: u16) -> Result<Box<dyn Stack>
         "ratatui" => RatatuiStack::new(width, height)
             .map(|stack| Box::new(stack) as Box<dyn Stack>)
             .map_err(|error| format!("couldn't set up {name}: {error}")),
-        "tuiframe" => Ok(Box::new(TuiframeStack::new(width, height, false))),
-        "tuiframe-scroll" => Ok(Box::new(TuiframeStack::new(width, height, true))),
+        "termelon" => Ok(Box::new(TermelonStack::new(width, height, false))),
+        "termelon-scroll" => Ok(Box::new(TermelonStack::new(width, height, true))),
         _ => Err(format!("unknown stack `{name}`")),
     }
 }
@@ -39,8 +39,8 @@ pub(crate) fn make(name: &str, width: u16, height: u16) -> Result<Box<dyn Stack>
 pub(crate) fn describe(name: &str) -> &'static str {
     match name {
         "ratatui" => "ratatui 0.30 + crossterm 0.29",
-        "tuiframe" => "tuiframe's buffer and encoder",
-        "tuiframe-scroll" => "tuiframe with scroll detection",
+        "termelon" => "termelon's buffer and encoder",
+        "termelon-scroll" => "termelon with scroll detection",
         _ => "unknown stack",
     }
 }

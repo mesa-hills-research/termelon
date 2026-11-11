@@ -8,7 +8,7 @@ use harness::driver::{Driver, Launch, installed, work_dir};
 use harness::drivers::tmux::Tmux;
 use harness::run::smoke;
 use harness::{Error, compare};
-use tuiframe_vt::{Emulator, Key, Mods, Profile};
+use termelon_vt::{Emulator, Key, Mods, Profile};
 
 #[expect(
     clippy::expect_used,
@@ -19,7 +19,7 @@ fn tmux() -> Option<Tmux> {
 }
 
 /// Runs bytes in a tmux pane with `cat`, waits for the marker at their end, and compares the pane
-/// with `tuiframe-vt`'s screen for them.
+/// with `termelon-vt`'s screen for them.
 #[expect(
     clippy::unwrap_used,
     reason = "a helper of tests, which fail on an error"
@@ -152,7 +152,7 @@ fn raw_bytes_reach_the_program() {
     assert_eq!(read_until(&file, bytes.len()), bytes);
 }
 
-/// tmux's keys are the ones `tuiframe-vt`'s tmux profile encodes, key by key.
+/// tmux's keys are the ones `termelon-vt`'s tmux profile encodes, key by key.
 #[test]
 fn keys_match_the_tmux_profile() {
     let Some(mut tmux) = tmux() else { return };

@@ -4,7 +4,7 @@
 //! terminal's own sequences, shows `probe-keys:ready`, and appends every byte it reads to the
 //! input file as it comes, until its input ends or `--hold` passes. The framework isn't involved,
 //! since its terminal decodes the bytes this saves. The bytes that set the mode go to the record
-//! file, so the harness can play them to `tuiframe-vt` and ask it what the terminal should send.
+//! file, so the harness can play them to `termelon-vt` and ask it what the terminal should send.
 
 use std::io::{self, Read as _, Write as _};
 use std::process::{Command, Stdio};

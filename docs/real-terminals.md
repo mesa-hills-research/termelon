@@ -1,7 +1,7 @@
 # Testing in real terminals
 
 `tools/harness` starts a real terminal running `tools/probe`, waits until the probe's scene shows,
-reads the screen back, and compares it cell by cell with the screen `tuiframe-vt` computes for the
+reads the screen back, and compares it cell by cell with the screen `termelon-vt` computes for the
 probe's frame. Text and colours always count. Attributes and the cursor count where the terminal's
 readback reports them.
 
@@ -50,7 +50,7 @@ events, so its driver sends bytes, and mouse events through xterm.js's own mouse
 `keys` runs the probe as `probe --keys MODE`, which turns the mode on, shows a marker and saves
 every byte it reads. The harness presses a fixed list of keys and mouse events through the
 terminal's own encoder, with a `|` after each, and holds what the terminal sent against what
-`tuiframe-vt` sends under that terminal's profile. The modes are `legacy`, `disambiguate` (the
+`termelon-vt` sends under that terminal's profile. The modes are `legacy`, `disambiguate` (the
 kitty keyboard protocol's flag 1) and `modify-other-keys` (xterm's level 2). Mouse events go in
 the legacy mode alone, since the keyboard modes leave them as they are.
 
@@ -67,7 +67,7 @@ target/debug/harness keys tmux --probe target/debug/probe --out harness-out
 
 The other drivers press keys with the tools in the table above, and make no mouse events.
 
-Each terminal, version and mode has a fixture in `crates/tuiframe/tests/fixtures/input`, with a
+Each terminal, version and mode has a fixture in `crates/termelon/tests/fixtures/input`, with a
 line per event and the bytes in hex. `keys` names every change since the fixture, and `--update`
 writes it again. The decoder's tests decode each fixture, and the `decoded.txt` beside it lists
 the events that decode as another, such as ctrl+1, which these terminals send as `1`.

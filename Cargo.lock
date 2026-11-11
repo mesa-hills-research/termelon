@@ -96,7 +96,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "stats_alloc",
- "tuiframe",
+ "termelon",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -567,7 +567,7 @@ dependencies = [
 name = "harness"
 version = "0.1.0"
 dependencies = [
- "tuiframe-vt",
+ "termelon-vt",
 ]
 
 [[package]]
@@ -1134,7 +1134,7 @@ checksum = "4a6394b9e965e73d0a289ee54f589087e2c676aedf60885baf52c76b771e4958"
 name = "probe"
 version = "0.1.0"
 dependencies = [
- "tuiframe",
+ "termelon",
 ]
 
 [[package]]
@@ -1815,7 +1815,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tuiframe"
+name = "termelon"
 version = "0.1.0"
 dependencies = [
  "futures-core",
@@ -1824,14 +1824,14 @@ dependencies = [
  "rustix",
  "signal-hook 0.3.18",
  "tokio",
- "tuiframe-vt",
+ "termelon-vt",
  "unicode-segmentation",
  "unicode-width",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
-name = "tuiframe-vt"
+name = "termelon-vt"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",

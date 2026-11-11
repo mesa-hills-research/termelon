@@ -1,17 +1,17 @@
 //! Pressing the scripted keys and mouse events in a terminal, and holding what it sent for each
-//! against what `tuiframe-vt` says that terminal sends.
+//! against what `termelon-vt` says that terminal sends.
 //!
 //! The probe runs as `probe --keys MODE --input FILE --record FILE`. It turns the mode on, shows
 //! `probe-keys:ready`, and saves every byte it reads. The harness presses each event and then a
 //! `|`, which no event in the script sends, so the bytes split into one piece per event however
 //! the terminal's writes come. A fixture keeps the pieces, a line per event with its name
-//! and the bytes in hex, for the decoder's tests in `crates/tuiframe`.
+//! and the bytes in hex, for the decoder's tests in `crates/termelon`.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use tuiframe_vt::{Emulator, Key, Mods, Profile};
+use termelon_vt::{Emulator, Key, Mods, Profile};
 
 use crate::driver::{Driver, Error, Launch};
 use crate::json::Json;
@@ -31,14 +31,14 @@ const SEPARATOR: u8 = b'|';
 /// How long the terminal may take to send everything.
 const INPUT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// An event pressed, what the terminal sent for it, and what `tuiframe-vt` expected.
+/// An event pressed, what the terminal sent for it, and what `termelon-vt` expected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     /// The event's name, such as `ctrl+a` or `press left 3,2`.
     pub name: String,
     /// The bytes the terminal sent.
     pub sent: Vec<u8>,
-    /// The bytes `tuiframe-vt`'s profile of the terminal sends.
+    /// The bytes `termelon-vt`'s profile of the terminal sends.
     pub expected: Vec<u8>,
 }
 
@@ -52,7 +52,7 @@ pub struct Recording {
 }
 
 impl Recording {
-    /// The events whose bytes differ from what `tuiframe-vt` expected.
+    /// The events whose bytes differ from what `termelon-vt` expected.
     pub fn mismatches(&self) -> impl Iterator<Item = &Entry> {
         self.entries
             .iter()
@@ -174,7 +174,7 @@ pub fn shown(bytes: &[u8]) -> String {
 
 /// Where the input fixtures are kept, beside the decoder they test.
 pub fn default_fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../crates/tuiframe/tests/fixtures/input")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../crates/termelon/tests/fixtures/input")
 }
 
 /// Where a terminal's fixture for a mode goes, such as `tmux-3.6-legacy/input.txt`.
@@ -199,7 +199,7 @@ pub fn version_slug(version: &str) -> String {
 }
 
 /// Presses the script in a terminal in one mode, and holds each event's bytes against what
-/// `tuiframe-vt` sends under `profile` once it's seen the probe's setup. Keys go where the driver
+/// `termelon-vt` sends under `profile` once it's seen the probe's setup. Keys go where the driver
 /// can press them, and mouse events, which no mode changes, in the legacy mode where it can make
 /// them.
 ///
@@ -282,7 +282,7 @@ pub fn run_input(
 #[derive(Clone, Copy)]
 enum Event {
     Key(Key, Mods),
-    Mouse(tuiframe_vt::Mouse),
+    Mouse(termelon_vt::Mouse),
 }
 
 /// Presses every key the driver can, and the mouse events if `mouse`, each followed by the

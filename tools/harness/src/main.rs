@@ -16,8 +16,8 @@
 //! as it is now.
 //!
 //! `keys` presses the scripted keys and mouse events in each mode (every mode, by default), holds
-//! what the terminal sent against what `tuiframe-vt` says it sends, and names each change since
-//! the input fixture of the terminal's version, in `crates/tuiframe/tests/fixtures/input` by
+//! what the terminal sent against what `termelon-vt` says it sends, and names each change since
+//! the input fixture of the terminal's version, in `crates/termelon/tests/fixtures/input` by
 //! default. `--update` writes the fixtures as they are now.
 //!
 //! Both exit with 1 when something differs or a step fails, and with 2 on a bad command line.
@@ -250,19 +250,19 @@ fn keys_command(options: &RunOptions) -> Result<bool, String> {
         let mismatches: Vec<_> = recording.mismatches().collect();
         if mismatches.is_empty() {
             say(&format!(
-                "{mode}: {} events as tuiframe-vt sends them",
+                "{mode}: {} events as termelon-vt sends them",
                 recording.entries.len()
             ));
         } else {
             all_match = false;
             say(&format!(
-                "{mode}: {} of {} events differ from tuiframe-vt",
+                "{mode}: {} of {} events differ from termelon-vt",
                 mismatches.len(),
                 recording.entries.len()
             ));
             for entry in mismatches {
                 say(&format!(
-                    "  {}: sent {}, tuiframe-vt sends {}",
+                    "  {}: sent {}, termelon-vt sends {}",
                     entry.name,
                     input::shown(&entry.sent),
                     input::shown(&entry.expected)

@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tuiframe_vt::{Key, Mods, Mouse, WidthRules};
+use termelon_vt::{Key, Mods, Mouse, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, work_dir,
@@ -55,7 +55,7 @@ impl XtermJs {
 ///
 /// # Errors
 ///
-/// When the answer lacks a field or its rows hold a sequence `tuiframe-vt` doesn't know.
+/// When the answer lacks a field or its rows hold a sequence `termelon-vt` doesn't know.
 pub fn parse(reply: &Json, cols: u16, rows: u16) -> Result<Readback, Error> {
     let missing = |field: &str| Error::Parse(format!("xterm.js's answer has no {field}"));
     let ansi = reply

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use tuiframe_vt::{Key, Mods};
+use termelon_vt::{Key, Mods};
 
 use crate::driver::{Error, clean_command, describe, run};
 use crate::keys;

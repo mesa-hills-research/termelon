@@ -73,11 +73,11 @@ report, inside a synchronized update that clears them again.
 `Options::capabilities` skips the probe and uses what the program gives, for tests and for setups
 the probe gets wrong.
 
-`TUIFRAME_CAPS` sets fields over whatever was found, as `field=value` pairs separated by commas. A
+`TERMELON_CAPS` sets fields over whatever was found, as `field=value` pairs separated by commas. A
 field or value it doesn't know is skipped.
 
 ```sh
-TUIFRAME_CAPS="colors=256,hyperlinks=no,keyboard=kitty:1,terminal=kitty 0.32.2" my-program
+TERMELON_CAPS="colors=256,hyperlinks=no,keyboard=kitty:1,terminal=kitty 0.32.2" my-program
 ```
 
 | Field | Values |

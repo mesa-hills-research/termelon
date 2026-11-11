@@ -7,7 +7,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
-use tuiframe_vt::{Mouse, MouseButton, MouseKind};
+use termelon_vt::{Mouse, MouseButton, MouseKind};
 
 use crate::driver::{Error, describe};
 use crate::json::Json;

@@ -1,7 +1,7 @@
 # Testing
 
-`tuiframe::testing::TestTerminal` is a terminal in memory. It draws frames through the same code
-as `Terminal` (the buffers, the diff and the encoder) and feeds the bytes to `tuiframe-vt`, a
+`termelon::testing::TestTerminal` is a terminal in memory. It draws frames through the same code
+as `Terminal` (the buffers, the diff and the encoder) and feeds the bytes to `termelon-vt`, a
 terminal emulator, so a test checks what a terminal would show, the cursor included, rather than
 what the buffer holds. Goldens keep a screen's text or styled text in a file beside the test.
 
@@ -9,7 +9,7 @@ The module comes with the `testing` feature.
 
 ```toml
 [dev-dependencies]
-tuiframe = { version = "0.1", features = ["testing"] }
+termelon = { version = "0.1", features = ["testing"] }
 ```
 
 ## A test
@@ -17,10 +17,10 @@ tuiframe = { version = "0.1", features = ["testing"] }
 A program that draws with a function of its own tests it by drawing into a `TestTerminal`.
 
 ```rust
-use tuiframe::layout::{Position, Rect};
-use tuiframe::testing::{TestTerminal, golden};
-use tuiframe::text::Line;
-use tuiframe::{CursorShape, Frame};
+use termelon::layout::{Position, Rect};
+use termelon::testing::{TestTerminal, golden};
+use termelon::text::Line;
+use termelon::{CursorShape, Frame};
 
 fn draw(frame: &mut Frame<'_>, prompt: &str) {
     let row = Rect::new(0, frame.area().height - 1, frame.area().width, 1);
@@ -80,7 +80,7 @@ text 1 "failed: 2"
 style 1 0 7 fg=red bold
 ```
 
-`tuiframe-vt`'s documentation gives the format in full, version 1.
+`termelon-vt`'s documentation gives the format in full, version 1.
 
 ## Goldens
 
@@ -104,15 +104,15 @@ directories, instead of failing. Review the diff of the golden files before comm
 ## Terminals and capabilities
 
 A `TestTerminal` plays xterm unless `with_profile` names another terminal, one of the profiles of
-`tuiframe-vt` (`xterm`, `kitty`, `konsole`, `windows_terminal`, `tmux_3_4`, `linux_console` and
-`silent`), which `tuiframe::testing::vt` re-exports. A profile decides how the emulator measures
+`termelon-vt` (`xterm`, `kitty`, `konsole`, `windows_terminal`, `tmux_3_4`, `linux_console` and
+`silent`), which `termelon::testing::vt` re-exports. A profile decides how the emulator measures
 characters, which modes it has and what it answers. The capabilities are what the startup probe
 finds in that terminal, as `Terminal::open` would, unless `with_caps` gives them, and
 `with_options` sets the `Options` the setup follows.
 
 ```rust
-use tuiframe::caps::{Capabilities, ColorDepth};
-use tuiframe::testing::{TestTerminal, vt};
+use termelon::caps::{Capabilities, ColorDepth};
+use termelon::testing::{TestTerminal, vt};
 
 let mut caps = Capabilities::default();
 caps.colors = ColorDepth::Ansi16;

@@ -2,12 +2,12 @@
 //!
 //! tmux's `capture-pane -e`, kitty's `get-text --ansi` and WezTerm's `get-text --escapes` give the
 //! rows as text with SGR and OSC 8. xterm's `CSI 10 i` dump is XHTML with inline styles, and GNU
-//! screen's hardcopy is text with one byte per cell. Each becomes rows fed to a `tuiframe-vt`
+//! screen's hardcopy is text with one byte per cell. Each becomes rows fed to a `termelon-vt`
 //! emulator, whose cells can then be compared with the screen it computes for the program's bytes.
 
 use std::fmt::Write as _;
 
-use tuiframe_vt::{Color, Emulator, Profile, WidthRules};
+use termelon_vt::{Color, Emulator, Profile, WidthRules};
 
 use crate::driver::Error;
 
@@ -34,7 +34,7 @@ fn feed(screen: &mut Emulator, bytes: &[u8]) -> Result<(), Error> {
 ///
 /// # Errors
 ///
-/// When the text holds a sequence `tuiframe-vt` doesn't know.
+/// When the text holds a sequence `termelon-vt` doesn't know.
 pub fn ansi_screen(
     text: &[u8],
     cols: u16,
@@ -91,7 +91,7 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 ///
 /// # Errors
 ///
-/// Never in practice, since the sequences are ones `tuiframe-vt` knows.
+/// Never in practice, since the sequences are ones `termelon-vt` knows.
 pub fn set_cursor(
     screen: &mut Emulator,
     x: u16,

@@ -14,7 +14,7 @@ mod run;
 mod scene;
 mod stack;
 mod stats;
-mod tuiframe_stack;
+mod termelon_stack;
 mod workload;
 
 use std::io::{self, Write};
@@ -36,7 +36,7 @@ five replayed from frames recorded from Arko, and all includes them.
 Options:
   --frames N       timed frames per workload, instead of its own count
   --repeat N       how many times to play each workload on each stack (default 1)
-  --stack NAME     a stack to measure, ratatui, tuiframe or tuiframe-scroll, or all (default)
+  --stack NAME     a stack to measure, ratatui, termelon or termelon-scroll, or all (default)
   --recordings DIR the directory with idle.styled, streaming.styled, scrolling.styled,
                    typing.styled and redraw.styled
   --file PATH      play the frames in a styled-text file, the first one untimed, in place of WORKLOAD

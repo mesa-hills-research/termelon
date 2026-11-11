@@ -1,6 +1,6 @@
 # How it works
 
-tuiframe owns the terminal from the moment a program opens it until it gives it back. The program
+Termelon owns the terminal from the moment a program opens it until it gives it back. The program
 draws frames into a cell buffer and reads events, and two threads of the library's own do the
 reading and writing.
 
@@ -8,8 +8,8 @@ reading and writing.
 
 | Crate | Holds |
 |---|---|
-| `crates/tuiframe` | The library |
-| `crates/tuiframe-vt` | A terminal emulator in a library, which tests use to see what a terminal would show. It doesn't depend on `tuiframe`, so it checks the library's output independently |
+| `crates/termelon` | The library |
+| `crates/termelon-vt` | A terminal emulator in a library, which tests use to see what a terminal would show. It doesn't depend on `termelon`, so it checks the library's output independently |
 | `tools/probe` | A program run inside real terminals, which measures them and draws test scenes |
 | `tools/harness` | Starts real terminals with the probe, drives them and reads back what they show |
 | `tools/bench` | Workloads that compare the output layer with ratatui and crossterm |
@@ -79,7 +79,7 @@ with every write clipped to the regions, and only those regions are diffed and w
 animation costs the size of what moves.
 
 `testing::TestTerminal` takes the same steps with the same buffers and encoder, and feeds the bytes
-to `tuiframe-vt` instead of a writer, so a test sees what a terminal would show.
+to `termelon-vt` instead of a writer, so a test sees what a terminal would show.
 
 ## Cells and widths
 
@@ -153,7 +153,7 @@ At open, before any event reaches the program, the probe writes one batch of que
 hasn't come by the time DA1's does is unsupported, and the probe takes one round trip. A terminal
 that doesn't answer at all is waited for up to `Options::probe_timeout`. Environment variables
 and a table of known terminals and versions fill in what can't be asked, and a reply always beats a
-variable. `TUIFRAME_CAPS` overrides any field.
+variable. `TERMELON_CAPS` overrides any field.
 
 Where support is unknown, private modes are sent, since terminals ignore modes they don't know, and
 strings (OSC and DCS) aren't, since a terminal that doesn't parse them may print them.

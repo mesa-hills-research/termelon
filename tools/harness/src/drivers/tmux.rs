@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use tuiframe_vt::{Key, Mods, WidthRules};
+use termelon_vt::{Key, Mods, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
@@ -113,7 +113,7 @@ pub const CURSOR_FORMAT: &str =
 ///
 /// # Errors
 ///
-/// When the capture holds a sequence `tuiframe-vt` doesn't know, or the cursor line is malformed.
+/// When the capture holds a sequence `termelon-vt` doesn't know, or the cursor line is malformed.
 pub fn parse(
     capture: &[u8],
     cursor_line: &str,

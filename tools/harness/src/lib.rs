@@ -5,8 +5,8 @@
 //! back, takes a screenshot where there's a display, and stops it. [`Driver::wait_for`] polls the readback every 100 ms until a
 //! marker shows, so nothing waits a fixed time.
 //!
-//! A readback becomes a `tuiframe-vt` screen, so [`compare()`] can hold it against the screen
-//! `tuiframe-vt` computes for the bytes the program wrote. Text and colours count, and attributes
+//! A readback becomes a `termelon-vt` screen, so [`compare()`] can hold it against the screen
+//! `termelon-vt` computes for the bytes the program wrote. Text and colours count, and attributes
 //! and the cursor count where the terminal reports them.
 //!
 //! | Terminal | Started with | Keys | Read back with |

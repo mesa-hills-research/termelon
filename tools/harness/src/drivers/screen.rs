@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use tuiframe_vt::{Key, Mods};
+use termelon_vt::{Key, Mods};
 
 use crate::driver::{
     Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run, work_dir,

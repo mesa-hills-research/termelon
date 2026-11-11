@@ -1,7 +1,7 @@
 //! The names terminals' tools give keys: tmux's `send-keys`, kitty's `send-key` and xdotool's
 //! `key`.
 
-use tuiframe_vt::{Key, Mods};
+use termelon_vt::{Key, Mods};
 
 /// The key as `tmux send-keys` names it, such as `C-a`, `M-Up` or `F5`. A plain character is
 /// `None`, since it goes as literal text (`send-keys -l`), and so is a key tmux has no name for.

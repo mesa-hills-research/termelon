@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 use std::fmt::Write as _;
 
-use tuiframe::{Capabilities, Event, Size};
+use termelon::{Capabilities, Event, Size};
 
 /// A JSON string.
 fn string(text: &str) -> String {

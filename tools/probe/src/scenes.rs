@@ -1,7 +1,7 @@
 //! The probe's scenes, drawn with the framework. Each fits in 80 by 24 cells and ends with its
 //! marker on the last row, which the harness waits for.
 
-use tuiframe::{
+use termelon::{
     Buffer, Color, Cursor, CursorShape, Modifier, Position, Rect, Style, UnderlineStyle,
 };
 
@@ -162,13 +162,13 @@ fn cursor(b: &mut Buffer) {
 mod tests {
     use super::*;
 
-    /// Each scene draws with sequences `tuiframe-vt` knows, and shows its text and marker there.
+    /// Each scene draws with sequences `termelon-vt` knows, and shows its text and marker there.
     #[test]
     fn each_scene_shows_in_the_emulator() {
         for scene in &SCENES {
             let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
             draw(scene, &mut buffer);
-            let mut term = tuiframe::testing::TestTerminal::new(80, 24);
+            let mut term = termelon::testing::TestTerminal::new(80, 24);
             term.draw(|frame| {
                 draw(scene, frame.buffer_mut());
                 frame.set_cursor(scene.cursor);

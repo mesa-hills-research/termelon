@@ -1,4 +1,4 @@
-# tuiframe
+# Termelon
 
 A terminal UI framework in pure Rust. It covers the whole stack a full-screen terminal program needs:
 

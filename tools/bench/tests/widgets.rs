@@ -1,8 +1,8 @@
-//! tuiframe's widgets draw what ratatui's draw. Each case builds the same widget for both, draws
+//! termelon's widgets draw what ratatui's draw. Each case builds the same widget for both, draws
 //! it over the same cells, and compares the screens, each cell a terminal would show with its
 //! colours and modifiers.
 //!
-//! The cases leave out the places where tuiframe draws differently on purpose. Its buffer skips
+//! The cases leave out the places where termelon draws differently on purpose. Its buffer skips
 //! zero-width clusters where ratatui appends them to the cell before, and a write over half of a
 //! wide character blanks the rest of it. A control character takes no cells in a line's width,
 //! where ratatui's `Line::width` counts one for it and then draws nothing. A paragraph never lets
@@ -19,11 +19,11 @@ use ratatui::widgets::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use tuiframe::buffer::Buffer;
-use tuiframe::layout::{Alignment, Rect};
-use tuiframe::style::{Color, Modifier, Style};
-use tuiframe::text::{Line, Span, Text};
-use tuiframe::widgets::{
+use termelon::buffer::Buffer;
+use termelon::layout::{Alignment, Rect};
+use termelon::style::{Color, Modifier, Style};
+use termelon::text::{Line, Span, Text};
+use termelon::widgets::{
     Block, BorderSet, Borders, Clear, Padding, Paragraph, TitlePosition, Widget, Wrap,
 };
 
@@ -701,7 +701,7 @@ impl ParagraphCase {
         p
     }
 
-    /// Whether tuiframe's paragraph leaves every cell outside its area as it was.
+    /// Whether termelon's paragraph leaves every cell outside its area as it was.
     fn stays_inside(&self) -> bool {
         let (before, _) = buffers(18, 9);
         let (mut drawn, _) = buffers(18, 9);
@@ -717,7 +717,7 @@ impl ParagraphCase {
     }
 
     /// Whether ratatui lets a wide character overflow a wrapped row of this paragraph, which
-    /// tuiframe moves to the next row instead. The text is drawn whole with spare columns marked
+    /// termelon moves to the next row instead. The text is drawn whole with spare columns marked
     /// on the right, and a row overflows when it writes over a mark or ends with a wide character
     /// in the last column.
     fn overflows_in_ratatui(&self) -> bool {
@@ -822,7 +822,7 @@ fn wrapped_lines_are_the_rows_of_ratatuis_wrapped_paragraphs() {
         let line = &text.lines[0];
         let width = rng.below16(12) + 1;
         let trim = rng.below(2) == 0;
-        let rows = tuiframe::text::wrap_with(line, width, trim, tuiframe::WidthProfile::default());
+        let rows = termelon::text::wrap_with(line, width, trim, termelon::WidthProfile::default());
         let height = u16::try_from(rows.len() + 1).unwrap_or(u16::MAX);
         let area = Rect::new(0, 0, width, height);
         let (mut a, mut b) = buffers(width, height);

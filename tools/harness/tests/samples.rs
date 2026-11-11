@@ -14,8 +14,8 @@ use harness::drivers::{
 };
 use harness::json::Json;
 use harness::{Readback, compare};
-use tuiframe_vt::{Color, Emulator, Profile, WidthRules};
-use tuiframe_vt::{Key, Mods};
+use termelon_vt::{Color, Emulator, Profile, WidthRules};
+use termelon_vt::{Key, Mods};
 
 #[expect(clippy::panic, reason = "a helper of tests, which fail on an error")]
 fn sample(name: &str) -> Vec<u8> {

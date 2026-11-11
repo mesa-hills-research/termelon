@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use tuiframe_vt::{Key, Mods, WidthRules};
+use termelon_vt::{Key, Mods, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
@@ -100,7 +100,7 @@ pub fn start_command(launch: &Launch, runtime_dir: &Path) -> Command {
 ///
 /// # Errors
 ///
-/// When the text holds a sequence `tuiframe-vt` doesn't know, or the list gives no cursor.
+/// When the text holds a sequence `termelon-vt` doesn't know, or the list gives no cursor.
 pub fn parse(text: &[u8], list_json: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
     let width = WidthRules {
         joins_emoji: true,

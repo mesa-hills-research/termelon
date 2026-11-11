@@ -26,7 +26,7 @@ use std::io::{self, Write as _};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use tuiframe::{Drawn, Event, KeyCode, Options, Terminal};
+use termelon::{Drawn, Event, KeyCode, Options, Terminal};
 
 use crate::report::Report;
 

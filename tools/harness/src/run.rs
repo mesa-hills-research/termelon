@@ -1,9 +1,9 @@
-//! Running a scene in a terminal and comparing what it shows with `tuiframe-vt`.
+//! Running a scene in a terminal and comparing what it shows with `termelon-vt`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tuiframe_vt::{Emulator, Key, Mods, Profile};
+use termelon_vt::{Emulator, Key, Mods, Profile};
 
 use crate::compare::{Mismatch, compare};
 use crate::driver::{Driver, Error, Launch, Readback};
@@ -39,7 +39,7 @@ pub fn smoke(driver: &mut dyn Driver) -> Result<(), Error> {
 pub struct Outcome {
     /// What the terminal showed.
     pub readback: Readback,
-    /// What `tuiframe-vt` computed for the bytes the program wrote.
+    /// What `termelon-vt` computed for the bytes the program wrote.
     pub expected: Emulator,
     /// How the two differ.
     pub mismatches: Vec<Mismatch>,
@@ -47,7 +47,7 @@ pub struct Outcome {
     pub screenshot: Option<PathBuf>,
 }
 
-/// Runs a probe's scene in a terminal and compares the screen with what `tuiframe-vt` computes
+/// Runs a probe's scene in a terminal and compares the screen with what `termelon-vt` computes
 /// under `profile` for the bytes the probe recorded.
 ///
 /// The probe runs as `probe --scene NAME --record FILE --report FILE --size COLSxROWS`. It draws
@@ -198,7 +198,7 @@ pub fn write_outcome(
     let stem = format!("{terminal}-{scene}");
     let page = format!(
         "<!DOCTYPE html>\n<meta charset=\"utf-8\">\n<title>{stem}</title>\n<h1>{stem}</h1>\n<p>{version}</p>\n\
-         <h2>tuiframe-vt</h2>\n{}\n<h2>{terminal}</h2>\n{}\n",
+         <h2>termelon-vt</h2>\n{}\n<h2>{terminal}</h2>\n{}\n",
         outcome.expected.to_html(),
         outcome.readback.screen.to_html()
     );

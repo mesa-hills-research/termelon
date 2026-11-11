@@ -10,7 +10,7 @@ publish = false
 [dependencies]
 # Rebuilds each terminal's readback as a screen, and computes what the terminal should show for the
 # bytes the probe wrote, so the two compare cell by cell.
-tuiframe-vt.workspace = true
+termelon-vt.workspace = true
 
 [lints]
 workspace = true

@@ -9,11 +9,11 @@ publish = false
 
 [dependencies]
 # The framework, whose terminal the probe opens and draws its scenes with.
-tuiframe.workspace = true
+termelon.workspace = true
 
 [dev-dependencies]
 # Checks that every scene is made of sequences the emulator knows, through `TestTerminal`.
-tuiframe = { workspace = true, features = ["testing"] }
+termelon = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

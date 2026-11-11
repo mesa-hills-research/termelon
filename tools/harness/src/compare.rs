@@ -1,8 +1,8 @@
-//! Comparing a terminal's readback with the screen `tuiframe-vt` computes for the same bytes.
+//! Comparing a terminal's readback with the screen `termelon-vt` computes for the same bytes.
 
 use std::fmt;
 
-use tuiframe_vt::{Cell, Color, Emulator, Style};
+use termelon_vt::{Cell, Color, Emulator, Style};
 
 use crate::driver::{Colors, Readback};
 
@@ -18,7 +18,7 @@ pub struct Mismatch {
     pub y: u16,
     /// What differs: `size`, `text`, `fg`, `bg`, `ul`, an attribute's name, or `cursor`.
     pub what: &'static str,
-    /// What `tuiframe-vt` computed.
+    /// What `termelon-vt` computed.
     pub expected: String,
     /// What the terminal showed.
     pub got: String,
@@ -67,7 +67,7 @@ pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
                 || e.style().reverse
                 || e.style().strike
                 || e.style().overline
-                || e.style().underline != tuiframe_vt::Underline::None;
+                || e.style().underline != termelon_vt::Underline::None;
             let mut push = |what: &'static str, a: String, b: String| {
                 if what == "fg" && !shows_fg {
                     return;
@@ -196,7 +196,7 @@ fn compare_attributes(
         );
         // An underline's colour shows only with the underline.
         if readback.reports.colors == Colors::AsWritten
-            && e.underline != tuiframe_vt::Underline::None
+            && e.underline != termelon_vt::Underline::None
         {
             push(
                 "ul",
@@ -205,7 +205,7 @@ fn compare_attributes(
             );
         }
     } else if attributes.underline {
-        let on = |style: &Style| style.underline != tuiframe_vt::Underline::None;
+        let on = |style: &Style| style.underline != termelon_vt::Underline::None;
         push("underline", on(e).to_string(), on(g).to_string());
     }
     if attributes.link {

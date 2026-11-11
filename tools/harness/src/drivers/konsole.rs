@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use tuiframe_vt::{Key, Mods};
+use termelon_vt::{Key, Mods};
 
 use crate::driver::{
     Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run, work_dir, x_screenshot,
@@ -181,7 +181,7 @@ pub fn parse(text: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
         clean.as_bytes(),
         cols,
         rows,
-        tuiframe_vt::WidthRules::default(),
+        termelon_vt::WidthRules::default(),
     )?;
     Ok(Readback {
         screen,
