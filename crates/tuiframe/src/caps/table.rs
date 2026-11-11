@@ -32,6 +32,9 @@ pub(crate) struct Row {
     pub(crate) cursor_shape: Support,
     pub(crate) title: Support,
     pub(crate) title_stack: Support,
+    /// Background colour erase, from the terminal's terminfo entry in ncurses' database where it
+    /// has one.
+    pub(crate) bce: Support,
     /// xterm's modifyOtherKeys, which the library turns on where the kitty protocol isn't.
     pub(crate) modify_other_keys: Support,
     pub(crate) width_profile: WidthProfile,
@@ -57,6 +60,7 @@ const CURRENT: Row = Row {
     cursor_shape: Yes,
     title: Yes,
     title_stack: Unknown,
+    bce: Unknown,
     modify_other_keys: No,
     width_profile: WidthProfile {
         joins_emoji: false,
@@ -71,51 +75,60 @@ pub(crate) const ROWS: &[Row] = &[
     Row {
         name: "xterm",
         source: "xterm's ctlseqs and a measured run of xterm 411. OSC 52 needs allowWindowOps, \
-                 and xterm ignores it otherwise",
+                 and xterm ignores it otherwise. Its BCE is from xterm-256color in ncurses' \
+                 terminfo",
         synchronized_output: No,
         hyperlinks: No,
         underline_styles: No,
         underline_color: Unknown,
         title_stack: Yes,
         modify_other_keys: Yes,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "vte",
-        source: "VTE's code, for GNOME Terminal and the others built on it",
+        source: "VTE's code, for GNOME Terminal and the others built on it. Its BCE is from \
+                 vte-256color in ncurses' terminfo",
         synchronized_output: No,
         clipboard_write: No,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "konsole",
-        source: "Konsole's code (Vt102Emulation.cpp). Mode 2026 is in its main branch and not \
-                 in 23.08 or 25.12",
+        source: "Konsole's code (Vt102Emulation.cpp). Mode 2026 is in its main branch and not in \
+                 23.08 or 25.12. Its BCE is from konsole-256color in ncurses' terminfo",
         synchronized_output: Unknown,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "kitty",
         source: "kitty's docs and a measured run of kitty 0.49.2, which joins emoji sequences and \
-                 widens VS16",
+                 widens VS16. Its BCE is from tuiframe-vt's kitty profile, since ncurses has no \
+                 xterm-kitty",
         title_stack: Yes,
         width_profile: WidthProfile {
             joins_emoji: true,
             vs16_widens: true,
             ambiguous_wide: false,
         },
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "alacritty",
-        source: "Alacritty's code (alacritty_terminal) and a measured run of Alacritty 0.17.0",
+        source: "Alacritty's code (alacritty_terminal) and a measured run of Alacritty 0.17.0. \
+                 Its BCE is from alacritty in ncurses' terminfo",
         title_stack: Yes,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "wezterm",
         source: "WezTerm's docs and a measured run of a 2026-10-10 nightly, which joins emoji \
-                 sequences",
+                 sequences. Its BCE is from wezterm in ncurses' terminfo",
         grapheme_clustering: Yes,
         modify_other_keys: Yes,
         width_profile: WidthProfile {
@@ -123,42 +136,49 @@ pub(crate) const ROWS: &[Row] = &[
             vs16_widens: false,
             ambiguous_wide: false,
         },
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "foot",
-        source: "foot's docs and changelog",
+        source: "foot's docs and changelog. Its BCE is from foot in ncurses' terminfo",
         grapheme_clustering: Yes,
         title_stack: Yes,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "tmux",
         source: "tmux's CHANGES and man page. It passes true colour, styled underlines and \
                  underline colour on only where the outer terminal's features say so, OSC 52 only \
-                 with set-clipboard on, and modified keys only with extended-keys on",
+                 with set-clipboard on, and modified keys only with extended-keys on. \
+                 tmux-256color in ncurses' terminfo has no BCE",
         modify_other_keys: Unknown,
         colors: ColorDepth::Ansi256,
         synchronized_output: No,
         underline_styles: Unknown,
         underline_color: Unknown,
         title_stack: Yes,
+        bce: No,
         ..CURRENT
     },
     Row {
         name: "tmux",
         since: Some("3.7"),
-        source: "tmux's CHANGES, which add mode 2026 in 3.7",
+        source: "tmux's CHANGES, which add mode 2026 in 3.7. tmux-256color in ncurses' terminfo \
+                 has no BCE",
         modify_other_keys: Unknown,
         colors: ColorDepth::Ansi256,
         underline_styles: Unknown,
         underline_color: Unknown,
         title_stack: Yes,
+        bce: No,
         ..CURRENT
     },
     Row {
         name: "screen",
-        source: "GNU screen's code (ansi.c, 5.0.2)",
+        source: "GNU screen's code (ansi.c, 5.0.2). screen-256color in ncurses' terminfo has no \
+                 BCE",
         colors: ColorDepth::Ansi256,
         synchronized_output: No,
         focus_events: No,
@@ -170,12 +190,14 @@ pub(crate) const ROWS: &[Row] = &[
         underline_color: No,
         cursor_shape: No,
         title_stack: No,
+        bce: No,
         ..CURRENT
     },
     Row {
         name: "linux",
         source: "the Linux console's code (drivers/tty/vt/vt.c). It maps every colour to the 16 \
-                 basic ones, and its fonts lack most box drawing and braille",
+                 basic ones, and its fonts lack most box drawing and braille. Its BCE is from \
+                 linux in ncurses' terminfo",
         colors: ColorDepth::Ansi16,
         alternate_screen: No,
         synchronized_output: No,
@@ -190,18 +212,22 @@ pub(crate) const ROWS: &[Row] = &[
         title: No,
         title_stack: No,
         glyphs: GlyphSupport::Limited,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "windows-terminal",
-        source: "Windows Terminal's code (terminalInput.hpp, adaptDispatch.cpp) and docs",
+        source: "Windows Terminal's code (terminalInput.hpp, adaptDispatch.cpp) and docs. Its BCE \
+                 is from ms-terminal in ncurses' terminfo",
         grapheme_clustering: Yes,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "apple-terminal",
         source: "a measured run of Terminal.app 2.15 on macOS 26, the first with true colour, \
-                 which this row leaves out for older versions",
+                 which this row leaves out for older versions. Its BCE is from nsterm-256color in \
+                 ncurses' terminfo",
         colors: ColorDepth::Ansi256,
         synchronized_output: No,
         focus_events: Unknown,
@@ -210,18 +236,20 @@ pub(crate) const ROWS: &[Row] = &[
         clipboard_write: No,
         underline_color: No,
         cursor_shape: Unknown,
+        bce: Yes,
         ..CURRENT
     },
     Row {
         name: "iterm2",
         source: "iTerm2's docs and a measured run of iTerm2 3.6.11, which joins emoji sequences \
-                 and widens VS16",
+                 and widens VS16. Its BCE is from iterm2 in ncurses' terminfo",
         modify_other_keys: Yes,
         width_profile: WidthProfile {
             joins_emoji: true,
             vs16_widens: true,
             ambiguous_wide: false,
         },
+        bce: Yes,
         ..CURRENT
     },
 ];
@@ -290,6 +318,13 @@ mod tests {
         assert_eq!(find("iTerm.app", Some("3.6.11")).unwrap().name, "iterm2");
         assert_eq!(find("XTerm", Some("390")).unwrap().name, "xterm");
         assert!(find("st", None).is_none());
+    }
+
+    #[test]
+    fn every_row_says_whether_it_erases_with_the_background() {
+        assert!(ROWS.iter().all(|row| row.bce != Unknown), "{ROWS:?}");
+        assert_eq!(find("xterm", None).unwrap().bce, Yes);
+        assert_eq!(find("tmux", Some("3.7")).unwrap().bce, No);
     }
 
     #[test]

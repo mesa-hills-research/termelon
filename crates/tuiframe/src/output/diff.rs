@@ -7,6 +7,7 @@
 //! than moving the cursor over them.
 
 use crate::buffer::{Buffer, Cell};
+use crate::style::Color;
 
 /// Cells of one row to write, by row and columns counted inside the buffer's area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,9 @@ pub(crate) enum Before<'a> {
     Row(&'a Buffer, usize),
     /// A blank row, as a cleared screen or a scroll leaves.
     Blank,
+    /// A row of spaces in this background, as a screen cleared with it leaves where erasing
+    /// fills with the background.
+    Fill(Color),
 }
 
 /// The longest gap of unchanged cells worth writing instead of moving over.
@@ -42,15 +46,16 @@ pub(crate) fn diff_row(
     runs: &mut Vec<Run>,
 ) {
     let row = next.row(y);
-    let prev = match before {
+    let (prev, fill) = match before {
         Before::Row(prev, py) => {
             let prev_row = prev.row(py);
             if !prev.is_rich_row(py) && !next.is_rich_row(y) && Buffer::rows_equal(prev_row, row) {
                 return;
             }
-            Some((prev, prev_row))
+            (Some((prev, prev_row)), Color::Reset)
         }
-        Before::Blank => None,
+        Before::Blank => (None, Color::Reset),
+        Before::Fill(color) => (None, color),
     };
     let crosses = |x: usize| {
         row.get(x).is_some_and(Cell::is_continuation)
@@ -69,7 +74,7 @@ pub(crate) fn diff_row(
         }
         while x < to {
             let width = unit_width(row, x);
-            if unit_changed(prev, next, row, x, width) {
+            if unit_changed(prev, fill, next, row, x, width) {
                 push(runs, first, y, x, x + width);
             }
             x += width;
@@ -88,9 +93,12 @@ pub(crate) fn unit_width(row: &[Cell], x: usize) -> usize {
         .count()
 }
 
-/// Whether the unit at `x` of `width` cells shows something else than the previous frame there.
+/// Whether the unit at `x` of `width` cells shows something else than the previous frame there,
+/// or with no previous frame, than a space in the background `fill`. Spaces that show only their
+/// background look the same with the same background.
 fn unit_changed(
     prev: Option<(&Buffer, &[Cell])>,
+    fill: Color,
     next: &Buffer,
     row: &[Cell],
     x: usize,
@@ -100,7 +108,7 @@ fn unit_changed(
         return false;
     };
     let Some((prev, prev_row)) = prev else {
-        return width > 1 || !next.looks_blank(cell);
+        return width > 1 || next.bare_background(cell) != Some(fill);
     };
     let Some(before) = prev_row.get(x) else {
         return true;
@@ -108,7 +116,8 @@ fn unit_changed(
     if before.is_continuation() || unit_width(prev_row, x) != width {
         return true;
     }
-    !(prev.same_cell(before, next, cell) || (prev.looks_blank(before) && next.looks_blank(cell)))
+    let bare = prev.bare_background(before);
+    !(prev.same_cell(before, next, cell) || (bare.is_some() && bare == next.bare_background(cell)))
 }
 
 /// Adds the cells `start..end` of row `y` to the runs from `first`, joining the last run when

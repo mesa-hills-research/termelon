@@ -536,6 +536,44 @@ fn a_full_redraw_clears_and_writes_what_isnt_blank() {
 }
 
 #[test]
+fn with_bce_coloured_spaces_are_erased() {
+    let caps = Capabilities {
+        bce: Support::Yes,
+        ..full_caps()
+    };
+    let prev = text(AREA, &[(0, 0, "abcdefghij", Style::new())]);
+    let mut next = text(AREA, &[(0, 0, "ab", Style::new())]);
+    next.set_style(Rect::new(2, 0, 8, 1), Style::new().bg(Color::Blue));
+    let got = packet(&mut primed(&prev, &caps), &prev, &next, None, &caps);
+    assert_eq!(got, "␛[?2026h␛[3G␛[44m␛[K␛[0m␛[?2026l");
+    let unknown = full_caps();
+    let got = packet(&mut primed(&prev, &unknown), &prev, &next, None, &unknown);
+    assert_eq!(
+        got, "␛[?2026h␛[3G␛[44m        ␛[0m␛[?2026l",
+        "spaces where BCE isn't known"
+    );
+}
+
+#[test]
+fn with_bce_a_full_redraw_clears_in_the_common_background() {
+    let caps = Capabilities {
+        bce: Support::Yes,
+        ..full_caps()
+    };
+    let mut frame = Buffer::empty(AREA);
+    frame.set_style(AREA, Style::new().bg(Color::Rgb(40, 44, 52)));
+    frame.set_string(0, 0, "hi", Style::new().fg(Color::White));
+    frame.set_style(Rect::new(0, 2, 3, 1), Style::new().bg(Color::Red));
+    let mut encoder = primed(&frame, &caps);
+    encoder.redraw();
+    let got = packet(&mut encoder, &frame, &frame, None, &caps);
+    assert_eq!(
+        got,
+        "␛[?2026h␛[?25l␛[0;48;2;40;44;52m␛[?7l␛[2J␛[H␛[97mhi␛[3H␛[0;41m   ␛[0m␛[?2026l"
+    );
+}
+
+#[test]
 fn without_synchronized_output_the_packet_has_no_update() {
     let caps = Capabilities {
         synchronized_output: Support::No,
@@ -729,12 +767,13 @@ fn vt_underline_color(c: Color) -> tuiframe_vt::Color {
     }
 }
 
-fn looks_blank(style: &tuiframe_vt::Style, text: &str) -> bool {
-    text == " "
-        && style.bg == tuiframe_vt::Color::Default
+/// The background of an emulator's cell that is a space showing nothing else.
+fn bare_background(style: &tuiframe_vt::Style, text: &str) -> Option<tuiframe_vt::Color> {
+    let bare = text == " "
         && style.underline == Underline::None
         && !(style.reverse || style.strike || style.overline || style.blink || style.rapid_blink)
-        && style.link.is_none()
+        && style.link.is_none();
+    bare.then_some(style.bg)
 }
 
 /// Whether the emulator's screen shows what the buffer holds, cell for cell, with colours at the
@@ -802,20 +841,20 @@ fn check_cells(
                 continue;
             }
             let style = theirs.style();
-            let blank = buffer.cell((x, y)).is_some_and(|c| {
-                c.symbol() == " "
-                    && c.bg() == Color::Reset
-                    && !c.modifier().intersects(
-                        Modifier::REVERSED
-                            | Modifier::UNDERLINED
-                            | Modifier::CROSSED_OUT
-                            | Modifier::OVERLINED
-                            | Modifier::SLOW_BLINK
-                            | Modifier::RAPID_BLINK,
-                    )
-                    && (c.link().is_none() || caps.hyperlinks != Support::Yes)
-            });
-            if blank && looks_blank(style, theirs.text()) {
+            // A space that shows only its background looks the same whatever else it holds.
+            let bare = ours.symbol() == " "
+                && !ours.modifier().intersects(
+                    Modifier::REVERSED
+                        | Modifier::UNDERLINED
+                        | Modifier::CROSSED_OUT
+                        | Modifier::OVERLINED
+                        | Modifier::SLOW_BLINK
+                        | Modifier::RAPID_BLINK,
+                )
+                && (ours.link().is_none() || caps.hyperlinks != Support::Yes);
+            if bare
+                && bare_background(style, theirs.text()) == Some(vt_color(lower(ours.bg(), depth)))
+            {
                 continue;
             }
             if theirs.text() != ours.symbol() || u16::from(theirs.width()) != ours.width() {
@@ -1379,9 +1418,17 @@ proptest! {
         profile in width_profile(),
         caps in caps(),
         bce in any::<bool>(),
+        bce_known in any::<bool>(),
         scroll in any::<bool>(),
         frames in prop::collection::vec(frame(), 1..6),
     ) {
+        // The capabilities say BCE only where the terminal has it.
+        let mut caps = caps;
+        caps.bce = match (bce, bce_known) {
+            (true, true) => Support::Yes,
+            (false, true) => Support::No,
+            _ => Support::Unknown,
+        };
         if let Err(e) = run_frames(profile, &caps, bce, scroll, &frames) {
             prop_assert!(false, "{}", e);
         }
@@ -1402,6 +1449,7 @@ proptest! {
             };
             let caps = Capabilities {
                 synchronized_output: if quirk == Quirk::NoSync { Support::No } else { Support::Yes },
+                bce: if quirk == Quirk::NoBce { Support::No } else { Support::Yes },
                 ..full_caps()
             };
             let scroll = quirk != Quirk::NoInsertDeleteLines;
