@@ -18,6 +18,53 @@ pub enum KeyEncoding {
     LinuxConsole,
 }
 
+/// Behaviours some terminals have that a program shouldn't depend on either way. Each is off in
+/// the built-in profiles, so a test turns them on to check that output still shows right.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Quirks {
+    /// `CSI ? 7 l` does nothing, so autowrap stays on.
+    pub ignores_autowrap_off: bool,
+    /// Writing over half of a wide character leaves the other half on the screen. The emulator
+    /// keeps the character's text there, in a narrow cell.
+    pub keeps_wide_halves: bool,
+    /// `CSI n S` and `CSI n T` do nothing.
+    pub no_scroll_up_down: bool,
+    /// `CSI n L` and `CSI n M` do nothing.
+    pub no_insert_delete_lines: bool,
+}
+
+/// One way a terminal differs, for turning it on in a profile with [`Profile::with_quirk`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Quirk {
+    /// [`Quirks::ignores_autowrap_off`].
+    IgnoresAutowrapOff,
+    /// [`Quirks::keeps_wide_halves`].
+    KeepsWideHalves,
+    /// [`Quirks::no_scroll_up_down`].
+    NoScrollUpDown,
+    /// [`Quirks::no_insert_delete_lines`].
+    NoInsertDeleteLines,
+    /// No mode 2026, so synchronized updates are ignored.
+    NoSync,
+    /// East Asian ambiguous characters take two cells ([`WidthRules::ambiguous_wide`]).
+    AmbiguousWide,
+    /// Erasing and scrolling leave the default background ([`Profile::bce`] off).
+    NoBce,
+}
+
+impl Quirk {
+    /// Every quirk.
+    pub const ALL: [Quirk; 7] = [
+        Quirk::IgnoresAutowrapOff,
+        Quirk::KeepsWideHalves,
+        Quirk::NoScrollUpDown,
+        Quirk::NoInsertDeleteLines,
+        Quirk::NoSync,
+        Quirk::AmbiguousWide,
+        Quirk::NoBce,
+    ];
+}
+
 /// A terminal as the emulator plays it: how it measures and erases, which modes it has, what it
 /// answers, and how it encodes input.
 ///
@@ -66,6 +113,8 @@ pub struct Profile {
     /// The capabilities it answers XTGETTCAP (`DCS + q name ST`) with, each a name and a value
     /// (`None` for a boolean). `None` means it doesn't answer XTGETTCAP at all.
     pub termcap: Option<Vec<(String, Option<String>)>>,
+    /// Behaviours a program shouldn't depend on.
+    pub quirks: Quirks,
 }
 
 const XTERM_MODES: [u16; 16] = [
@@ -108,6 +157,7 @@ impl Profile {
                 ("Co", Some("256")),
                 ("colors", Some("256")),
             ])),
+            quirks: Quirks::default(),
         }
     }
 
@@ -149,6 +199,7 @@ impl Profile {
                 ("Tc", None),
                 ("RGB", None),
             ])),
+            quirks: Quirks::default(),
         }
     }
 
@@ -179,6 +230,7 @@ impl Profile {
             foreground: Some((0xfc, 0xfc, 0xfc)),
             background: Some((0x23, 0x26, 0x27)),
             termcap: None,
+            quirks: Quirks::default(),
         }
     }
 
@@ -209,6 +261,7 @@ impl Profile {
             foreground: Some((0xcc, 0xcc, 0xcc)),
             background: Some((0x0c, 0x0c, 0x0c)),
             termcap: None,
+            quirks: Quirks::default(),
         }
     }
 
@@ -240,6 +293,7 @@ impl Profile {
             foreground: None,
             background: None,
             termcap: None,
+            quirks: Quirks::default(),
         }
     }
 
@@ -268,6 +322,7 @@ impl Profile {
             foreground: None,
             background: None,
             termcap: None,
+            quirks: Quirks::default(),
         }
     }
 
@@ -286,6 +341,21 @@ impl Profile {
             termcap: None,
             ..Profile::xterm()
         }
+    }
+
+    /// The profile with a quirk turned on.
+    #[must_use]
+    pub fn with_quirk(mut self, quirk: Quirk) -> Profile {
+        match quirk {
+            Quirk::IgnoresAutowrapOff => self.quirks.ignores_autowrap_off = true,
+            Quirk::KeepsWideHalves => self.quirks.keeps_wide_halves = true,
+            Quirk::NoScrollUpDown => self.quirks.no_scroll_up_down = true,
+            Quirk::NoInsertDeleteLines => self.quirks.no_insert_delete_lines = true,
+            Quirk::NoSync => self.modes.retain(|&mode| mode != 2026),
+            Quirk::AmbiguousWide => self.width.ambiguous_wide = true,
+            Quirk::NoBce => self.bce = false,
+        }
+        self
     }
 
     /// Whether it has a DEC private mode.

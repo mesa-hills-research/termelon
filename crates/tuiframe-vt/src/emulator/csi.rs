@@ -130,8 +130,12 @@ impl Emulator {
             }
             b'J' if few(1) => return self.erase_display(params.get(0)),
             b'K' if few(1) => return self.erase_line(params.get(0)),
+            b'S' | b'T' if few(1) && self.profile.quirks.no_scroll_up_down => {}
             b'S' if few(1) => self.scroll_up(n),
             b'T' if few(1) => self.scroll_down(n),
+            b'L' | b'M' if few(1) && self.profile.quirks.no_insert_delete_lines => {}
+            b'L' if few(1) => self.insert_lines(n),
+            b'M' if few(1) => self.delete_lines(n),
             b'r' if few(2) => self.set_scroll_region(params),
             b's' if params.is_empty() => self.save_cursor(),
             b'u' if params.is_empty() => self.restore_cursor(),
@@ -314,6 +318,7 @@ impl Emulator {
                 self.origin = on;
                 self.goto(0, 0);
             }
+            7 if !on && self.profile.quirks.ignores_autowrap_off => return true,
             7 => self.autowrap = on,
             9 | 1000 | 1002 | 1003 => {
                 self.mouse = match (on, mode) {
