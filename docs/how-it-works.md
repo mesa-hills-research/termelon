@@ -76,6 +76,9 @@ writes the cells that aren't blank. Nothing ever asks the terminal where its cur
 with every write clipped to the regions, and only those regions are diffed and written, so an
 animation costs the size of what moves.
 
+`testing::TestTerminal` takes the same steps with the same buffers and encoder, and feeds the bytes
+to `tuiframe-vt` instead of a writer, so a test sees what a terminal would show.
+
 ## Cells and widths
 
 A `Cell` is 16 bytes and `Copy`. It holds one character's UTF-8 inline, or a tag and an index into
