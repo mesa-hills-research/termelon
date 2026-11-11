@@ -131,9 +131,21 @@ impl Grid {
     }
 
     /// Writes a cluster of `width` cells at `x`. The caller makes sure it fits.
-    pub(crate) fn put(&mut self, x: u16, y: u16, text: &str, width: u8, style: &Style) {
+    ///
+    /// Parts of wide clusters that stick out of the cells written become blanks, or with
+    /// `keep_halves`, keep the cluster's text in a narrow cell, as a terminal that leaves the other
+    /// half of a wide character on the screen shows it.
+    pub(crate) fn put(
+        &mut self,
+        x: u16,
+        y: u16,
+        text: &str,
+        width: u8,
+        style: &Style,
+        keep_halves: bool,
+    ) {
         let end = x.saturating_add(u16::from(width)).min(self.cols);
-        self.break_wide(y, x, end);
+        self.break_wide(y, x, end, keep_halves);
         let Some(row) = self.rows.get_mut(usize::from(y)) else {
             return;
         };
@@ -180,7 +192,7 @@ impl Grid {
         if start >= end {
             return;
         }
-        self.break_wide(y, start, end);
+        self.break_wide(y, start, end, false);
         if let Some(row) = self.rows.get_mut(usize::from(y)) {
             for cell in &mut row[usize::from(start)..usize::from(end)] {
                 cell.clone_from(blank);
@@ -255,20 +267,30 @@ impl Grid {
     }
 
     /// Before cells from `start` to `end` change, blanks the parts of wide clusters that stick out
-    /// of that range, keeping their style.
-    fn break_wide(&mut self, y: u16, start: u16, end: u16) {
+    /// of that range, keeping their style. With `keep_halves`, the first cell of each part keeps the
+    /// cluster's text instead.
+    fn break_wide(&mut self, y: u16, start: u16, end: u16, keep_halves: bool) {
         let Some(row) = self.rows.get_mut(usize::from(y)) else {
             return;
         };
         let (start, end) = (usize::from(start), usize::from(end));
-        if start < row.len() && row[start].is_continuation() {
-            let mut x = start;
+        let leader_of = |row: &[Cell], mut x: usize| {
             while x > 0 && row[x].is_continuation() {
                 x -= 1;
             }
-            for cell in &mut row[x..start] {
+            x
+        };
+        let right = (end < row.len() && row[end].is_continuation())
+            .then(|| row[leader_of(row, end)].symbol.clone());
+        if start < row.len() && row[start].is_continuation() {
+            let leader = leader_of(row, start);
+            let text = row[leader].symbol.clone();
+            for cell in &mut row[leader..start] {
                 cell.symbol = Symbol::SPACE;
                 cell.width = 1;
+            }
+            if keep_halves {
+                row[leader].symbol = text;
             }
         }
         let mut x = end;
@@ -276,6 +298,9 @@ impl Grid {
             row[x].symbol = Symbol::SPACE;
             row[x].width = 1;
             x += 1;
+        }
+        if let (true, Some(text)) = (keep_halves && end < row.len(), right) {
+            row[end].symbol = text;
         }
     }
 
@@ -316,12 +341,25 @@ mod tests {
     fn writing_over_half_a_wide_cluster_blanks_the_other_half() {
         let mut grid = Grid::new(6, 1);
         let style = Style::default();
-        grid.put(0, 0, "字", 2, &style);
-        grid.put(2, 0, "字", 2, &style);
-        grid.put(1, 0, "a", 1, &style);
+        grid.put(0, 0, "字", 2, &style, false);
+        grid.put(2, 0, "字", 2, &style, false);
+        grid.put(1, 0, "a", 1, &style, false);
         assert_eq!(text(&grid, 0), " a字  ");
-        grid.put(2, 0, "b", 1, &style);
+        grid.put(2, 0, "b", 1, &style, false);
         assert_eq!(text(&grid, 0), " ab   ");
+        grid.check().unwrap();
+    }
+
+    #[test]
+    fn writing_over_half_a_wide_cluster_can_leave_the_other_half() {
+        let mut grid = Grid::new(6, 1);
+        let style = Style::default();
+        grid.put(0, 0, "字", 2, &style, true);
+        grid.put(2, 0, "字", 2, &style, true);
+        grid.put(1, 0, "a", 1, &style, true);
+        assert_eq!(text(&grid, 0), "字a字  ");
+        grid.put(2, 0, "b", 1, &style, true);
+        assert_eq!(text(&grid, 0), "字ab字  ");
         grid.check().unwrap();
     }
 
@@ -329,8 +367,8 @@ mod tests {
     fn erasing_part_of_a_wide_cluster_blanks_all_of_it() {
         let mut grid = Grid::new(4, 1);
         let style = Style::default();
-        grid.put(0, 0, "字", 2, &style);
-        grid.put(2, 0, "字", 2, &style);
+        grid.put(0, 0, "字", 2, &style, false);
+        grid.put(2, 0, "字", 2, &style, false);
         grid.erase(0, 1, 3, &Cell::blank(Style::default()));
         assert_eq!(text(&grid, 0), "    ");
         grid.check().unwrap();
@@ -341,7 +379,7 @@ mod tests {
         let mut grid = Grid::new(1, 4);
         let style = Style::default();
         for (y, c) in ["a", "b", "c", "d"].iter().enumerate() {
-            grid.put(0, u16::try_from(y).unwrap(), c, 1, &style);
+            grid.put(0, u16::try_from(y).unwrap(), c, 1, &style, false);
         }
         let blank = Cell::blank(Style::default());
         grid.scroll_up(1, 2, 1, &blank);
@@ -353,7 +391,7 @@ mod tests {
     #[test]
     fn resizing_cuts_a_wide_cluster_at_the_edge() {
         let mut grid = Grid::new(4, 1);
-        grid.put(2, 0, "字", 2, &Style::default());
+        grid.put(2, 0, "字", 2, &Style::default(), false);
         grid.resize(3, 2);
         assert_eq!(text(&grid, 0), "   ");
         grid.check().unwrap();

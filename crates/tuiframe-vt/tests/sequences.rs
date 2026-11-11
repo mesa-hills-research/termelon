@@ -428,6 +428,40 @@ fn scrolling_leaves_the_cursor() {
 }
 
 #[test]
+fn il_and_dl_inside_the_region() {
+    let lines = |seq: &[u8]| run(2, 4, &[lettered(4).as_slice(), seq].concat());
+    assert_eq!(lines(b"\x1b[2;2H\x1b[L").rows(), ["a", "", "b", "c"]);
+    assert_eq!(lines(b"\x1b[2;2H\x1b[2L").rows(), ["a", "", "", "b"]);
+    assert_eq!(lines(b"\x1b[2;2H\x1b[M").rows(), ["a", "c", "d", ""]);
+    assert_eq!(lines(b"\x1b[2;2H\x1b[9M").rows(), ["a", "", "", ""]);
+    assert_eq!(
+        lines(b"\x1b[2;3r\x1b[2;1H\x1b[L").rows(),
+        ["a", "", "b", "d"]
+    );
+    assert_eq!(
+        lines(b"\x1b[2;3r\x1b[2;1H\x1b[M").rows(),
+        ["a", "c", "", "d"]
+    );
+    // Outside the region they do nothing.
+    assert_eq!(
+        lines(b"\x1b[2;3r\x1b[4;1H\x1b[L").rows(),
+        ["a", "b", "c", "d"]
+    );
+}
+
+#[test]
+fn il_and_dl_move_the_cursor_to_the_first_column() {
+    assert_eq!(at(&run(5, 3, b"\x1b[2;4H\x1b[L")), (0, 1));
+    assert_eq!(at(&run(5, 3, b"\x1b[2;4H\x1b[M")), (0, 1));
+}
+
+#[test]
+fn inserted_lines_take_the_background_with_bce() {
+    let term = run(2, 2, b"\x1b[42m\x1b[L");
+    assert_eq!(term.cell(0, 0).unwrap().style().bg, Color::Green);
+}
+
+#[test]
 fn decstbm_scrolls_only_the_region() {
     let region =
         |seq: &[u8]| run(1, 4, &[lettered(4).as_slice(), b"\x1b[2;3r", seq].concat()).rows();

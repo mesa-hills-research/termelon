@@ -570,7 +570,7 @@ impl Emulator {
         }
         if at.x + u16::from(width) <= self.cols {
             let pen = self.pen.clone();
-            self.grid_mut().put(at.x, at.y, &text, width, &pen);
+            self.grid_mut().put(at.x, at.y, &text, width, &pen, false);
             self.event(Event::Drawn {
                 at,
                 width,
@@ -642,8 +642,8 @@ impl Emulator {
             }
         }
         let (x, y) = (self.x, self.y);
-        let pen = self.pen.clone();
-        self.grid_mut().put(x, y, text, width, &pen);
+        let (pen, keep_halves) = (self.pen.clone(), self.profile.quirks.keeps_wide_halves);
+        self.grid_mut().put(x, y, text, width, &pen, keep_halves);
         self.event(Event::Drawn {
             at: Pos::new(x, y),
             width,
@@ -701,6 +701,30 @@ impl Emulator {
     fn scroll_down(&mut self, n: u16) {
         let (top, bottom, blank) = (self.top, self.bottom, self.blank());
         self.grid_mut().scroll_down(top, bottom, n, &blank);
+    }
+
+    /// IL, inside the scroll region only. The rows from the cursor's down move down by `n`, and
+    /// the cursor goes to the first column, as DEC terminals do.
+    fn insert_lines(&mut self, n: u16) {
+        if self.y < self.top || self.y > self.bottom {
+            return;
+        }
+        let (y, bottom, blank) = (self.y, self.bottom, self.blank());
+        self.grid_mut().scroll_down(y, bottom, n, &blank);
+        self.x = 0;
+        self.pending_wrap = false;
+    }
+
+    /// DL, inside the scroll region only. The rows below the cursor's move up by `n`, and the
+    /// cursor goes to the first column.
+    fn delete_lines(&mut self, n: u16) {
+        if self.y < self.top || self.y > self.bottom {
+            return;
+        }
+        let (y, bottom, blank) = (self.y, self.bottom, self.blank());
+        self.grid_mut().scroll_up(y, bottom, n, &blank);
+        self.x = 0;
+        self.pending_wrap = false;
     }
 
     fn tab(&mut self) {
