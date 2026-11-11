@@ -75,6 +75,12 @@ impl Mods {
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
+
+    /// These modifiers but those of `other`.
+    #[must_use]
+    pub const fn without(self, other: Mods) -> Mods {
+        Mods(self.0 & !other.0)
+    }
 }
 
 impl BitOr for Mods {

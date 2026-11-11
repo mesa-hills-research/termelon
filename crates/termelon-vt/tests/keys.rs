@@ -366,6 +366,58 @@ fn tmux_home_and_end() {
     );
 }
 
+/// tmux 3.4 drops the keys it can't encode, and sends them in CSI u form once a program asks for
+/// modifyOtherKeys, as a run on Ubuntu 24.04 showed.
+#[test]
+fn tmux_3_4_keys_without_and_with_modify_other_keys() {
+    let both = [
+        (Key::Char('a'), CTRL, Press, "\x01"),
+        (Key::Char('a'), CTRL | ALT, Press, "\x1b\x01"),
+        (Key::Char('a'), CTRL | SHIFT, Press, "\x01"),
+        (Key::Char(' '), CTRL, Press, "\x00"),
+        (Key::Char('a'), ALT, Press, "\x1ba"),
+        (Key::Enter, ALT, Press, "\x1b\r"),
+        (Key::Tab, SHIFT, Press, "\x1b[Z"),
+        (Key::Backspace, ALT, Press, "\x1b\x7f"),
+        (Key::Home, NONE, Press, "\x1b[1~"),
+        (Key::Left, CTRL, Press, "\x1b[1;5D"),
+    ];
+    check(&term(Profile::tmux_3_4(), b""), &both);
+    check(&term(Profile::tmux_3_4(), b"\x1b[>4;2m"), &both);
+    check(
+        &term(Profile::tmux_3_4(), b""),
+        &[
+            (Key::Char('1'), CTRL, Press, ""),
+            (Key::Char('2'), CTRL, Press, "\x00"),
+            (Key::Enter, CTRL, Press, ""),
+            (Key::Enter, SHIFT, Press, ""),
+            (Key::Escape, CTRL, Press, ""),
+            (Key::Tab, CTRL, Press, "\t"),
+            (Key::Tab, CTRL | SHIFT, Press, "\x1b[Z"),
+            (Key::Char('1'), CTRL | ALT, Press, ""),
+        ],
+    );
+    for level in ["1", "2"] {
+        let setup = format!("\x1b[>4;{level}m");
+        check(
+            &term(Profile::tmux_3_4(), setup.as_bytes()),
+            &[
+                (Key::Char('1'), CTRL, Press, "\x1b[49;5u"),
+                (Key::Char('2'), CTRL, Press, "\x1b[50;5u"),
+                (Key::Enter, CTRL, Press, "\x1b[13;5u"),
+                (Key::Enter, SHIFT, Press, "\x1b[13;2u"),
+                (Key::Escape, CTRL, Press, "\x1b[27;5u"),
+                (Key::Backspace, CTRL, Press, "\x1b[127;5u"),
+                (Key::Tab, CTRL, Press, "\x1b[9;5u"),
+                (Key::Tab, CTRL | SHIFT, Press, "\x1b[1;5Z"),
+                (Key::Char('1'), CTRL | ALT, Press, "\x1b[49;7u"),
+            ],
+        );
+    }
+    let off = term(Profile::tmux_3_4(), b"\x1b[>4;2m\x1b[>4m");
+    check(&off, &[(Key::Enter, CTRL, Press, "")]);
+}
+
 fn mouse(term: &Emulator, kind: MouseKind, x: u16, y: u16, mods: Mods) -> Vec<u8> {
     term.encode_mouse(Mouse { kind, x, y, mods })
 }

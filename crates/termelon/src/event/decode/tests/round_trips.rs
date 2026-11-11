@@ -147,9 +147,11 @@ fn parameterized_code(key: Key, mods: Mods) -> KeyCode {
     }
 }
 
-/// The C0 byte xterm sends for Ctrl with a character.
-fn control_byte(c: char) -> Option<u8> {
+/// The C0 byte a terminal sends for Ctrl with a character, xterm's or tmux 3.4's.
+fn control_byte(keys: KeyEncoding, c: char) -> Option<u8> {
     match c {
+        '-' if keys == KeyEncoding::Tmux34 => Some(0x1f),
+        '3' | '4' | '5' | '7' | '8' | '~' if keys == KeyEncoding::Tmux34 => None,
         'a'..='z' => u8::try_from(u32::from(c) - u32::from('a') + 1).ok(),
         '@' | ' ' | '2' => Some(0x00),
         '[' | '3' => Some(0x1b),
@@ -179,7 +181,7 @@ fn control_key(byte: u8) -> (KeyCode, KeyModifiers) {
 /// the ESC prefix, and Shift as a capital. The special keys keep no modifier (they have none here,
 /// but on the Linux console, which drops them). Ctrl survives on the characters that have a control
 /// code, and Ctrl+Backspace is 0x08, Ctrl+H.
-fn legacy(key: Key, mods: Mods) -> Decoded {
+fn legacy(keys: KeyEncoding, key: Key, mods: Mods) -> Decoded {
     let alt = if mods.contains(Mods::ALT) { ALT } else { NONE };
     let (code, held) = match key {
         Key::Enter => (KeyCode::Enter, alt),
@@ -188,7 +190,7 @@ fn legacy(key: Key, mods: Mods) -> Decoded {
         Key::Backspace if mods.contains(Mods::CTRL) => (KeyCode::Char('h'), CTRL | alt),
         Key::Backspace => (KeyCode::Backspace, alt),
         Key::Escape => (KeyCode::Esc, alt),
-        Key::Char(c) => match control_byte(c) {
+        Key::Char(c) => match control_byte(keys, c) {
             Some(byte) if mods.contains(Mods::CTRL) => {
                 let (code, held) = control_key(byte);
                 (code, held | alt)
@@ -223,6 +225,34 @@ fn sends_nothing(flags: u8, key: Key, mods: Mods, kind: KeyKind) -> bool {
     }
 }
 
+/// Whether tmux 3.4 sends nothing for the key, as `KeyEncoding::Tmux34` says: Ctrl with a
+/// character that has no control byte, and Shift or Ctrl with Enter, Escape, Backspace and Tab
+/// where its table has no entry, until a program asks for modifyOtherKeys. Ctrl with a character
+/// tmux has no name for sends nothing even then. Super is dropped before this.
+fn tmux_3_4_drops(extended: bool, key: Key, mods: Mods) -> bool {
+    const KEEPS_CTRL: &str = "!#()+,-.0123456789:;<=>'`/";
+    match key {
+        Key::Tab if mods.contains(Mods::CTRL) || mods.without(Mods::ALT) == Mods::SHIFT => false,
+        Key::Enter | Key::Escape | Key::Backspace | Key::Tab => {
+            !extended && mods.intersects(Mods::SHIFT | Mods::CTRL)
+        }
+        Key::Char(c) if mods.contains(Mods::CTRL) => {
+            let typed = typed(c, mods);
+            if typed.is_ascii() && !KEEPS_CTRL.contains(typed) {
+                return control_byte(KeyEncoding::Tmux34, typed.to_ascii_lowercase()).is_none();
+            }
+            let held = if typed.is_alphabetic() {
+                mods.without(Mods::SHIFT)
+            } else {
+                mods
+            };
+            let has_byte = held == Mods::CTRL && control_byte(KeyEncoding::Tmux34, typed).is_some();
+            !extended && !has_byte
+        }
+        _ => false,
+    }
+}
+
 #[test]
 fn every_key_and_modifier_under_each_profile() {
     let mut checked = 0;
@@ -246,9 +276,18 @@ fn every_key_and_modifier_under_each_profile() {
                             )
                         };
                         let decoded = decode(&bytes);
+                        // tmux has no Super, so the key reads as the one without it.
+                        let mods = if profile.keys == KeyEncoding::Tmux34 {
+                            mods.without(Mods::SUPER)
+                        } else {
+                            mods
+                        };
+                        let tmux_drops = profile.keys == KeyEncoding::Tmux34
+                            && kind != KeyKind::Release
+                            && tmux_3_4_drops(emulator.modify_other_keys() != 0, key, mods);
                         assert_eq!(
                             bytes.is_empty(),
-                            sends_nothing(flags, key, mods, kind),
+                            sends_nothing(flags, key, mods, kind) || tmux_drops,
                             "{}",
                             context()
                         );
@@ -261,14 +300,26 @@ fn every_key_and_modifier_under_each_profile() {
                                 (true, KeyKind::Release) => KeyEventKind::Release,
                                 _ => KeyEventKind::Press,
                             };
-                            let event = KeyEvent::new_with_kind(
-                                parameterized_code(key, mods),
-                                modifiers(mods),
-                                kind,
-                            );
+                            // tmux 3.4 sends a letter with Shift as its capital.
+                            let event = match key {
+                                Key::Char(c)
+                                    if profile.keys == KeyEncoding::Tmux34 && c.is_alphabetic() =>
+                                {
+                                    KeyEvent::new_with_kind(
+                                        code(key, mods),
+                                        modifiers(mods.without(Mods::SHIFT)),
+                                        kind,
+                                    )
+                                }
+                                _ => KeyEvent::new_with_kind(
+                                    parameterized_code(key, mods),
+                                    modifiers(mods),
+                                    kind,
+                                ),
+                            };
                             Decoded::Event(Event::Key(event))
                         } else {
-                            legacy(key, mods)
+                            legacy(profile.keys, key, mods)
                         };
                         assert_eq!(decoded, [expected], "{}", context());
                         checked += 1;

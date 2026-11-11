@@ -39,6 +39,9 @@ impl Emulator {
         if kind == KeyKind::Release {
             return Vec::new();
         }
+        if self.profile.keys == KeyEncoding::Tmux34 {
+            return self.tmux_3_4_key(key, mods);
+        }
         if self.profile.modify_other_keys
             && let Some(bytes) = self.modify_other_key(key, mods)
         {
@@ -222,6 +225,78 @@ impl Emulator {
             _ => !(only_shift && matches!(key, Key::Char(_))),
         };
         send.then(|| format!("\x1b[27;{};{code}~", u32::from(mods.bits()) + 1).into_bytes())
+    }
+
+    /// tmux 3.4's keys, after `input_key` in its `input-keys.c`. Where a key with Ctrl has a
+    /// control character, it's that. Ctrl+Tab and the special keys come from its table. Any other
+    /// key with Shift or Ctrl sends nothing, or `CSI code ; mods u` once the program has asked for
+    /// modifyOtherKeys. tmux has no Super, so a key with Super is the key without it.
+    fn tmux_3_4_key(&self, key: Key, mods: Mods) -> Vec<u8> {
+        /// The characters tmux keeps Ctrl on, rather than turning into a control character.
+        const KEEPS_CTRL: &str = "!#()+,-.0123456789:;<=>'`/";
+        let mods = mods.without(Mods::SUPER);
+        let extended = self.profile.modify_other_keys && self.modify_other_keys != 0;
+        let esc = |bytes: &[u8]| -> Vec<u8> {
+            if mods.contains(Mods::ALT) {
+                [&[ESC][..], bytes].concat()
+            } else {
+                bytes.to_vec()
+            }
+        };
+        let (code, mods) = match key {
+            Key::Tab if mods.contains(Mods::CTRL) => {
+                let shift = mods.contains(Mods::SHIFT);
+                let bytes: &[u8] = match (shift, extended && !mods.contains(Mods::ALT)) {
+                    (false, false) => b"\t",
+                    (false, true) => b"\x1b[9;5u",
+                    (true, false) => b"\x1b[Z",
+                    (true, true) => b"\x1b[1;5Z",
+                };
+                return esc(bytes);
+            }
+            // Shift+Tab is tmux's BTab, in its table.
+            Key::Enter | Key::Escape | Key::Backspace | Key::Tab
+                if mods.intersects(Mods::SHIFT | Mods::CTRL)
+                    && !(key == Key::Tab && mods.without(Mods::ALT) == Mods::SHIFT) =>
+            {
+                let code = match key {
+                    Key::Enter => '\r',
+                    Key::Escape => '\x1b',
+                    Key::Backspace => '\x7f',
+                    _ => '\t',
+                };
+                (code, mods)
+            }
+            Key::Char(c) if mods.contains(Mods::CTRL) => {
+                let typed = typed_char(c, mods);
+                if !KEEPS_CTRL.contains(typed) && typed.is_ascii() {
+                    return match typed {
+                        'a'..='z' | '@'..='_' | ' ' | '?' => {
+                            control_byte(typed).map_or_else(Vec::new, |byte| esc(&[byte]))
+                        }
+                        // tmux has no name for the others.
+                        _ => Vec::new(),
+                    };
+                }
+                // Shift is in a letter, and stays a modifier on the others.
+                if c.is_alphabetic() {
+                    (typed, mods.without(Mods::SHIFT))
+                } else {
+                    (typed, mods)
+                }
+            }
+            _ => return self.legacy_key(key, mods),
+        };
+        if extended {
+            return format!("\x1b[{};{}u", u32::from(code), mods.bits() + 1).into_bytes();
+        }
+        match code {
+            _ if mods != Mods::CTRL => Vec::new(),
+            '2' => vec![0],
+            '6' => vec![0x1e],
+            '-' | '/' => vec![0x1f],
+            _ => Vec::new(),
+        }
     }
 
     /// The kitty keyboard protocol, by the flags in force.

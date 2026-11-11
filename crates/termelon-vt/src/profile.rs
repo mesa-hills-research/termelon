@@ -13,6 +13,11 @@ pub enum KeyEncoding {
     Xterm,
     /// tmux's, which are xterm's but for Home and End without modifiers, `CSI 1 ~` and `CSI 4 ~`.
     Tmux,
+    /// tmux 3.4's. It sends nothing for a key with Ctrl that has no control character, such as
+    /// Ctrl+1 or Ctrl+Enter, or for Shift with Enter, Escape or Backspace. Once a program asks for
+    /// modifyOtherKeys, at either level, those keys come as `CSI code ; mods u`, and Ctrl+Tab as
+    /// `CSI 9 ; 5 u`. Its other keys are [`KeyEncoding::Tmux`]'s.
+    Tmux34,
     /// The Linux console's. F1 to F5 are `CSI [ A` to `CSI [ E`, Home and End are `CSI 1 ~` and
     /// `CSI 4 ~`, and modifiers on the other special keys are lost.
     LinuxConsole,
@@ -83,13 +88,13 @@ pub struct Profile {
     pub decrqm: bool,
     /// Whether it keeps OSC 8 hyperlinks. Without them it ignores OSC 8.
     pub hyperlinks: bool,
+    /// The SGR attributes it takes and doesn't draw, such as 53 (overline) for kitty.
+    pub ignored_sgr: Vec<u16>,
     /// Whether it has the title stack (`CSI 22 t` and `CSI 23 t`).
     pub title_stack: bool,
     /// Whether it sets the cursor's shape with DECSCUSR (`CSI n SP q`).
     pub cursor_shape: bool,
     /// Whether it has the kitty keyboard protocol and answers `CSI ? u`.
-    /// The SGR attributes it takes and doesn't draw, such as 53 (overline) for kitty.
-    pub ignored_sgr: Vec<u16>,
     pub kitty_keyboard: bool,
     /// Whether it honours modifyOtherKeys (`CSI > 4 ; n m`).
     pub modify_other_keys: bool,
@@ -141,12 +146,12 @@ impl Profile {
             modes: XTERM_MODES.to_vec(),
             decrqm: true,
             hyperlinks: false,
+            ignored_sgr: Vec::new(),
             title_stack: true,
             cursor_shape: true,
             kitty_keyboard: false,
             modify_other_keys: true,
             linux_console: false,
-            ignored_sgr: Vec::new(),
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?64;1;2;6;9;15;16;17;18;21;22;28c".to_owned()),
             da2: Some("\x1b[>41;390;0c".to_owned()),
@@ -183,12 +188,12 @@ impl Profile {
             modes,
             decrqm: true,
             hyperlinks: true,
+            ignored_sgr: vec![5, 6, 8, 53],
             title_stack: true,
             cursor_shape: true,
             kitty_keyboard: true,
             modify_other_keys: false,
             linux_console: false,
-            ignored_sgr: vec![5, 6, 8, 53],
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?62;c".to_owned()),
             da2: Some("\x1b[>1;4000;32c".to_owned()),
@@ -221,12 +226,12 @@ impl Profile {
             modes,
             decrqm: false,
             hyperlinks: true,
+            ignored_sgr: Vec::new(),
             title_stack: false,
             cursor_shape: true,
             kitty_keyboard: false,
             modify_other_keys: false,
             linux_console: false,
-            ignored_sgr: Vec::new(),
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?62;1;4c".to_owned()),
             da2: Some("\x1b[>1;115;0c".to_owned()),
@@ -253,12 +258,12 @@ impl Profile {
             modes,
             decrqm: true,
             hyperlinks: true,
+            ignored_sgr: Vec::new(),
             title_stack: false,
             cursor_shape: true,
             kitty_keyboard: true,
             modify_other_keys: false,
             linux_console: false,
-            ignored_sgr: Vec::new(),
             keys: KeyEncoding::Xterm,
             da1: Some("\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c".to_owned()),
             da2: Some("\x1b[>0;10;1c".to_owned()),
@@ -274,8 +279,10 @@ impl Profile {
 
     /// tmux 3.4, as Ubuntu 24.04 ships it, with its default options. It doesn't know mode 2026 and
     /// doesn't answer DECRQM (3.6 answers it for some modes, 3.7 knows 2026), answers XTVERSION,
-    /// keeps hyperlinks, and sends no extended keys, since `extended-keys` is off by default. Its
-    /// `CSI 18 t` answer and its Home and End keys are believed.
+    /// and keeps hyperlinks. Its keys are [`KeyEncoding::Tmux34`], from `input_key` in its
+    /// `input-keys.c` and a run on Ubuntu 24.04: with `extended-keys` off, as it is by default, it
+    /// still sends extended keys once a program asks for modifyOtherKeys. Its `CSI 18 t` answer is
+    /// believed.
     pub fn tmux_3_4() -> Profile {
         Profile {
             name: "tmux-3.4".to_owned(),
@@ -286,14 +293,14 @@ impl Profile {
             ],
             decrqm: false,
             hyperlinks: true,
+            ignored_sgr: Vec::new(),
             title_stack: true,
             cursor_shape: true,
             kitty_keyboard: false,
-            modify_other_keys: false,
+            modify_other_keys: true,
             linux_console: false,
-            keys: KeyEncoding::Tmux,
+            keys: KeyEncoding::Tmux34,
             da1: Some("\x1b[?1;2c".to_owned()),
-            ignored_sgr: Vec::new(),
             da2: Some("\x1b[>84;0;0c".to_owned()),
             xtversion: Some("tmux 3.4".to_owned()),
             cursor_report: true,
@@ -316,6 +323,7 @@ impl Profile {
             modes: vec![1, 6, 7, 9, 25, 1000],
             decrqm: false,
             hyperlinks: false,
+            ignored_sgr: Vec::new(),
             title_stack: false,
             cursor_shape: false,
             kitty_keyboard: false,
@@ -323,7 +331,6 @@ impl Profile {
             linux_console: true,
             keys: KeyEncoding::LinuxConsole,
             da1: Some("\x1b[?6c".to_owned()),
-            ignored_sgr: Vec::new(),
             da2: None,
             xtversion: None,
             cursor_report: true,
