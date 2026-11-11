@@ -16,7 +16,6 @@ const ALT: KeyModifiers = KeyModifiers::ALT;
 const DISAMBIGUATE: u8 = 1;
 const REPORT_EVENTS: u8 = 2;
 const ALL_KEYS: u8 = 8;
-const TEXT: u8 = 16;
 
 fn profiles() -> [Profile; 6] {
     [
@@ -250,16 +249,8 @@ fn every_key_and_modifier_under_each_profile() {
                                 (true, KeyKind::Release) => KeyEventKind::Release,
                                 _ => KeyEventKind::Press,
                             };
-                            let mut event =
+                            let event =
                                 KeyEvent::new_with_kind(code(key, mods), modifiers(mods), kind);
-                            let types_text = !mods.intersects(Mods::CTRL | Mods::ALT | Mods::SUPER);
-                            if let Key::Char(c) = key
-                                && flags & (ALL_KEYS | TEXT) == ALL_KEYS | TEXT
-                                && types_text
-                                && kind != KeyEventKind::Release
-                            {
-                                event.text = Some(typed(c, mods).to_string().into());
-                            }
                             Decoded::Event(Event::Key(event))
                         } else {
                             legacy(key, mods)
