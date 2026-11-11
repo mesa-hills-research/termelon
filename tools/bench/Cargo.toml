@@ -21,5 +21,9 @@ crossterm = { version = "0.29", default-features = false }
 # the files AGENTS.md lists, so the crate that holds it is a dependency.
 stats_alloc = "0.1.10"
 
+[dev-dependencies]
+# The widgets the tests draw beside ratatui's, to check that they draw the same.
+tuiframe.workspace = true
+
 [lints]
 workspace = true
