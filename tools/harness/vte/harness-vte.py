@@ -10,6 +10,9 @@ It writes {"ready": true} once the program runs, then answers each line it reads
     {"read": true}                    {"html": the screen as VTE's HTML, "cursor": [x, y], "size": [c, r]}
     {"send": "1b5b41"}                bytes, in hex, to the program as if typed
     {"key": "Up", "mods": ["ctrl"]}   a key press through VTE's own key encoder
+    {"mouse": "press", "button": "left", "x": 3, "y": 2}
+                                      a mouse event over a cell counted from 0, through VTE's
+                                      own mouse reports. The wheel is "scroll" with "up" or "down".
     {"quit": true}                    ends the program and this script
 """
 
@@ -30,6 +33,8 @@ PALETTE = [
 ]
 FOREGROUND = "#000000"
 BACKGROUND = "#ffffff"
+
+BUTTONS = {"left": 1, "middle": 2, "right": 3}
 
 MODIFIERS = {
     "ctrl": Gdk.ModifierType.CONTROL_MASK,
@@ -69,6 +74,59 @@ def main():
     while Gtk.events_pending():
         Gtk.main_iteration()
 
+    # Event times, in milliseconds.
+    stamp = [0]
+
+    def key(name, mask):
+        """A key's press and release as GTK would deliver them. GTK's own test helper can't send
+        keys to an offscreen window."""
+        # GDK names no keysym for most characters, which come as Unicode keysyms (U00E9).
+        if len(name) > 2 and name[0] == "U" and all(c in "0123456789ABCDEF" for c in name[1:]):
+            keyval = Gdk.unicode_to_keyval(int(name[1:], 16))
+        else:
+            keyval = Gdk.keyval_from_name(name)
+        display = Gdk.Display.get_default()
+        found, entries = Gdk.Keymap.get_for_display(display).get_entries_for_keyval(keyval)
+        for kind in (Gdk.EventType.KEY_PRESS, Gdk.EventType.KEY_RELEASE):
+            event = Gdk.Event.new(kind)
+            fields = event.key
+            fields.window = terminal.get_window()
+            fields.keyval = keyval
+            fields.state = mask
+            if found and entries:
+                fields.hardware_keycode = entries[0].keycode
+                fields.group = entries[0].group
+            stamp[0] += 1000
+            fields.time = stamp[0]
+            event.set_device(display.get_default_seat().get_keyboard())
+            terminal.event(event)
+
+    def event_window():
+        # VTE takes mouse events on an input-only window of its own over the widget.
+        windows = terminal.get_window().get_children()
+        return next((w for w in windows if w.is_input_only()), terminal.get_window())
+
+    def mouse(request):
+        """A mouse event as GTK would deliver it, at the middle of the cell."""
+        x = padding.left + (request["x"] + 0.5) * terminal.get_char_width()
+        y = padding.top + (request["y"] + 0.5) * terminal.get_char_height()
+        if request["mouse"] == "scroll":
+            event = Gdk.Event.new(Gdk.EventType.SCROLL)
+            fields = event.scroll
+            fields.direction = Gdk.ScrollDirection.UP if request["button"] == "up" else Gdk.ScrollDirection.DOWN
+        else:
+            kind = Gdk.EventType.BUTTON_PRESS if request["mouse"] == "press" else Gdk.EventType.BUTTON_RELEASE
+            event = Gdk.Event.new(kind)
+            fields = event.button
+            fields.button = BUTTONS[request["button"]]
+        fields.window = event_window()
+        fields.x, fields.y = x, y
+        # A second apart, so no two presses make a double click.
+        stamp[0] += 1000
+        fields.time = stamp[0]
+        event.set_device(Gdk.Display.get_default().get_default_seat().get_pointer())
+        terminal.event(event)
+
     def spawned(_terminal, _pid, error, *_data):
         if error:
             reply({"error": str(error)})
@@ -99,7 +157,10 @@ def main():
             mask = Gdk.ModifierType(0)
             for name in request.get("mods", []):
                 mask |= MODIFIERS[name]
-            Gtk.test_widget_send_key(terminal, Gdk.keyval_from_name(request["key"]), mask)
+            key(request["key"], mask)
+            reply({"sent": True})
+        elif "mouse" in request:
+            mouse(request)
             reply({"sent": True})
         elif "quit" in request:
             Gtk.main_quit()

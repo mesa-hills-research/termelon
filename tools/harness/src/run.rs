@@ -50,10 +50,11 @@ pub struct Outcome {
 /// Runs a probe's scene in a terminal and compares the screen with what `tuiframe-vt` computes
 /// under `profile` for the bytes the probe recorded.
 ///
-/// The probe runs as `probe --scene NAME --record FILE --report FILE --size COLSxROWS`. It saves
-/// the bytes that show its frame, draws the scene with its marker, and holds the screen until `q`,
-/// then writes its report. The harness presses `q` after reading the screen back, as bytes where the
-/// terminal takes them and as a key otherwise, so the report has the capabilities the probe found.
+/// The probe runs as `probe --scene NAME --record FILE --report FILE --size COLSxROWS`. It draws
+/// the scene with its marker and holds the screen until `q`, then saves every byte the framework
+/// wrote and writes its report. The harness presses `q` after reading the screen back, as bytes
+/// where the terminal takes them and as a key otherwise, so the report has the capabilities the
+/// probe found.
 ///
 /// # Errors
 ///

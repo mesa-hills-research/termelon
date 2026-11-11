@@ -3,16 +3,22 @@
 //! ```text
 //! probe --list
 //! probe --scene NAME --record FILE [--report FILE] [--size COLSxROWS] [--hold SECONDS]
+//! probe --keys MODE --input FILE [--record FILE] [--hold SECONDS]
 //! ```
 //!
 //! It opens the terminal with the framework, which asks what the terminal supports and measures
 //! its widths, and checks the size is the one asked for. It draws the scene as a frame, which ends
-//! with `probe-done:NAME` on the last row, after saving to `--record` the bytes that show the
-//! frame's cells and cursor on a cleared screen, for the harness to compute the screen the
-//! terminal should show. Then it holds the screen, recording every event, until its input ends,
-//! `q` is pressed, or `--hold` seconds pass (300 by default), and writes its report as JSON.
+//! with `probe-done:NAME` on the last row. Then it holds the screen, recording every event, until
+//! its input ends, `q` is pressed, or `--hold` seconds pass (300 by default). It saves to
+//! `--record` every byte the framework wrote, for the harness to compute the screen the terminal
+//! should show, and writes its report as JSON.
+//!
+//! With `--keys`, it saves instead the raw bytes the terminal sends to `--input`, in a mode of
+//! `legacy`, `disambiguate` (the kitty keyboard protocol's flag 1) or `modify-other-keys`
+//! (xterm's level 2), each with SGR mouse reports on, and the bytes that set the mode to
+//! `--record`.
 
-mod record;
+mod input;
 mod report;
 mod scenes;
 
@@ -20,32 +26,34 @@ use std::io::{self, Write as _};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use tuiframe::{Buffer, Drawn, Event, KeyCode, Options, Rect, Terminal};
+use tuiframe::{Drawn, Event, KeyCode, Options, Terminal};
 
 use crate::report::Report;
 
 /// How long the probe holds the screen, at most, by default.
 const HOLD: Duration = Duration::from_secs(300);
 
-/// Standard output, for `--list`, before the terminal is open.
+/// Standard output, for `--list` and `--keys`, which don't open the terminal with the framework.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the probe lists its scenes before it opens the terminal"
+    reason = "the probe lists its scenes and sets up `--keys` without the framework's terminal"
 )]
 fn stdout() -> io::Stdout {
     io::stdout()
 }
 
-/// Standard error, for a bad command line, before the terminal is open.
+/// Standard error, for a bad command line and the errors of `--keys`, without the framework's
+/// terminal.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the probe reports a bad command line before it opens the terminal"
+    reason = "the probe reports a bad command line, and `--keys` its errors, without the framework's terminal"
 )]
 fn stderr() -> io::Stderr {
     io::stderr()
 }
 
-const USAGE: &str = "usage: probe --list | probe --scene NAME --record FILE [--report FILE] [--size COLSxROWS] [--hold SECONDS]";
+const USAGE: &str = "usage: probe --list | probe --scene NAME --record FILE [--report FILE] [--size COLSxROWS] \
+                     [--hold SECONDS] | probe --keys MODE --input FILE [--record FILE] [--hold SECONDS]";
 
 struct Args {
     scene: &'static scenes::Scene,
@@ -100,8 +108,8 @@ fn draw(terminal: &mut Terminal, scene: &scenes::Scene) -> Result<(), String> {
 
 /// Runs the scene, filling in the report.
 fn run(args: &Args, report: &mut Report) -> Result<(), String> {
-    let mut terminal =
-        Terminal::open(Options::default().width_probes(true)).map_err(|error| error.to_string())?;
+    let options = Options::default().width_probes(true).record_output(true);
+    let mut terminal = Terminal::open(options).map_err(|error| error.to_string())?;
     let size = terminal.size();
     report.size = Some(size);
     report.capabilities = Some(terminal.capabilities().clone());
@@ -114,16 +122,6 @@ fn run(args: &Args, report: &mut Report) -> Result<(), String> {
             size.width, size.height
         ));
     }
-    // The recording is complete before the marker can show.
-    let mut buffer =
-        Buffer::with_width_profile(Rect::from(size), terminal.capabilities().width_profile);
-    scenes::draw(args.scene, &mut buffer);
-    let allowed = record::Allowed::new(terminal.capabilities());
-    std::fs::write(
-        &args.record,
-        record::render(&buffer, args.scene.cursor, allowed),
-    )
-    .map_err(|error| format!("couldn't write {}: {error}", args.record))?;
     draw(&mut terminal, args.scene)?;
     let mut events = terminal.events();
     let deadline = Instant::now() + args.hold;
@@ -140,7 +138,67 @@ fn run(args: &Args, report: &mut Report) -> Result<(), String> {
             Err(_) => break,
         }
     }
+    block_on(terminal.written(), Duration::from_secs(2));
+    std::fs::write(&args.record, terminal.take_written())
+        .map_err(|error| format!("couldn't write {}: {error}", args.record))?;
     terminal.close().map_err(|error| error.to_string())
+}
+
+/// Runs `future` on this thread until it completes or `timeout` passes.
+fn block_on(future: impl Future<Output = ()>, timeout: Duration) {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let until = Instant::now() + timeout;
+    let waker = std::task::Waker::from(std::sync::Arc::new(Unpark(std::thread::current())));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    while future.as_mut().poll(&mut cx).is_pending() {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::park_timeout(left);
+    }
+}
+
+/// The options of `--keys MODE`.
+fn parse_keys(mode: &str, args: &[String]) -> Option<input::Options> {
+    let mut options = input::Options {
+        mode: mode.to_owned(),
+        input: String::new(),
+        record: None,
+        hold: HOLD,
+    };
+    let mut args = args.iter();
+    while let Some(flag) = args.next() {
+        let value = args.next()?;
+        match flag.as_str() {
+            "--input" => options.input.clone_from(value),
+            "--record" => options.record = Some(value.clone()),
+            "--hold" => options.hold = Duration::from_secs(value.parse().ok()?),
+            _ => return None,
+        }
+    }
+    (!options.input.is_empty()).then_some(options)
+}
+
+/// `--keys MODE` with the options after it.
+fn keys(mode: &str, args: &[String]) -> ExitCode {
+    let Some(options) = parse_keys(mode, args) else {
+        let _ = writeln!(stderr(), "{USAGE}");
+        return ExitCode::from(2);
+    };
+    match input::record(&options, &mut stdout()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            let _ = writeln!(stderr(), "probe: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -149,6 +207,11 @@ fn main() -> ExitCode {
         let names: Vec<&str> = scenes::SCENES.iter().map(|scene| scene.name).collect();
         let _ = writeln!(stdout(), "{}", names.join(" "));
         return ExitCode::SUCCESS;
+    }
+    if let [flag, mode, rest @ ..] = args.as_slice()
+        && flag == "--keys"
+    {
+        return keys(mode, rest);
     }
     let Some(args) = parse(&args) else {
         let _ = writeln!(stderr(), "{USAGE}");

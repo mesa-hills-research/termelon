@@ -8,12 +8,12 @@
 
 use std::path::{Path, PathBuf};
 
-use tuiframe_vt::{Key, Mods, WidthRules};
+use tuiframe_vt::{Key, Mods, Mouse, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, work_dir,
 };
-use crate::drivers::lines::Helper;
+use crate::drivers::lines::{Helper, mouse_request};
 use crate::drivers::x11;
 use crate::drivers::xtermjs::hex;
 use crate::json::Json;
@@ -142,6 +142,13 @@ impl Driver for Vte {
 
     fn send_keys(&mut self, keys: &[(Key, Mods)]) -> Result<(), Error> {
         for &(key, mods) in keys {
+            // GTK gives a shifted letter's keysym as the capital, as X does.
+            let key = match key {
+                Key::Char(c) if mods.contains(Mods::SHIFT) => {
+                    Key::Char(c.to_uppercase().next().unwrap_or(c))
+                }
+                _ => key,
+            };
             let name = keys::x_keysym(key).ok_or(Error::Unsupported("send that key"))?;
             let mods = Json::List(
                 keys::modifier_names(mods)
@@ -153,6 +160,11 @@ impl Driver for Vte {
                 .request(&Json::object([("key", Json::Str(name)), ("mods", mods)]))?;
         }
         Ok(())
+    }
+
+    fn send_mouse(&mut self, mouse: Mouse) -> Result<(), Error> {
+        let request = mouse_request(mouse)?;
+        self.helper()?.request(&request).map(drop)
     }
 
     fn read(&mut self) -> Result<Readback, Error> {

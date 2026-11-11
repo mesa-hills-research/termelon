@@ -4,7 +4,7 @@
 use tuiframe_vt::{Key, Mods};
 
 /// The key as `tmux send-keys` names it, such as `C-a`, `M-Up` or `F5`. A plain character is
-/// `None`, since it goes as literal text (`send-keys -l`).
+/// `None`, since it goes as literal text (`send-keys -l`), and so is a key tmux has no name for.
 pub fn tmux(key: Key, mods: Mods) -> Option<String> {
     let mut prefix = String::new();
     if mods.contains(Mods::CTRL) {
@@ -17,6 +17,12 @@ pub fn tmux(key: Key, mods: Mods) -> Option<String> {
     let name = match key {
         Key::Char(_) if prefix.is_empty() && !shift => return None,
         Key::Char(c) if shift && c.is_alphabetic() => c.to_uppercase().collect(),
+        Key::Char(' ') => {
+            if shift {
+                prefix.push_str("S-");
+            }
+            "Space".to_owned()
+        }
         Key::Char(c) => {
             if shift {
                 prefix.push_str("S-");
@@ -24,6 +30,8 @@ pub fn tmux(key: Key, mods: Mods) -> Option<String> {
             c.to_string()
         }
         Key::Tab if shift => return Some(format!("{prefix}BTab")),
+        // tmux 3.6 takes `C-BSpace` for literal text.
+        Key::Backspace if mods.contains(Mods::CTRL) => return None,
         _ => {
             if shift {
                 prefix.push_str("S-");
@@ -219,9 +227,11 @@ mod tests {
             Some("C-M-a")
         );
         assert_eq!(tmux(Key::Char('a'), Mods::SHIFT).as_deref(), Some("A"));
+        assert_eq!(tmux(Key::Char(' '), Mods::CTRL).as_deref(), Some("C-Space"));
         assert_eq!(tmux(Key::Up, Mods::SHIFT).as_deref(), Some("S-Up"));
         assert_eq!(tmux(Key::Tab, Mods::SHIFT).as_deref(), Some("BTab"));
         assert_eq!(tmux(Key::Backspace, NONE).as_deref(), Some("BSpace"));
+        assert_eq!(tmux(Key::Backspace, Mods::CTRL), None);
         assert_eq!(tmux(Key::PageDown, Mods::CTRL).as_deref(), Some("C-NPage"));
         assert_eq!(tmux(Key::F(5), NONE).as_deref(), Some("F5"));
         assert_eq!(tmux(Key::F(13), NONE), None);

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use tuiframe_vt::{Emulator, Key, Mods};
+use tuiframe_vt::{Emulator, Key, Mods, Mouse};
 
 /// How long `wait_for` polls between readbacks.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -248,6 +248,16 @@ pub trait Driver {
     ///
     /// When the terminal can't take synthetic keys, or a key has no name there.
     fn send_keys(&mut self, keys: &[(Key, Mods)]) -> Result<(), Error>;
+
+    /// Clicks or turns the wheel over a cell, through the terminal's own mouse reports. Terminals
+    /// whose tools can't make mouse events can't.
+    ///
+    /// # Errors
+    ///
+    /// When the terminal can't take synthetic mouse events, or the event fails.
+    fn send_mouse(&mut self, _mouse: Mouse) -> Result<(), Error> {
+        Err(Error::Unsupported("take mouse events"))
+    }
 
     /// Reads the screen back.
     ///

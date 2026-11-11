@@ -1,0 +1,7 @@
+# What xtermjs (@xterm/headless 6.0.0) sent in the legacy mode, in hex, for each event.
+press left 3,2	1b5b3c303b343b334d
+release left 3,2	1b5b3c303b343b336d
+press right 3,2	1b5b3c323b343b334d
+release right 3,2	1b5b3c323b343b336d
+scroll up 3,2	1b5b3c36343b343b334d
+scroll down 3,2	1b5b3c36353b343b334d

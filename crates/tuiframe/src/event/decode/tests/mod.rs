@@ -1,5 +1,6 @@
 //! The decoder's tests, a file for each encoding.
 
+mod fixtures;
 mod keys_kitty;
 mod keys_legacy;
 mod mouse;

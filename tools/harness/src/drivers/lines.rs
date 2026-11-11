@@ -7,6 +7,8 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
+use tuiframe_vt::{Mouse, MouseButton, MouseKind};
+
 use crate::driver::{Error, describe};
 use crate::json::Json;
 
@@ -95,5 +97,50 @@ impl Helper {
         let _ = self.stdin.write_all(b"{\"quit\":true}\n");
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// A mouse event as the helpers take it, such as
+/// `{"mouse":"press","button":"left","x":3,"y":2}`, with the cell counted from 0. The wheel is
+/// `scroll` with `up` or `down`.
+///
+/// # Errors
+///
+/// For a drag, a move or a tilt of the wheel, which the helpers don't make.
+pub fn mouse_request(mouse: Mouse) -> Result<Json, Error> {
+    let button = |button| match button {
+        MouseButton::Left => "left",
+        MouseButton::Middle => "middle",
+        MouseButton::Right => "right",
+    };
+    let (what, button) = match mouse.kind {
+        MouseKind::Press(b) => ("press", button(b)),
+        MouseKind::Release(b) => ("release", button(b)),
+        MouseKind::ScrollUp => ("scroll", "up"),
+        MouseKind::ScrollDown => ("scroll", "down"),
+        _ => return Err(Error::Unsupported("make that mouse event")),
+    };
+    Ok(Json::object([
+        ("mouse", Json::str(what)),
+        ("button", Json::str(button)),
+        ("x", Json::Int(i64::from(mouse.x))),
+        ("y", Json::Int(i64::from(mouse.y))),
+    ]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mouse_requests() {
+        let press = mouse_request(Mouse::new(MouseKind::Press(MouseButton::Right), 3, 2)).unwrap();
+        assert_eq!(
+            press.to_text().replace(['\n', ' '], ""),
+            r#"{"mouse":"press","button":"right","x":3,"y":2}"#
+        );
+        let wheel = mouse_request(Mouse::new(MouseKind::ScrollDown, 0, 0)).unwrap();
+        assert_eq!(wheel.get("button").and_then(Json::as_str), Some("down"));
+        assert!(mouse_request(Mouse::new(MouseKind::Move, 0, 0)).is_err());
     }
 }

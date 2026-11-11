@@ -2,16 +2,17 @@
 //!
 //! `tools/harness/xtermjs/run.mjs` runs the program with `node-pty`, feeds what it writes to an
 //! `@xterm/headless` terminal, and answers requests as JSON lines. It needs `npm ci` in that
-//! directory first. xterm.js takes keys as browser events, so the driver sends bytes only.
+//! directory first. xterm.js takes keys as browser events, so the driver sends bytes, and mouse
+//! events through xterm.js's own mouse service.
 
 use std::path::{Path, PathBuf};
 
-use tuiframe_vt::{Key, Mods, WidthRules};
+use tuiframe_vt::{Key, Mods, Mouse, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, work_dir,
 };
-use crate::drivers::lines::Helper;
+use crate::drivers::lines::{Helper, mouse_request};
 use crate::json::Json;
 use crate::readback::{ansi_screen, set_cursor};
 
@@ -147,6 +148,11 @@ impl Driver for XtermJs {
 
     fn send_keys(&mut self, _keys: &[(Key, Mods)]) -> Result<(), Error> {
         Err(Error::Unsupported("take keys without a browser"))
+    }
+
+    fn send_mouse(&mut self, mouse: Mouse) -> Result<(), Error> {
+        let request = mouse_request(mouse)?;
+        self.helper()?.request(&request).map(drop)
     }
 
     fn read(&mut self) -> Result<Readback, Error> {

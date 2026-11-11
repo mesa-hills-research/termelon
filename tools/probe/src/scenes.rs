@@ -162,25 +162,24 @@ fn cursor(b: &mut Buffer) {
 mod tests {
     use super::*;
 
+    /// Each scene draws with sequences `tuiframe-vt` knows, and shows its text and marker there.
     #[test]
-    fn each_scene_reads_back_from_its_recording() {
+    fn each_scene_shows_in_the_emulator() {
         for scene in &SCENES {
             let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
             draw(scene, &mut buffer);
-            let mut term = tuiframe_vt::Emulator::new(80, 24);
-            let allowed = crate::record::Allowed::ALL;
-            term.feed(&crate::record::render(&buffer, scene.cursor, allowed))
-                .unwrap();
-            for y in 0..24 {
+            let mut term = tuiframe::testing::TestTerminal::new(80, 24);
+            term.draw(|frame| {
+                draw(scene, frame.buffer_mut());
+                frame.set_cursor(scene.cursor);
+            })
+            .unwrap();
+            let rows = term.screen().rows();
+            for (y, shown) in (0..24).zip(&rows) {
                 let row: String = (0..80).map(|x| buffer.symbol((x, y)).to_owned()).collect();
-                assert_eq!(
-                    term.row_text(y).unwrap(),
-                    row.trim_end(),
-                    "{} row {y}",
-                    scene.name
-                );
+                assert_eq!(shown, row.trim_end(), "{} row {y}", scene.name);
             }
-            assert!(term.text().contains(&marker(scene)));
+            assert!(term.screen().text().contains(&marker(scene)));
         }
     }
 }
