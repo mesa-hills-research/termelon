@@ -17,6 +17,7 @@ pub mod xtermjs;
 use termelon_vt::{KeyEncoding, Profile, WidthRules};
 
 use crate::driver::{Driver, Error};
+use crate::input::version_slug;
 
 /// The terminals the harness has drivers for.
 pub const TERMINALS: [&str; 11] = [
@@ -42,7 +43,7 @@ pub fn driver(name: &str) -> Result<Box<dyn Driver>, Error> {
     Ok(match name {
         "tmux" => {
             let mut tmux = tmux::Tmux::new()?;
-            tmux.set_width_rules(profile(name).map(|p| p.width).unwrap_or_default());
+            tmux.set_width_rules(Profile::tmux_3_4().width);
             Box::new(tmux)
         }
         "screen" => Box::new(screen::Screen::new()?),
@@ -59,10 +60,31 @@ pub fn driver(name: &str) -> Result<Box<dyn Driver>, Error> {
     })
 }
 
-/// The `termelon-vt` profile that computes what a terminal should show.
-pub fn profile(name: &str) -> Option<Profile> {
+/// The numbers in a terminal's version, such as `[0, 32, 2]` for `kitty 0.32.2 created by Kovid
+/// Goyal`, so versions compare in order. An unknown version has none and comes first.
+pub fn version_numbers(version: &str) -> Vec<u64> {
+    version_slug(version)
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse().unwrap_or(u64::MAX))
+        .collect()
+}
+
+/// The `termelon-vt` profile that computes what a terminal of a version, as its driver gives it,
+/// should show and send.
+pub fn profile(name: &str, version: &str) -> Option<Profile> {
+    let numbers = version_numbers(version);
     match name {
-        "tmux" => Some(Profile::tmux_3_4()),
+        "tmux" if numbers.as_slice() < [3, 5].as_slice() => Some(Profile::tmux_3_4()),
+        // From 3.5, tmux ignores a program's modifyOtherKeys while `extended-keys` is off, as it
+        // is by default (its CHANGES, and runs of 3.6 and 3.8).
+        "tmux" => Some(Profile {
+            name: format!("tmux-{}", version_slug(version)),
+            modify_other_keys: false,
+            keys: KeyEncoding::Tmux,
+            xtversion: Some(format!("tmux {}", version_slug(version))),
+            ..Profile::tmux_3_4()
+        }),
         // screen erases without the background colour and keeps no alternate screen or links
         // with its default options. It sends Home and End as tmux does, and ignores
         // modifyOtherKeys.
@@ -80,7 +102,14 @@ pub fn profile(name: &str) -> Option<Profile> {
                 .retain(|mode| ![47, 1047, 1049].contains(mode));
             Some(profile)
         }
-        "kitty" => Some(Profile::kitty()),
+        "kitty" if numbers.as_slice() < [0, 43].as_slice() => Some(Profile::kitty()),
+        // kitty 0.43 draws blink (its changelog), and still no rapid blink, hidden text or
+        // overline (`cursor_from_sgr` in 0.45.0's `cursor.c`).
+        "kitty" => Some(Profile {
+            ignored_sgr: vec![6, 8, 53],
+            xtversion: Some(format!("kitty({})", version_slug(version))),
+            ..Profile::kitty()
+        }),
         "xterm" => Some(Profile::xterm()),
         "wezterm" => {
             let mut profile = Profile {
@@ -138,5 +167,28 @@ pub fn profile(name: &str) -> Option<Profile> {
             Some(profile)
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profiles_follow_the_version() {
+        assert_eq!(
+            version_numbers("kitty 0.32.2 created by Kovid Goyal"),
+            [0, 32, 2]
+        );
+        assert_eq!(version_numbers("tmux 3.6a"), [3, 6]);
+        assert_eq!(version_numbers("xterm"), [] as [u64; 0]);
+        let keys = |version: &str| profile("tmux", version).map(|p| p.keys);
+        assert_eq!(keys("tmux 3.4"), Some(KeyEncoding::Tmux34));
+        assert_eq!(keys("tmux 3.6a"), Some(KeyEncoding::Tmux));
+        assert_eq!(keys("tmux 3.10"), Some(KeyEncoding::Tmux));
+        let blinks = |version: &str| profile("kitty", version).map(|p| !p.ignored_sgr.contains(&5));
+        assert_eq!(blinks("kitty 0.32.2 created by Kovid Goyal"), Some(false));
+        assert_eq!(blinks("kitty 0.45.0 created by Kovid Goyal"), Some(true));
+        assert!(profile("st", "st 0.9").is_none());
     }
 }

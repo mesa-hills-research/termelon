@@ -183,16 +183,21 @@ pub fn fixture_path(dir: &Path, terminal: &str, version: &str, mode: &str) -> Pa
         .join("input.txt")
 }
 
-/// The version number in a terminal's version, such as `3.6` in `tmux 3.6`, for file names.
+/// The version number in a terminal's version, such as `3.6` in `tmux 3.6` or `390` in
+/// `XTerm(390)`, for file names.
 pub fn version_slug(version: &str) -> String {
     version
         .split_whitespace()
+        .map(|word| {
+            word.split_once('(')
+                .map_or(word, |(_, inside)| inside.trim_end_matches(')'))
+        })
         .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
         .map_or_else(
             || "unknown".to_owned(),
             |word| {
                 word.chars()
-                    .filter(|c| c.is_ascii_alphanumeric() || *c == '.')
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-')
                     .collect()
             },
         )
@@ -395,6 +400,15 @@ mod tests {
         assert_eq!(version_slug("VTE 0.84.1"), "0.84.1");
         assert_eq!(version_slug("@xterm/headless 6.0.0"), "6.0.0");
         assert_eq!(version_slug("xterm"), "unknown");
+        assert_eq!(version_slug("XTerm(390)"), "390");
+        assert_eq!(
+            version_slug("Screen version 4.09.01 (GNU) 20-Aug-23"),
+            "4.09.01"
+        );
+        assert_eq!(
+            version_slug("wezterm 20240203-110809-5046fc22"),
+            "20240203-110809-5046fc22"
+        );
         assert_eq!(
             fixture_path(Path::new("f"), "tmux", "tmux 3.6", "legacy"),
             Path::new("f/tmux-3.6-legacy/input.txt")

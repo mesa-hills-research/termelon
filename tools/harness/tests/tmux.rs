@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use harness::driver::{Driver, Launch, installed, work_dir};
-use harness::drivers::tmux::Tmux;
+use harness::drivers::{self, tmux::Tmux};
 use harness::run::smoke;
 use harness::{Error, compare};
 use termelon_vt::{Emulator, Key, Mods, Profile};
@@ -157,7 +157,8 @@ fn raw_bytes_reach_the_program() {
 fn keys_match_the_tmux_profile() {
     let Some(mut tmux) = tmux() else { return };
     let (file, _dir) = recorder(&mut tmux);
-    let profile = Emulator::with_profile(Profile::tmux_3_4(), 20, 3);
+    let version = tmux.version().unwrap();
+    let profile = Emulator::with_profile(drivers::profile("tmux", &version).unwrap(), 20, 3);
     let none = Mods::NONE;
     let keys = [
         (Key::Char('a'), none),

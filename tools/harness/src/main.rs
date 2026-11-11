@@ -137,13 +137,13 @@ fn probe_scenes(probe: &PathBuf) -> Result<Vec<String>, String> {
 }
 
 fn run_command(options: &RunOptions) -> Result<bool, String> {
-    let profile = drivers::profile(&options.terminal)
-        .ok_or_else(|| format!("no profile for {}", options.terminal))?;
     let mut driver = drivers::driver(&options.terminal).map_err(|error| error.to_string())?;
     let version = driver
         .version()
         .unwrap_or_else(|error| format!("unknown ({error})"));
     say(&format!("{} {version}", options.terminal));
+    let profile = drivers::profile(&options.terminal, &version)
+        .ok_or_else(|| format!("no profile for {}", options.terminal))?;
     std::fs::create_dir_all(&options.out)
         .map_err(|error| format!("couldn't make {}: {error}", options.out.display()))?;
     let out = std::fs::canonicalize(&options.out).unwrap_or_else(|_| options.out.clone());
@@ -210,11 +210,11 @@ fn run_command(options: &RunOptions) -> Result<bool, String> {
 }
 
 fn keys_command(options: &RunOptions) -> Result<bool, String> {
-    let profile = drivers::profile(&options.terminal)
-        .ok_or_else(|| format!("no profile for {}", options.terminal))?;
     let mut driver = drivers::driver(&options.terminal).map_err(|error| error.to_string())?;
     let version = driver.version().map_err(|error| error.to_string())?;
     say(&format!("{} {version}", options.terminal));
+    let profile = drivers::profile(&options.terminal, &version)
+        .ok_or_else(|| format!("no profile for {}", options.terminal))?;
     std::fs::create_dir_all(&options.out)
         .map_err(|error| format!("couldn't make {}: {error}", options.out.display()))?;
     let out = std::fs::canonicalize(&options.out).unwrap_or_else(|_| options.out.clone());
