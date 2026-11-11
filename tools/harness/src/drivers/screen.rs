@@ -102,6 +102,7 @@ pub fn parse(hardcopy: &[u8], cols: u16, rows: u16) -> Result<Readback, Error> {
         ..Reports::default()
     };
     Ok(Readback {
+        raw: Vec::new(),
         screen: hardcopy_screen(hardcopy, cols, rows)?,
         reports,
     })
@@ -194,7 +195,7 @@ impl Driver for Screen {
             last = now;
             std::thread::sleep(Duration::from_millis(30));
         };
-        parse(&bytes, cols, rows)
+        Ok(parse(&bytes, cols, rows)?.with_raw("hardcopy", bytes))
     }
 
     fn screenshot(&mut self, _path: &Path) -> Result<bool, Error> {

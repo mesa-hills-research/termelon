@@ -142,9 +142,27 @@ pub struct Readback {
     pub screen: Emulator,
     /// What the terminal reported.
     pub reports: Reports,
+    /// What the terminal gave, as it gave it, in parts named for their files, such as `xhtml`.
+    pub raw: Vec<(&'static str, Vec<u8>)>,
 }
 
 impl Readback {
+    /// A readback of a screen, without what it was rebuilt from.
+    pub fn new(screen: Emulator, reports: Reports) -> Readback {
+        Readback {
+            screen,
+            reports,
+            raw: Vec::new(),
+        }
+    }
+
+    /// The readback with a part of what the terminal gave.
+    #[must_use]
+    pub fn with_raw(mut self, name: &'static str, bytes: impl Into<Vec<u8>>) -> Readback {
+        self.raw.push((name, bytes.into()));
+        self
+    }
+
     /// The rows' text, with trailing spaces trimmed.
     pub fn rows(&self) -> Vec<String> {
         self.screen.rows()

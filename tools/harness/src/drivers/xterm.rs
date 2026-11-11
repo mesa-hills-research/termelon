@@ -97,6 +97,7 @@ pub fn parse(html: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
         ..Attributes::NONE
     };
     Ok(Readback {
+        raw: Vec::new(),
         screen,
         reports: Reports {
             colors,
@@ -204,7 +205,8 @@ impl Driver for Xterm {
             .open(tty)
             .and_then(|mut file| std::io::Write::write_all(&mut file, b"\x1b[10i"))
             .map_err(|error| Error::Io(tty.display().to_string(), error))?;
-        parse(&take_dump(&self.dir, &before)?, cols, rows)
+        let html = take_dump(&self.dir, &before)?;
+        Ok(parse(&html, cols, rows)?.with_raw("xhtml", html))
     }
 
     fn screenshot(&mut self, path: &Path) -> Result<bool, Error> {

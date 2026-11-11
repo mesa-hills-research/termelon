@@ -121,7 +121,7 @@ pub fn parse(text: &[u8], list_json: &str, cols: u16, rows: u16) -> Result<Readb
         wide_text: true,
         trims_rows: false,
     };
-    Ok(Readback { screen, reports })
+    Ok(Readback::new(screen, reports))
 }
 
 impl Driver for Wezterm {
@@ -177,7 +177,9 @@ impl Driver for Wezterm {
         let mut list = self.cli()?;
         list.args(["list", "--format", "json"]);
         let list = String::from_utf8_lossy(&run(&mut list)?).into_owned();
-        parse(&text, &list, cols, rows)
+        Ok(parse(&text, &list, cols, rows)?
+            .with_raw("ansi", text)
+            .with_raw("json", list))
     }
 
     fn screenshot(&mut self, path: &Path) -> Result<bool, Error> {

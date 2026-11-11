@@ -248,7 +248,7 @@ pub fn parse(grid_json: &str) -> Result<Readback, Error> {
         wide_text: true,
         trims_rows: false,
     };
-    Ok(Readback { screen, reports })
+    Ok(Readback::new(screen, reports))
 }
 
 impl Driver for Alacritty {
@@ -319,7 +319,7 @@ impl Driver for Alacritty {
         let path = self.dir.join("grid.json");
         let text = std::fs::read_to_string(&path)
             .map_err(|error| Error::Io(path.display().to_string(), error))?;
-        parse(&text)
+        Ok(parse(&text)?.with_raw("json", text))
     }
 
     fn wait_for(&mut self, marker: &str, _timeout: Duration) -> Result<Readback, Error> {

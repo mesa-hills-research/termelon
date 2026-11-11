@@ -155,7 +155,7 @@ pub fn parse(
         wide_text: true,
         trims_rows: false,
     };
-    Ok(Readback { screen, reports })
+    Ok(Readback::new(screen, reports))
 }
 
 /// The DECSCUSR number for tmux's cursor shape and blinking.
@@ -256,13 +256,16 @@ impl Driver for Tmux {
             .ok_or(Error::Missing("a running tmux".to_owned()))?;
         let capture = self.tmux(&["capture-pane", "-p", "-e", "-N", "-t", TARGET])?;
         let info = self.tmux(&["display-message", "-p", "-t", TARGET, CURSOR_FORMAT])?;
-        parse(
+        let readback = parse(
             &capture,
             &String::from_utf8_lossy(&info),
             cols,
             rows,
             self.width,
-        )
+        )?;
+        Ok(readback
+            .with_raw("capture", capture)
+            .with_raw("cursor", info))
     }
 
     fn screenshot(&mut self, _path: &Path) -> Result<bool, Error> {

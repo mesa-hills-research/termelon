@@ -73,7 +73,7 @@ pub fn parse(reply: &Json, cols: u16, rows: u16) -> Result<Readback, Error> {
         wide_text: true,
         trims_rows: false,
     };
-    Ok(Readback { screen, reports })
+    Ok(Readback::new(screen, reports))
 }
 
 /// The `[x, y]` of an answer's `cursor`.
@@ -162,7 +162,7 @@ impl Driver for XtermJs {
         let reply = self
             .helper()?
             .request(&Json::object([("read", Json::Bool(true))]))?;
-        parse(&reply, cols, rows)
+        Ok(parse(&reply, cols, rows)?.with_raw("json", reply.to_text()))
     }
 
     fn screenshot(&mut self, _path: &Path) -> Result<bool, Error> {

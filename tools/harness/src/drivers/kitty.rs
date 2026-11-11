@@ -92,6 +92,7 @@ pub fn parse(text: &[u8], cols: u16, rows: u16, width: WidthRules) -> Result<Rea
         trims_rows: false,
     };
     Ok(Readback {
+        raw: Vec::new(),
         screen: ansi_screen(text, cols, rows, width)?,
         reports,
     })
@@ -147,7 +148,8 @@ impl Driver for Kitty {
             .ok_or(Error::Missing("a running kitty".to_owned()))?;
         let mut command = self.kitten();
         command.args(GET_TEXT);
-        parse(&run(&mut command)?, cols, rows, self.width)
+        let text = run(&mut command)?;
+        Ok(parse(&text, cols, rows, self.width)?.with_raw("ansi", text))
     }
 
     fn screenshot(&mut self, path: &Path) -> Result<bool, Error> {

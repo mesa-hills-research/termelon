@@ -145,6 +145,7 @@ pub fn parse(text: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
     };
     let screen = ansi_screen(clean.as_bytes(), cols, rows, width)?;
     Ok(Readback {
+        raw: Vec::new(),
         screen,
         reports: Reports {
             wide_text: true,
@@ -220,7 +221,7 @@ impl Ghostty {
             if !path.is_empty()
                 && let Ok(text) = std::fs::read_to_string(&path)
             {
-                return parse(&text, cols, rows);
+                return Ok(parse(&text, cols, rows)?.with_raw("txt", text));
             }
             if Instant::now() >= deadline {
                 return Err(Error::Parse("Ghostty wrote no screen file".to_owned()));

@@ -184,6 +184,7 @@ pub fn parse(text: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
         termelon_vt::WidthRules::default(),
     )?;
     Ok(Readback {
+        raw: Vec::new(),
         screen,
         reports: Reports {
             wide_text: true,
@@ -256,11 +257,8 @@ impl Driver for Konsole {
         let (cols, rows) = self
             .size
             .ok_or(Error::Missing("a running Konsole".to_owned()))?;
-        parse(
-            &gvariant_string(&self.call("getAllDisplayedText", &[])?)?,
-            cols,
-            rows,
-        )
+        let result = self.call("getAllDisplayedText", &[])?;
+        Ok(parse(&gvariant_string(&result)?, cols, rows)?.with_raw("gdbus", result))
     }
 
     fn screenshot(&mut self, path: &Path) -> Result<bool, Error> {

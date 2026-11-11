@@ -110,6 +110,7 @@ pub fn parse(text: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
         },
     )?;
     Ok(Readback {
+        raw: Vec::new(),
         screen,
         reports: Reports {
             wide_text: true,
@@ -195,8 +196,8 @@ impl Foot {
         let mut last = None;
         loop {
             let now = std::fs::read_to_string(&path).ok();
-            if now.is_some() && now == last {
-                return parse(&now.unwrap_or_default(), cols, rows);
+            if let Some(text) = now.as_ref().filter(|_| now == last) {
+                return Ok(parse(text, cols, rows)?.with_raw("txt", text.clone()));
             }
             if Instant::now() >= deadline {
                 return Err(Error::Parse("foot piped no screen".to_owned()));

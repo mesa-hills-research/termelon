@@ -182,8 +182,8 @@ pub fn report(terminal: &str, version: &str, scene: &str, outcome: &Outcome) -> 
     ])
 }
 
-/// Writes a scene's report, both screens in the styled-text format, and an HTML page with the two
-/// side by side, into `out`.
+/// Writes a scene's report, both screens in the styled-text format, an HTML page with the two side
+/// by side, and what the terminal gave as it gave it, into `out`.
 ///
 /// # Errors
 ///
@@ -214,9 +214,18 @@ pub fn write_outcome(
         ),
         (format!("{stem}.html"), page),
     ];
-    for (name, text) in files {
+    let raw = outcome
+        .readback
+        .raw
+        .iter()
+        .map(|(part, bytes)| (format!("{stem}.readback.{part}"), bytes.clone()));
+    for (name, bytes) in files
+        .into_iter()
+        .map(|(name, text)| (name, text.into_bytes()))
+        .chain(raw)
+    {
         let path = out.join(name);
-        std::fs::write(&path, text)
+        std::fs::write(&path, bytes)
             .map_err(|error| Error::Io(path.display().to_string(), error))?;
     }
     Ok(())

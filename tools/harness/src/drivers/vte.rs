@@ -87,6 +87,7 @@ pub fn parse(reply: &Json, cols: u16, rows: u16) -> Result<Readback, Error> {
         ..Attributes::NONE
     };
     Ok(Readback {
+        raw: Vec::new(),
         screen,
         reports: Reports {
             colors,
@@ -174,7 +175,7 @@ impl Driver for Vte {
         let reply = self
             .helper()?
             .request(&Json::object([("read", Json::Bool(true))]))?;
-        parse(&reply, cols, rows)
+        Ok(parse(&reply, cols, rows)?.with_raw("json", reply.to_text()))
     }
 
     fn screenshot(&mut self, path: &Path) -> Result<bool, Error> {
