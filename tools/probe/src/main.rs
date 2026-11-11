@@ -11,7 +11,7 @@
 //! with `probe-done:NAME` on the last row. Then it holds the screen, recording every event, until
 //! its input ends, `q` is pressed, or `--hold` seconds pass (300 by default). It saves to
 //! `--record` every byte the framework wrote, for the harness to compute the screen the terminal
-//! should show, and writes its report as JSON.
+//! should show, and writes its report as JSON, both once the frame is drawn and again at the end.
 //!
 //! With `--keys`, it saves instead the raw bytes the terminal sends to `--input`, in a mode of
 //! `legacy`, `disambiguate` (the kitty keyboard protocol's flag 1) or `modify-other-keys`
@@ -26,7 +26,7 @@ use std::io::{self, Write as _};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use termelon::{Drawn, Event, KeyCode, Options, Terminal};
+use termelon::{Drawn, Event, KeyCode, Options, Size, Terminal};
 
 use crate::report::Report;
 
@@ -106,13 +106,53 @@ fn draw(terminal: &mut Terminal, scene: &scenes::Scene) -> Result<(), String> {
     Err("the terminal never took the frame".to_owned())
 }
 
-/// Runs the scene, filling in the report.
+/// How long a window may take to reach the size asked, after the program starts in it.
+const RESIZE_WAIT: Duration = Duration::from_secs(2);
+
+/// Waits for the terminal to reach `(cols, rows)`, as a window may start at another size and
+/// resize a moment later, and returns the size it has.
+fn wait_for_size(terminal: &Terminal, (cols, rows): (u16, u16), report: &mut Report) -> Size {
+    let mut events = terminal.events();
+    let deadline = Instant::now() + RESIZE_WAIT;
+    while (terminal.size().width, terminal.size().height) != (cols, rows)
+        && Instant::now() < deadline
+    {
+        match events.next_timeout(Duration::from_millis(50)) {
+            Ok(Some(event)) => report.events.push(event),
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+    terminal.size()
+}
+
+/// Writes a file whole or not at all, through a temporary file beside it, so a reader never sees
+/// it half written.
+fn write_whole(path: &str, contents: &[u8]) -> Result<(), String> {
+    let temporary = format!("{path}.part");
+    std::fs::write(&temporary, contents)
+        .and_then(|()| std::fs::rename(&temporary, path))
+        .map_err(|error| format!("couldn't write {path}: {error}"))
+}
+
+/// Saves every byte the framework wrote so far, after those `recorded` holds already.
+fn record(terminal: &mut Terminal, recorded: &mut Vec<u8>, path: &str) -> Result<(), String> {
+    block_on(terminal.written(), Duration::from_secs(2));
+    recorded.extend(terminal.take_written());
+    write_whole(path, recorded)
+}
+
+/// Runs the scene, filling in the report. The record and the report are written once the frame
+/// is drawn too, for a terminal that ends the program to read its screen, as Alacritty does.
 fn run(args: &Args, report: &mut Report) -> Result<(), String> {
     let options = Options::default().width_probes(true).record_output(true);
     let mut terminal = Terminal::open(options).map_err(|error| error.to_string())?;
-    let size = terminal.size();
-    report.size = Some(size);
     report.capabilities = Some(terminal.capabilities().clone());
+    let size = match args.size {
+        Some(asked) => wait_for_size(&terminal, asked, report),
+        None => terminal.size(),
+    };
+    report.size = Some(size);
     if let Some((cols, rows)) = args.size
         && (size.width, size.height) != (cols, rows)
     {
@@ -123,6 +163,11 @@ fn run(args: &Args, report: &mut Report) -> Result<(), String> {
         ));
     }
     draw(&mut terminal, args.scene)?;
+    let mut recorded = Vec::new();
+    record(&mut terminal, &mut recorded, &args.record)?;
+    if let Some(path) = &args.report {
+        let _ = write_whole(path, report.to_json().as_bytes());
+    }
     let mut events = terminal.events();
     let deadline = Instant::now() + args.hold;
     while Instant::now() < deadline {
@@ -138,9 +183,7 @@ fn run(args: &Args, report: &mut Report) -> Result<(), String> {
             Err(_) => break,
         }
     }
-    block_on(terminal.written(), Duration::from_secs(2));
-    std::fs::write(&args.record, terminal.take_written())
-        .map_err(|error| format!("couldn't write {}: {error}", args.record))?;
+    record(&mut terminal, &mut recorded, &args.record)?;
     terminal.close().map_err(|error| error.to_string())
 }
 
@@ -227,7 +270,7 @@ fn main() -> ExitCode {
         report.error = Some(error.clone());
     }
     if let Some(path) = &args.report {
-        let _ = std::fs::write(path, report.to_json());
+        let _ = write_whole(path, report.to_json().as_bytes());
     }
     if result.is_ok() {
         ExitCode::SUCCESS

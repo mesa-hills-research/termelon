@@ -97,11 +97,17 @@ pub fn run_scene(
         Ok(true) => Some(screenshot),
         _ => None,
     };
+    // The probe writes its report once the frame is drawn, and again as it ends.
+    let drawn_report = std::fs::read(&probe_report).ok();
     let quit = driver
         .send_bytes(b"q")
         .or_else(|_| driver.send_keys(&[(Key::Char('q'), Mods::NONE)]));
     if quit.is_ok() {
-        wait_for_file(&probe_report, Duration::from_secs(3));
+        wait_for_change(
+            &probe_report,
+            drawn_report.as_deref(),
+            Duration::from_secs(3),
+        );
     }
     driver.stop()?;
     let readback = result.map_err(|error| match probe_error(&probe_report) {
@@ -122,10 +128,14 @@ pub fn run_scene(
     })
 }
 
-fn wait_for_file(path: &Path, timeout: Duration) {
+/// Waits until the file at `path` holds something other than `before`.
+fn wait_for_change(path: &Path, before: Option<&[u8]>, timeout: Duration) {
     let deadline = std::time::Instant::now() + timeout;
-    while !path.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(50));
+    while std::time::Instant::now() < deadline {
+        match std::fs::read(path) {
+            Ok(now) if Some(now.as_slice()) != before => return,
+            _ => std::thread::sleep(Duration::from_millis(50)),
+        }
     }
 }
 
