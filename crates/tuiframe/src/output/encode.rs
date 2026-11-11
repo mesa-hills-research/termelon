@@ -134,6 +134,13 @@ impl Encoder {
     }
 
     /// Turns on looking for rows that moved, which the terminal then scrolls itself.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "scroll detection stays off until the terminal matrix passes it"
+        )
+    )]
     pub(crate) fn set_scroll_detection(&mut self, on: bool) {
         self.scroll_detection = on;
     }

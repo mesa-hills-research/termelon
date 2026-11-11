@@ -973,13 +973,6 @@ impl Buffer {
 }
 
 /// The clip that partial frames draw under.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::draw_regions` sets the clip, and comes with the terminal API"
-    )
-)]
 impl Buffer {
     /// Drops every write from now on that would change a cell outside `regions`, whatever the
     /// call, until [`clear_clip`](Self::clear_clip). A wide character that crosses a region's
@@ -1011,13 +1004,6 @@ impl Buffer {
 }
 
 /// Reading for the diff and the encoder.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the encoder reads cells through these, and `Terminal` runs the encoder"
-    )
-)]
 impl Buffer {
     /// Modifiers that show on a space.
     const VISIBLE_ON_BLANK: Modifier = Modifier::REVERSED

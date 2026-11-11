@@ -22,31 +22,9 @@
 //! | `background` | `#rrggbb`, `none` |
 //! | `glyphs` | `full`, `limited` |
 
-#[expect(
-    dead_code,
-    reason = "`Terminal::open` detects the capabilities, and comes next"
-)]
 pub(crate) mod env;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::open` detects the capabilities, and comes next"
-    )
-)]
 mod overrides;
-#[expect(
-    dead_code,
-    reason = "`Terminal::open` detects the capabilities, and comes next"
-)]
 pub(crate) mod probe;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::open` detects the capabilities, and comes next"
-    )
-)]
 mod table;
 
 /// Whether the terminal supports a feature.
@@ -213,13 +191,6 @@ pub struct Capabilities {
     pub glyphs: GlyphSupport,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::open` detects the capabilities, and comes next"
-    )
-)]
 impl ColorDepth {
     /// How many colours it shows, for comparing depths.
     fn rank(self) -> u8 {
@@ -234,13 +205,6 @@ impl ColorDepth {
 
 /// The capabilities `answers` and `hints` give, with the table filling in what neither says, and
 /// `overrides` (`TUIFRAME_CAPS`) last.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::open` detects the capabilities, and comes next"
-    )
-)]
 pub(crate) fn detect(
     answers: &probe::Answers,
     hints: &env::Hints,
@@ -314,24 +278,10 @@ pub(crate) fn detect(
 }
 
 /// Sets the fields `TUIFRAME_CAPS` names in `overrides`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::open` detects the capabilities, and comes next"
-    )
-)]
 pub(crate) fn apply_overrides(caps: &mut Capabilities, overrides: &str) {
     overrides::apply(caps, overrides);
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::open` detects the capabilities, and comes next"
-    )
-)]
 fn apply_row(caps: &mut Capabilities, row: &table::Row) {
     caps.colors = row.colors;
     caps.alternate_screen = row.alternate_screen;

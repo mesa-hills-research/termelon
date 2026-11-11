@@ -11,8 +11,11 @@ use std::time::{Duration, Instant};
 use rustix::event::Timespec;
 use rustix::termios::{self, OptionalActions, SpecialCodeIndex, Termios};
 
+use rustix::io::Errno;
+
 use super::Shared;
 use crate::event::Event;
+use crate::event::decode::{Decoded, Decoder, Query};
 use crate::layout::Size;
 use crate::output::writer::lock;
 
@@ -229,17 +232,38 @@ fn drain(pipe: &PipeReader) {
     let _ = (&*pipe).read(&mut [0; 64]);
 }
 
-/// The decoding the reader does on what it reads.
+/// The decoding the reader does on what it reads, which [`Decoder`] does for the library.
 pub(crate) trait Decode: Send + 'static {
-    /// Decodes `bytes`, appending the events to `events`, and keeps an incomplete sequence for the
+    /// Decodes `bytes`, appending what it found to `out`, and keeps an incomplete sequence for the
     /// next call.
-    fn feed(&mut self, bytes: &[u8], events: &mut Vec<Event>);
+    fn feed(&mut self, bytes: &[u8], out: &mut Vec<Decoded>);
 
     /// Whether an incomplete sequence is kept.
     fn has_pending(&self) -> bool;
 
     /// Decodes the incomplete sequence kept as if no more input follows.
-    fn flush_pending(&mut self, events: &mut Vec<Event>);
+    fn flush_pending(&mut self, out: &mut Vec<Decoded>);
+
+    /// Records a query whose answer is outstanding.
+    fn expect(&mut self, query: Query);
+}
+
+impl Decode for Decoder {
+    fn feed(&mut self, bytes: &[u8], out: &mut Vec<Decoded>) {
+        Decoder::feed(self, bytes, out);
+    }
+
+    fn has_pending(&self) -> bool {
+        Decoder::has_pending(self)
+    }
+
+    fn flush_pending(&mut self, out: &mut Vec<Decoded>) {
+        Decoder::flush_pending(self, out);
+    }
+
+    fn expect(&mut self, query: Query) {
+        Decoder::expect(self, query);
+    }
 }
 
 /// What the reader does on SIGCONT, before it queues [`Event::Resumed`], to take the terminal
@@ -271,6 +295,8 @@ struct Requests {
     stop: bool,
     /// The reader's thread ended.
     ended: bool,
+    /// Queries whose answers are outstanding, for the decoder to learn of before it decodes more.
+    queries: Vec<Query>,
 }
 
 impl Control {
@@ -293,11 +319,11 @@ impl Control {
 }
 
 impl Reader {
-    /// Starts the reader's thread. It reads from `input`, decodes with `decoder` and queues the
-    /// events in `shared`. A sequence the decoder keeps waits `escape_timeout` for the rest, or
+    /// Starts the reader's thread. It reads from `input`, decodes with `decoder`, queues the events
+    /// in `shared` and offers the replies to its reply slot. A sequence the decoder keeps waits `escape_timeout` for the rest, or
     /// decodes at once when it's zero and no more input is ready. On SIGWINCH it reads the size
     /// and queues [`Event::Resize`], and on SIGCONT it calls `resume` and queues
-    /// [`Event::Resumed`]. When the input closes or fails, or the thread ends, the queue closes.
+    /// [`Event::Resumed`]. When the input closes or fails, or the thread ends, the queue ends.
     pub(crate) fn spawn(
         input: OwnedFd,
         decoder: impl Decode,
@@ -315,6 +341,7 @@ impl Reader {
             signals,
             resume,
             wake: wake_end,
+            decoded: Vec::new(),
             ended: Ended {
                 shared,
                 control: control.clone(),
@@ -328,6 +355,12 @@ impl Reader {
             control,
             wake,
         })
+    }
+
+    /// Tells the decoder of a query whose answer is outstanding, before it decodes what the reader
+    /// reads next. Calling it before the query is written is enough.
+    pub(crate) fn expect(&self, query: Query) {
+        lock(&self.control.state).queries.push(query);
     }
 
     /// Holds the reader still, reading nothing and handling no signal until
@@ -404,6 +437,8 @@ struct Loop<D> {
     signals: Signals,
     resume: Resume,
     wake: PipeReader,
+    /// What the decoder found and the reader hasn't routed yet.
+    decoded: Vec<Decoded>,
     ended: Ended,
 }
 
@@ -425,7 +460,10 @@ impl<D: Decode> Loop<D> {
             let [input, resize, resume, wake] = match wait(fds, timeout) {
                 Ok(ready) => ready,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
+                Err(error) => {
+                    self.ended.shared.events.fail(error.kind());
+                    break;
+                }
             };
             if wake {
                 drain(&self.wake);
@@ -444,11 +482,16 @@ impl<D: Decode> Loop<D> {
                 match (&self.input).read(&mut buffer) {
                     Ok(0) => break,
                     Ok(read) => {
-                        self.decoder.feed(&buffer[..read], &mut events);
+                        // (Queries asked for before their answers could have come.)
+                        let queries = std::mem::take(&mut lock(&self.ended.control.state).queries);
+                        for query in queries {
+                            self.decoder.expect(query);
+                        }
+                        self.decoder.feed(&buffer[..read], &mut self.decoded);
                         pending_since = None;
                         if self.decoder.has_pending() {
                             if self.escape_timeout.is_zero() && read < buffer.len() {
-                                self.decoder.flush_pending(&mut events);
+                                self.decoder.flush_pending(&mut self.decoded);
                             } else {
                                 pending_since = Some(Instant::now());
                             }
@@ -459,16 +502,34 @@ impl<D: Decode> Loop<D> {
                             error.kind(),
                             io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
                         ) => {}
-                    Err(_) => break,
+                    // (A terminal that hung up fails reads with EIO.)
+                    Err(error) if error.raw_os_error() == Some(Errno::IO.raw_os_error()) => break,
+                    Err(error) => {
+                        self.ended.shared.events.fail(error.kind());
+                        break;
+                    }
                 }
             } else if !(wake || resize || resume) && pending_since.take().is_some() {
                 // (The escape timeout passed with nothing more.)
-                self.decoder.flush_pending(&mut events);
+                self.decoder.flush_pending(&mut self.decoded);
             }
-            self.ended.shared.events.push(&mut events);
+            self.route(&mut events);
         }
-        self.decoder.flush_pending(&mut events);
-        self.ended.shared.events.push(&mut events);
+        self.decoder.flush_pending(&mut self.decoded);
+        self.route(&mut events);
+    }
+
+    /// Queues the events the decoder found, after `events`, and offers the replies to the reply
+    /// slot.
+    fn route(&mut self, events: &mut Vec<Event>) {
+        let shared = &self.ended.shared;
+        for decoded in self.decoded.drain(..) {
+            match decoded {
+                Decoded::Event(event) => events.push(event),
+                Decoded::Reply(reply) => shared.replies.offer(reply),
+            }
+        }
+        shared.events.push(events);
     }
 
     /// Follows the program's requests. Holds still while it's parked, and returns whether to go
@@ -650,7 +711,7 @@ pub(crate) mod tests {
     }
 
     impl Decode for Bytes {
-        fn feed(&mut self, bytes: &[u8], events: &mut Vec<Event>) {
+        fn feed(&mut self, bytes: &[u8], out: &mut Vec<Decoded>) {
             for &byte in bytes {
                 if byte == 0x1b && !self.escape {
                     self.escape = true;
@@ -661,7 +722,7 @@ pub(crate) mod tests {
                 } else {
                     KeyModifiers::NONE
                 };
-                events.push(key(char::from(byte), modifiers));
+                out.push(Decoded::Event(key(char::from(byte), modifiers)));
             }
         }
 
@@ -669,11 +730,16 @@ pub(crate) mod tests {
             self.escape
         }
 
-        fn flush_pending(&mut self, events: &mut Vec<Event>) {
+        fn flush_pending(&mut self, out: &mut Vec<Decoded>) {
             if std::mem::take(&mut self.escape) {
-                events.push(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+                out.push(Decoded::Event(Event::Key(KeyEvent::new(
+                    KeyCode::Esc,
+                    KeyModifiers::NONE,
+                ))));
             }
         }
+
+        fn expect(&mut self, _: Query) {}
     }
 
     pub(crate) fn key(c: char, modifiers: KeyModifiers) -> Event {
