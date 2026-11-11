@@ -614,7 +614,10 @@ mod unix {
             screen.expect(Query::CursorPosition);
         }
         screen.writer().send(queries.to_vec())?;
-        slot.wait(timeout, |replies| replies.iter().any(probe::is_end));
+        if !slot.wait(timeout, |replies| replies.iter().any(probe::is_end)) {
+            // (A cursor report that comes later must read as the key it looks like.)
+            screen.cancel_expected();
+        }
         Ok(slot.close())
     }
 

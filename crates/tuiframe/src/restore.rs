@@ -523,6 +523,13 @@ pub(crate) mod screen {
             }
         }
 
+        /// Tells the decoder to forget the queries whose answers are outstanding.
+        pub(crate) fn cancel_expected(&self) {
+            if let Some(reader) = &self.reader {
+                reader.cancel_expected();
+            }
+        }
+
         /// Turns on what `enabled` says, which the reset then undoes and a resume turns on again.
         /// Fails once the writer failed.
         pub(crate) fn enable(&self, enabled: &Enabled) -> io::Result<()> {

@@ -25,6 +25,10 @@ const READ_SIZE: usize = 4096;
 /// How long [`Reader::park`] and [`Reader::stop`] wait for the reader's thread.
 const CONTROL_WAIT: Duration = Duration::from_secs(1);
 
+/// How long the input stays silent before the decoder gives up on a sequence, a string or a paste
+/// it holds, which a terminal that stopped halfway leaves held for good.
+const HELD_WAIT: Duration = Duration::from_secs(1);
+
 /// How long the reader waits for the SIGCONT that ended a suspend, once the program runs again.
 const RESUME_WAIT: Duration = Duration::from_millis(100);
 
@@ -246,6 +250,15 @@ pub(crate) trait Decode: Send + 'static {
 
     /// Records a query whose answer is outstanding.
     fn expect(&mut self, query: Query);
+
+    /// Forgets the queries whose answers are outstanding.
+    fn cancel_expected(&mut self);
+
+    /// Whether anything at all is kept, a sequence with more of it, a string or a paste included.
+    fn has_held(&self) -> bool;
+
+    /// Gives up on what's kept, as the input has been silent too long for it to be finished.
+    fn flush_held(&mut self, out: &mut Vec<Decoded>);
 }
 
 impl Decode for Decoder {
@@ -264,6 +277,25 @@ impl Decode for Decoder {
     fn expect(&mut self, query: Query) {
         Decoder::expect(self, query);
     }
+
+    fn cancel_expected(&mut self) {
+        Decoder::cancel_expected(self);
+    }
+
+    fn has_held(&self) -> bool {
+        Decoder::has_held(self)
+    }
+
+    fn flush_held(&mut self, out: &mut Vec<Decoded>) {
+        Decoder::flush_held(self, out);
+    }
+}
+
+/// What the program asks of the decoder, which the reader passes on before it decodes more.
+#[derive(Debug, Clone, Copy)]
+enum Ask {
+    Expect(Query),
+    Cancel,
 }
 
 /// What the reader does on SIGCONT, before it queues [`Event::Resumed`], to take the terminal
@@ -295,8 +327,9 @@ struct Requests {
     stop: bool,
     /// The reader's thread ended.
     ended: bool,
-    /// Queries whose answers are outstanding, for the decoder to learn of before it decodes more.
-    queries: Vec<Query>,
+    /// Queries whose answers are outstanding, and their cancelling, for the decoder to learn of
+    /// before it decodes more.
+    asks: Vec<Ask>,
 }
 
 impl Control {
@@ -360,7 +393,13 @@ impl Reader {
     /// Tells the decoder of a query whose answer is outstanding, before it decodes what the reader
     /// reads next. Calling it before the query is written is enough.
     pub(crate) fn expect(&self, query: Query) {
-        lock(&self.control.state).queries.push(query);
+        lock(&self.control.state).asks.push(Ask::Expect(query));
+    }
+
+    /// Tells the decoder to forget the queries whose answers are outstanding, for a probe that
+    /// stopped waiting, before it decodes what the reader reads next.
+    pub(crate) fn cancel_expected(&self) {
+        lock(&self.control.state).asks.push(Ask::Cancel);
     }
 
     /// Holds the reader still, reading nothing and handling no signal until
@@ -448,9 +487,15 @@ impl<D: Decode> Loop<D> {
         let mut events = Vec::new();
         // (When the decoder last kept an incomplete sequence, for the escape timeout.)
         let mut pending_since = None;
+        let mut last_read = Instant::now();
         while self.obey() {
-            let timeout = pending_since
+            let pending = pending_since
                 .map(|since: Instant| self.escape_timeout.saturating_sub(since.elapsed()));
+            let held = self
+                .decoder
+                .has_held()
+                .then(|| HELD_WAIT.saturating_sub(last_read.elapsed()));
+            let timeout = pending.into_iter().chain(held).min();
             let fds = [
                 self.input.as_fd(),
                 self.signals.resize.as_fd(),
@@ -482,10 +527,14 @@ impl<D: Decode> Loop<D> {
                 match (&self.input).read(&mut buffer) {
                     Ok(0) => break,
                     Ok(read) => {
+                        last_read = Instant::now();
                         // (Queries asked for before their answers could have come.)
-                        let queries = std::mem::take(&mut lock(&self.ended.control.state).queries);
-                        for query in queries {
-                            self.decoder.expect(query);
+                        let asks = std::mem::take(&mut lock(&self.ended.control.state).asks);
+                        for ask in asks {
+                            match ask {
+                                Ask::Expect(query) => self.decoder.expect(query),
+                                Ask::Cancel => self.decoder.cancel_expected(),
+                            }
                         }
                         self.decoder.feed(&buffer[..read], &mut self.decoded);
                         pending_since = None;
@@ -509,9 +558,15 @@ impl<D: Decode> Loop<D> {
                         break;
                     }
                 }
-            } else if !(wake || resize || resume) && pending_since.take().is_some() {
-                // (The escape timeout passed with nothing more.)
-                self.decoder.flush_pending(&mut self.decoded);
+            } else if !(wake || resize || resume) {
+                if pending_since.is_some_and(|since| since.elapsed() >= self.escape_timeout) {
+                    // (The escape timeout passed with nothing more.)
+                    pending_since = None;
+                    self.decoder.flush_pending(&mut self.decoded);
+                }
+                if self.decoder.has_held() && last_read.elapsed() >= HELD_WAIT {
+                    self.decoder.flush_held(&mut self.decoded);
+                }
             }
             self.route(&mut events);
         }
@@ -740,6 +795,16 @@ pub(crate) mod tests {
         }
 
         fn expect(&mut self, _: Query) {}
+
+        fn cancel_expected(&mut self) {}
+
+        fn has_held(&self) -> bool {
+            self.escape
+        }
+
+        fn flush_held(&mut self, out: &mut Vec<Decoded>) {
+            self.flush_pending(out);
+        }
     }
 
     pub(crate) fn key(c: char, modifiers: KeyModifiers) -> Event {
@@ -764,6 +829,10 @@ pub(crate) mod tests {
     }
 
     fn reading(escape_timeout: Duration) -> Reading {
+        reading_with(Bytes::default(), escape_timeout)
+    }
+
+    fn reading_with(decoder: impl Decode, escape_timeout: Duration) -> Reading {
         let pty = Pty::open(Size::new(80, 24));
         let modes = Modes::enter(pty.slave.as_fd()).unwrap();
         let shared = Arc::new(Shared::new(Size::new(80, 24)));
@@ -772,7 +841,7 @@ pub(crate) mod tests {
         let counted = resumed.clone();
         let reader = Reader::spawn(
             pty.slave.try_clone().unwrap(),
-            Bytes::default(),
+            decoder,
             shared.clone(),
             escape_timeout,
             signals,
@@ -790,6 +859,46 @@ pub(crate) mod tests {
             resume,
             resumed,
         }
+    }
+
+    /// With the library's decoder, replies go to the reply slot while it's open and nowhere
+    /// otherwise, a cursor report is one only while it's expected, and a sequence a terminal left
+    /// unfinished is given up after a second of silence.
+    #[test]
+    fn the_decoder_routes_replies_and_gives_up_on_what_it_holds() {
+        use crate::event::decode::{DecoderOptions, Reply};
+        let mut reading = reading_with(Decoder::new(DecoderOptions::default()), Duration::ZERO);
+        let ctrl_f3 = Event::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::CONTROL));
+        reading.shared.replies.open();
+        reading.reader.expect(Query::CursorPosition);
+        reading.pty.type_in(b"\x1b[3;5R\x1b[?62;c");
+        assert!(
+            reading
+                .shared
+                .replies
+                .wait(LONG, |replies| replies.len() == 2)
+        );
+        assert_eq!(
+            reading.shared.replies.close(),
+            [
+                Reply::CursorPosition { row: 2, column: 4 },
+                Reply::Da1 {
+                    attributes: vec![62]
+                }
+            ]
+        );
+        // A late reply is dropped, and a cursor report nobody expects is the key it reads as.
+        reading.pty.type_in(b"\x1b[?62;c\x1b[1;5R");
+        assert_eq!(next(&reading.shared), ctrl_f3);
+        reading.reader.expect(Query::CursorPosition);
+        reading.reader.cancel_expected();
+        reading.pty.type_in(b"\x1b[1;5R");
+        assert_eq!(next(&reading.shared), ctrl_f3);
+        // A sequence cut short holds nothing back once the input was silent a while.
+        reading.pty.type_in(b"\x1b[1;");
+        std::thread::sleep(HELD_WAIT + Duration::from_millis(200));
+        reading.pty.type_in(b"a");
+        assert_eq!(next(&reading.shared), key('a', KeyModifiers::NONE));
     }
 
     /// Raw mode delivers each key as it's typed, with no echo, and the modes the program found
