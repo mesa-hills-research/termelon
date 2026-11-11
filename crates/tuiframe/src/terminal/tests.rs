@@ -459,10 +459,17 @@ fn a_writer_that_fails_ends_the_events() {
     let (signals, _resize, _resume) = Signals::unregistered().unwrap();
     let options = Options::default().capabilities(Capabilities::default());
     let mut terminal = Terminal::open_on(tty, options, &Vars(&[]), signals).unwrap();
-    // The terminal goes away once the setup was taken, and the next write fails.
+    // The terminal goes away once the setup was taken, and a write fails. (A child another test
+    // forks holds a copy of the pipe's reader until it execs, so a write may still go through
+    // for a moment.)
     assert!(block_on(terminal.written(), LONG));
     drop(read);
-    terminal.bell().unwrap();
+    let started = Instant::now();
+    while terminal.bell().is_ok() {
+        assert!(started.elapsed() < LONG, "the writer never failed");
+        assert!(block_on(terminal.written(), LONG));
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert!(matches!(
         terminal.events().next_timeout(LONG),
         Err(Error::Closed)
