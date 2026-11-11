@@ -110,7 +110,7 @@ mod tests {
         small.put_str(0, 0, "ab", Style::default(), 10);
         let mut big = Frame::new(12, 4);
         big.put_str(0, 0, "cd", Style::default(), 12);
-        let workload = from_frames("sizes", vec![small, big.clone(), big]);
+        let workload = from_frames("sizes", vec![small, big.clone(), big], false);
         let samples = run("ratatui", &workload).unwrap();
         assert_eq!(samples.len(), 2);
         assert!(samples[0].bytes > samples[1].bytes, "{samples:?}");
@@ -124,7 +124,7 @@ mod tests {
                 .unwrap_err()
                 .contains("unknown stack")
         );
-        let empty = from_frames("empty", Vec::new());
+        let empty = from_frames("empty", Vec::new(), false);
         assert!(run("ratatui", &empty).unwrap_err().contains("no frames"));
     }
 }

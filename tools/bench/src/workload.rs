@@ -62,10 +62,31 @@ pub(crate) fn build(name: &str, frames: usize) -> Option<Workload> {
     })
 }
 
+/// The workloads replayed from frames recorded from Arko, each with the file in the recordings
+/// directory that holds it.
+pub(crate) const RECORDED: [(&str, &str); 5] = [
+    ("idle-rec", "idle.styled"),
+    ("streaming-rec", "streaming.styled"),
+    ("scrolling-rec", "scrolling.styled"),
+    ("typing-rec", "typing.styled"),
+    ("full-redraw-rec", "redraw.styled"),
+];
+
+/// The file that holds the recorded workload `name`, or `None` for a name that isn't one.
+pub(crate) fn recorded_file(name: &str) -> Option<&'static str> {
+    RECORDED
+        .iter()
+        .find(|(recorded, _)| *recorded == name)
+        .map(|(_, file)| *file)
+}
+
 /// A workload from recorded frames. The first is drawn untimed, to put the screen in its starting
-/// state, unless it is the only one.
-pub(crate) fn from_frames(name: &str, mut frames: Vec<Frame>) -> Workload {
-    let warmup = if frames.len() > 1 {
+/// state, unless it is the only one. With `repaint`, every frame is timed, after a resize, and the
+/// first is also drawn untimed beforehand.
+pub(crate) fn from_frames(name: &str, mut frames: Vec<Frame>, repaint: bool) -> Workload {
+    let warmup = if repaint {
+        frames.first().cloned().into_iter().collect()
+    } else if frames.len() > 1 {
         frames.drain(..1).collect()
     } else {
         Vec::new()
@@ -74,7 +95,7 @@ pub(crate) fn from_frames(name: &str, mut frames: Vec<Frame>) -> Workload {
         name: name.to_string(),
         warmup,
         frames,
-        repaint: false,
+        repaint,
     }
 }
 
@@ -221,6 +242,17 @@ mod tests {
             assert!(!workload.warmup.is_empty(), "{name}");
         }
         assert!(build("nothing", 4).is_none());
+    }
+
+    #[test]
+    fn the_recordings_have_files() {
+        assert_eq!(recorded_file("idle-rec"), Some("idle.styled"));
+        assert_eq!(recorded_file("full-redraw-rec"), Some("redraw.styled"));
+        assert_eq!(recorded_file("idle"), None);
+        assert_eq!(RECORDED.len(), NAMES.len());
+        for ((recorded, _), name) in RECORDED.iter().zip(NAMES) {
+            assert_eq!(*recorded, format!("{name}-rec"));
+        }
     }
 
     #[test]
@@ -389,13 +421,19 @@ mod tests {
     #[test]
     fn recorded_frames_become_a_workload() {
         let frames: Vec<Frame> = (0..4).map(|n| Frame::new(3 + n, 2)).collect();
-        let workload = from_frames("session", frames);
+        let workload = from_frames("session", frames.clone(), false);
         assert_eq!(workload.name, "session");
         assert_eq!(workload.warmup.len(), 1);
         assert_eq!(workload.frames.len(), 3);
         assert!(!workload.repaint);
-        let single = from_frames("one", vec![Frame::new(2, 2)]);
+        let single = from_frames("one", vec![Frame::new(2, 2)], false);
         assert!(single.warmup.is_empty());
         assert_eq!(single.frames.len(), 1);
+        // A repainting workload times every frame, and draws the first once before.
+        let repainting = from_frames("resize", frames, true);
+        assert!(repainting.repaint);
+        assert_eq!(repainting.warmup.len(), 1);
+        assert_eq!(repainting.frames.len(), 4);
+        assert_eq!(repainting.warmup[0], repainting.frames[0]);
     }
 }

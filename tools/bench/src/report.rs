@@ -20,7 +20,7 @@ pub(crate) fn tables(rows: &[Row<'_>]) -> String {
     // Writing to a `String` can't fail, so the results are dropped.
     let _ = writeln!(
         out,
-        "{:<12} {:<8} {:>6} {:>13} {:>13} {:>13} {:>13} {:>10} {:>9} {:>6} {:>11}",
+        "{:<16} {:<8} {:>6} {:>13} {:>13} {:>13} {:>13} {:>10} {:>9} {:>6} {:>11}",
         "workload",
         "stack",
         "frames",
@@ -37,7 +37,7 @@ pub(crate) fn tables(rows: &[Row<'_>]) -> String {
         let s = &row.summary;
         let _ = writeln!(
             out,
-            "{:<12} {:<8} {:>6} {:>13.1} {:>13.1} {:>13.1} {:>13.1} {:>10.1} {:>9} {:>6.1} {:>11.0}",
+            "{:<16} {:<8} {:>6} {:>13.1} {:>13.1} {:>13.1} {:>13.1} {:>10.1} {:>9} {:>6.1} {:>11.0}",
             row.workload,
             row.stack,
             s.frames,
@@ -55,7 +55,7 @@ pub(crate) fn tables(rows: &[Row<'_>]) -> String {
         let _ = writeln!(out);
         let _ = writeln!(
             out,
-            "{:<12} {:<8} {:>7} {:>13} {:>13} {:>10} {:>13} {:>13} {:>10}",
+            "{:<16} {:<8} {:>7} {:>13} {:>13} {:>10} {:>13} {:>13} {:>10}",
             "workload",
             "stack",
             "repeats",
@@ -70,7 +70,7 @@ pub(crate) fn tables(rows: &[Row<'_>]) -> String {
             let s = &row.spread;
             let _ = writeln!(
                 out,
-                "{:<12} {:<8} {:>7} {:>13.1} {:>13.1} {:>10.1} {:>13.1} {:>13.1} {:>10.1}",
+                "{:<16} {:<8} {:>7} {:>13.1} {:>13.1} {:>10.1} {:>13.1} {:>13.1} {:>10.1}",
                 row.workload,
                 row.stack,
                 s.repeats,
@@ -135,11 +135,11 @@ mod tests {
         assert_eq!(lines.len(), 3, "{table}");
         assert_eq!(
             lines[0],
-            "workload     stack    frames render_us_p50 render_us_p95 encode_us_p50 encode_us_p95 bytes_mean bytes_max allocs alloc_bytes"
+            "workload         stack    frames render_us_p50 render_us_p95 encode_us_p50 encode_us_p95 bytes_mean bytes_max allocs alloc_bytes"
         );
         assert_eq!(
             lines[1],
-            "idle         ratatui     100          12.3          20.0          30.0          45.5      201.2       640    0.0           0"
+            "idle             ratatui     100          12.3          20.0          30.0          45.5      201.2       640    0.0           0"
         );
         assert!(
             lines.iter().all(|line| line.len() == lines[0].len()),
@@ -161,11 +161,11 @@ mod tests {
         assert!(lines[2].is_empty());
         assert_eq!(
             lines[3],
-            "workload     stack    repeats render_us_min render_us_max render_pct encode_us_min encode_us_max encode_pct"
+            "workload         stack    repeats render_us_min render_us_max render_pct encode_us_min encode_us_max encode_pct"
         );
         assert_eq!(
             lines[4],
-            "idle         ratatui        5          11.0          13.0       18.2          28.0          33.6       20.0"
+            "idle             ratatui        5          11.0          13.0       18.2          28.0          33.6       20.0"
         );
     }
 

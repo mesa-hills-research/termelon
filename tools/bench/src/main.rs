@@ -28,12 +28,16 @@ use crate::workload::Workload;
 const USAGE: &str = "\
 Usage: bench [WORKLOAD] [OPTIONS]
 
-WORKLOAD is one of idle, streaming, scrolling, typing, full-redraw, or all (the default).
+WORKLOAD is one of idle, streaming, scrolling, typing, full-redraw, or all (the default). With
+--recordings, idle-rec, streaming-rec, scrolling-rec, typing-rec and full-redraw-rec are the same
+five replayed from frames recorded from Arko, and all includes them.
 
 Options:
   --frames N       timed frames per workload, instead of its own count
   --repeat N       how many times to play each workload on each stack (default 1)
   --stack NAME     a stack to measure, or all (default). Only ratatui exists so far
+  --recordings DIR the directory with idle.styled, streaming.styled, scrolling.styled,
+                   typing.styled and redraw.styled
   --file PATH      play the frames in a styled-text file, the first one untimed, in place of WORKLOAD
   --dump           print the frames of WORKLOAD or --file in the styled-text format and stop
   --help           print this text
@@ -47,6 +51,7 @@ struct Options {
     repeat: usize,
     stacks: Vec<String>,
     file: Option<PathBuf>,
+    recordings: Option<PathBuf>,
     dump: bool,
     help: bool,
 }
@@ -71,6 +76,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         repeat: 1,
         stacks: Vec::new(),
         file: None,
+        recordings: None,
         dump: false,
         help: false,
     };
@@ -88,6 +94,9 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
                 }
             }
             "--file" => options.file = Some(PathBuf::from(value("--file", &mut args)?)),
+            "--recordings" => {
+                options.recordings = Some(PathBuf::from(value("--recordings", &mut args)?));
+            }
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}`")),
             name => {
                 if name != "all" {
@@ -113,24 +122,32 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         ));
     }
     if options.file.is_some() {
-        if !options.workloads.is_empty() {
-            return Err("--file takes the place of a workload".to_string());
+        if !options.workloads.is_empty() || options.recordings.is_some() {
+            return Err("--file takes the place of a workload and of --recordings".to_string());
         }
     } else if options.workloads.is_empty() {
         options.workloads = workload::NAMES
             .iter()
             .map(|name| (*name).to_string())
+            .chain(options.recordings.iter().flat_map(|_| {
+                workload::RECORDED
+                    .iter()
+                    .map(|(name, _)| (*name).to_string())
+            }))
             .collect();
     }
-    if let Some(unknown) = options
-        .workloads
-        .iter()
-        .find(|name| !workload::NAMES.contains(&name.as_str()))
-    {
-        return Err(format!(
-            "unknown workload `{unknown}`, the workloads are {}",
-            workload::NAMES.join(", ")
-        ));
+    for name in &options.workloads {
+        let recorded = workload::recorded_file(name).is_some();
+        if !recorded && !workload::NAMES.contains(&name.as_str()) {
+            return Err(format!(
+                "unknown workload `{name}`, the workloads are {}, and with --recordings {}",
+                workload::NAMES.join(", "),
+                workload::RECORDED.map(|(name, _)| name).join(", ")
+            ));
+        }
+        if recorded && options.recordings.is_none() {
+            return Err(format!("{name} needs --recordings DIR"));
+        }
     }
     Ok(options)
 }
@@ -138,12 +155,20 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
 /// The workloads to play.
 fn load(options: &Options) -> Result<Vec<Workload>, String> {
     if let Some(path) = &options.file {
-        return Ok(vec![read_file(path, options.frames)?]);
+        return Ok(vec![read_file(path, options.frames, false)?]);
     }
     options
         .workloads
         .iter()
         .map(|name| {
+            if let (Some(file), Some(directory)) =
+                (workload::recorded_file(name), &options.recordings)
+            {
+                let repaint = name.starts_with("full-redraw");
+                let mut recorded = read_file(&directory.join(file), options.frames, repaint)?;
+                recorded.name.clone_from(name);
+                return Ok(recorded);
+            }
             let frames = options
                 .frames
                 .unwrap_or_else(|| workload::default_frames(name));
@@ -152,7 +177,9 @@ fn load(options: &Options) -> Result<Vec<Workload>, String> {
         .collect()
 }
 
-fn read_file(path: &Path, frames: Option<usize>) -> Result<Workload, String> {
+/// The frames in the file at `path` as a workload named after the file. `frames` limits the timed
+/// ones. With `repaint` each is drawn after a resize.
+fn read_file(path: &Path, frames: Option<usize>, repaint: bool) -> Result<Workload, String> {
     let input = std::fs::read_to_string(path)
         .map_err(|error| format!("couldn't read {}: {error}", path.display()))?;
     let mut frames_in_file =
@@ -161,13 +188,14 @@ fn read_file(path: &Path, frames: Option<usize>) -> Result<Workload, String> {
         return Err(format!("{} has no frames", path.display()));
     }
     if let Some(frames) = frames {
-        frames_in_file.truncate(frames + 1);
+        // The first frame is untimed unless every frame is repainted.
+        frames_in_file.truncate(if repaint { frames } else { frames + 1 });
     }
     let name = path.file_stem().map_or_else(
         || "file".to_string(),
         |stem| stem.to_string_lossy().into_owned(),
     );
-    Ok(workload::from_frames(&name, frames_in_file))
+    Ok(workload::from_frames(&name, frames_in_file, repaint))
 }
 
 /// The standard output, which the report goes to.
@@ -367,19 +395,98 @@ mod tests {
         assert!(load(&options).unwrap_err().contains("couldn't read"));
     }
 
+    /// A directory with the five recordings, each a few frames of the workload it is named for.
+    fn recordings(tag: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!("bench-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        for ((_, file), name) in workload::RECORDED.iter().zip(workload::NAMES) {
+            let frames = dump(&[workload::build(name, 3).unwrap()]);
+            std::fs::write(directory.join(file), frames).unwrap();
+        }
+        directory
+    }
+
+    #[test]
+    fn recordings_add_five_workloads_beside_the_generated_ones() {
+        let directory = recordings("recorded");
+        let line = format!("--recordings {} --repeat 2 --frames 3", directory.display());
+        let options = parse_args(&args(&line)).unwrap();
+        assert_eq!(options.workloads.len(), 10);
+        let workloads = load(&options).unwrap();
+        let names: Vec<&str> = workloads.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(&names[..5], workload::NAMES);
+        assert_eq!(
+            &names[5..],
+            [
+                "idle-rec",
+                "streaming-rec",
+                "scrolling-rec",
+                "typing-rec",
+                "full-redraw-rec"
+            ]
+        );
+        // The first frame of a recording is untimed.
+        assert_eq!(workloads[5].warmup.len(), 1);
+        assert_eq!(workloads[5].frames.len(), 3);
+        assert!(!workloads[5].repaint);
+        // The full redraw is repainted, every frame timed.
+        assert!(workloads[9].repaint);
+        assert_eq!(workloads[9].frames.len(), 3);
+        let report = play(&options, &workloads).unwrap();
+        assert!(
+            report
+                .lines()
+                .any(|line| line.starts_with("full-redraw-rec ")),
+            "{report}"
+        );
+        // One recording alone, cut short.
+        let line = format!("typing-rec --frames 2 --recordings {}", directory.display());
+        let options = parse_args(&args(&line)).unwrap();
+        let workloads = load(&options).unwrap();
+        assert_eq!(workloads.len(), 1);
+        assert_eq!(workloads[0].frames.len(), 2);
+        let line = format!(
+            "full-redraw-rec --frames 2 --recordings {}",
+            directory.display()
+        );
+        let workloads = load(&parse_args(&args(&line)).unwrap()).unwrap();
+        assert_eq!(workloads[0].frames.len(), 2);
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn recordings_need_the_option_and_the_files() {
+        let error = parse_args(&args("idle-rec")).unwrap_err();
+        assert!(error.contains("needs --recordings"), "{error}");
+        let error = parse_args(&args("--file a.txt --recordings d")).unwrap_err();
+        assert!(error.contains("takes the place"), "{error}");
+        let options = parse_args(&args("idle-rec --recordings /nowhere/at/all")).unwrap();
+        let error = load(&options).unwrap_err();
+        assert!(
+            error.contains("couldn't read /nowhere/at/all/idle.styled"),
+            "{error}"
+        );
+        // Without the option, only the generated ones run.
+        assert_eq!(parse_args(&[]).unwrap().workloads.len(), 5);
+    }
+
     #[test]
     fn a_file_with_a_mistake_names_it() {
         let directory = std::env::temp_dir().join(format!("bench-bad-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("bad.txt");
         std::fs::write(&path, "size 4 2\nstyle 0 0 9 bold\n").unwrap();
-        let error = read_file(&path, None).unwrap_err();
+        let error = read_file(&path, None, false).unwrap_err();
         assert!(
             error.contains("bad.txt") && error.contains("line 2"),
             "{error}"
         );
         std::fs::write(&path, "# nothing\n").unwrap();
-        assert!(read_file(&path, None).unwrap_err().contains("no frames"));
+        assert!(
+            read_file(&path, None, false)
+                .unwrap_err()
+                .contains("no frames")
+        );
         std::fs::remove_file(&path).unwrap();
         std::fs::remove_dir(&directory).unwrap();
     }
