@@ -35,6 +35,10 @@ pub const PORTABLE: &str = "HARNESS_WINDOWS_TERMINAL";
 /// The class of Windows Terminal's windows.
 const WINDOW_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
 
+/// The profile of the driver's settings. Windows Terminal adds the profiles it generates, such as
+/// cmd's, to the settings only the first time it runs, and won't start without one.
+const PROFILE: &str = "{0e7d9c1f-2b5a-4d38-9a61-6c3f8e2b4d70}";
+
 /// The key the settings bind `exportBuffer` to, and the virtual keys that press it.
 const EXPORT_KEYS: &str = "ctrl+shift+f9";
 const EXPORT_CHORD: [u16; 3] = [0x11, 0x10, 0x78];
@@ -130,21 +134,32 @@ pub fn settings(export: &Path) -> String {
             ),
         ),
         ("confirmCloseAllTabs", Json::Bool(false)),
+        ("defaultProfile", Json::str(PROFILE)),
         ("disableAnimations", Json::Bool(true)),
         ("firstWindowPreference", Json::str("defaultProfile")),
         ("startOnUserLogin", Json::Bool(false)),
         ("windowingBehavior", Json::str("useNew")),
         (
             "profiles",
-            Json::object([(
-                "defaults",
-                Json::object([
-                    ("bellStyle", Json::str("none")),
-                    ("closeOnExit", Json::str("always")),
-                    ("padding", Json::str("0")),
-                    ("scrollbarState", Json::str("hidden")),
-                ]),
-            )]),
+            Json::object([
+                (
+                    "defaults",
+                    Json::object([
+                        ("bellStyle", Json::str("none")),
+                        ("closeOnExit", Json::str("always")),
+                        ("padding", Json::str("0")),
+                        ("scrollbarState", Json::str("hidden")),
+                    ]),
+                ),
+                (
+                    "list",
+                    Json::List(vec![Json::object([
+                        ("guid", Json::str(PROFILE)),
+                        ("name", Json::str("harness")),
+                        ("commandline", Json::str("cmd.exe")),
+                    ])]),
+                ),
+            ]),
         ),
         (
             "actions",
@@ -415,6 +430,16 @@ mod tests {
         assert_eq!(
             command.get("path").and_then(Json::as_str),
             Some("C:\\Users\\ada\\export.txt")
+        );
+        let profile = json
+            .get("profiles")
+            .and_then(|profiles| profiles.get("list"))
+            .and_then(|list| list.at(0))
+            .unwrap();
+        assert_eq!(profile.get("guid").and_then(Json::as_str), Some(PROFILE));
+        assert_eq!(
+            json.get("defaultProfile").and_then(Json::as_str),
+            Some(PROFILE)
         );
         assert_eq!(
             chord(Key::F(9), Mods::CTRL | Mods::SHIFT).as_deref(),
