@@ -8,12 +8,12 @@
 
 use std::path::{Path, PathBuf};
 
-use tuiframe_vt::{Key, Mods, WidthRules};
+use tuiframe_vt::{Key, Mods, Mouse, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, work_dir,
 };
-use crate::drivers::lines::Helper;
+use crate::drivers::lines::{Helper, mouse_request};
 use crate::drivers::x11;
 use crate::drivers::xtermjs::hex;
 use crate::json::Json;
@@ -160,6 +160,11 @@ impl Driver for Vte {
                 .request(&Json::object([("key", Json::Str(name)), ("mods", mods)]))?;
         }
         Ok(())
+    }
+
+    fn send_mouse(&mut self, mouse: Mouse) -> Result<(), Error> {
+        let request = mouse_request(mouse)?;
+        self.helper()?.request(&request).map(drop)
     }
 
     fn read(&mut self) -> Result<Readback, Error> {

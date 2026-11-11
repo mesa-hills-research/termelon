@@ -39,7 +39,7 @@ by side, and a screenshot where there's a display. It exits with 1 when a screen
 
 Alacritty reports its screen only as its window closes, so a readback ends the program, and the
 driver reads once after the program has had a moment to draw. xterm.js takes keys only as browser
-events, so its driver sends bytes.
+events, so its driver sends bytes, and mouse events through xterm.js's own mouse service.
 
 Under X, start Xvfb first and set `DISPLAY`, and for foot a headless sway and `WAYLAND_DISPLAY`, as
 `.github/workflows/terminals.yml` does. Screenshots

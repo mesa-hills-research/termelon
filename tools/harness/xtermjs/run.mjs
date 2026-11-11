@@ -7,6 +7,10 @@
 //
 //   {"read":true}       the screen, as {"ansi": rows with SGR, "cursor": [x, y], "visible": bool}
 //   {"send":"1b5b41"}   bytes, in hex, to the program as if typed
+//   {"mouse":"press","button":"left","x":3,"y":2}
+//                       a mouse event over a cell counted from 0, which xterm.js's own mouse
+//                       service reports by the modes the program set. The wheel is "scroll"
+//                       with "up" or "down".
 //   {"quit":true}       ends the program and this script
 //
 // Answers to the program's queries go back to it, as a terminal sends them.
@@ -124,6 +128,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     term.write("", () => reply(screen()));
   } else if (request.send !== undefined) {
     child.write(Buffer.from(request.send, "hex"));
+    reply({ sent: true });
+  } else if (request.mouse !== undefined) {
+    // xterm.js's buttons and actions, from its CoreMouseService.
+    const button = { left: 0, middle: 1, right: 2, up: 4, down: 4 }[request.button];
+    const action = request.mouse === "scroll" ? (request.button === "up" ? 0 : 1) : request.mouse === "press" ? 1 : 0;
+    term._core.coreMouseService.triggerMouseEvent({
+      col: request.x, row: request.y, x: 0, y: 0, button, action, ctrl: false, alt: false, shift: false,
+    });
     reply({ sent: true });
   } else if (request.quit) {
     child.kill();
