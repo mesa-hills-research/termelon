@@ -672,7 +672,8 @@ fn measure_char(c: char, profile: WidthProfile) -> Measure {
 ///
 /// Without `joins_emoji`, the cluster takes the sum of its scalars' widths, as a terminal that
 /// draws each scalar on its own does. With it, the cluster takes unicode-width's width of the whole
-/// string, at most 2. `vs16_widens` makes a text symbol followed by U+FE0F wide in both.
+/// string, at most 2. `vs16_widens` makes a text symbol followed by U+FE0F wide in both. The width
+/// is uncertain where the two measures differ, or the cluster is an emoji sequence.
 fn measure_sequence(cluster: &str, profile: WidthProfile) -> Measure {
     let mut sum = 0;
     let mut uncertain = false;
@@ -696,13 +697,15 @@ fn measure_sequence(cluster: &str, profile: WidthProfile) -> Measure {
         sum += if widened { 1 } else { own };
         previous = Some((i, own));
     }
-    let width = if !profile.joins_emoji {
-        clamp_width(sum, MAX_CLUSTER_WIDTH)
-    } else if joined || profile.vs16_widens || !selected {
+    let summed = clamp_width(sum, MAX_CLUSTER_WIDTH);
+    let whole = if joined || profile.vs16_widens || !selected {
         clamp_width(joined_width(cluster, profile), 2)
     } else {
         clamp_width(sum, 2)
     };
+    let width = if profile.joins_emoji { whole } else { summed };
+    // A terminal that joins clusters and one that doesn't would place what follows differently.
+    uncertain |= summed != whole;
     Measure { width, uncertain }
 }
 
@@ -911,6 +914,15 @@ mod tests {
         assert!(!m.uncertain);
         let m = measure("界", PLAIN);
         assert_eq!((m.width, m.uncertain), (2, false));
+    }
+
+    #[test]
+    fn clusters_the_two_measures_disagree_on_are_uncertain() {
+        let mark = measure("界\u{903}", PLAIN);
+        assert_eq!((mark.width, mark.uncertain), (3, true));
+        assert_eq!(measure("界\u{903}", profile(true, false, false)).width, 2);
+        assert!(!measure("e\u{301}", PLAIN).uncertain);
+        assert!(!measure("\u{1100}\u{1161}\u{11a8}", PLAIN).uncertain);
     }
 
     #[test]
