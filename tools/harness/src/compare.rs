@@ -62,7 +62,16 @@ pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
             let (Some(e), Some(g)) = (expected.cell(x, y), got.cell(x, y)) else {
                 continue;
             };
+            // A space shows its foreground only through an underline, a line or reverse video.
+            let shows_fg = e.text() != " "
+                || e.style().reverse
+                || e.style().strike
+                || e.style().overline
+                || e.style().underline != tuiframe_vt::Underline::None;
             let mut push = |what: &'static str, a: String, b: String| {
+                if what == "fg" && !shows_fg {
+                    return;
+                }
                 if a != b && out.len() < MAX_MISMATCHES {
                     out.push(Mismatch {
                         x,
@@ -84,7 +93,11 @@ pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
         }
     }
     if reports.cursor {
-        let (e, g) = (expected.cursor(), got.cursor());
+        let (mut e, g) = (expected.cursor(), got.cursor());
+        // A hidden cursor's place doesn't show.
+        if !e.visible && !g.visible {
+            (e.x, e.y) = (g.x, g.y);
+        }
         let place = |x: u16, y: u16, visible: bool| {
             format!("{x},{y} {}", if visible { "visible" } else { "hidden" })
         };
