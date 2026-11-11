@@ -32,6 +32,9 @@ const CLEAR: &[u8] = b"\x1b[2J";
 const ERASE_LINE: &[u8] = b"\x1b[K";
 const LINK_CLOSE: &[u8] = b"\x1b]8;;\x1b\\";
 
+/// The bytes the encoder's scratch buffers start with.
+const SCRATCH: usize = 96;
+
 /// What the terminal's pen draws with, as the encoder last set it, with colours already lowered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Pen {
@@ -119,9 +122,10 @@ impl Encoder {
             runs: Vec::new(),
             columns: Vec::new(),
             scroll: ScrollScratch::default(),
-            params: Vec::new(),
-            reset_params: Vec::new(),
-            joined: String::new(),
+            // Room for the longest SGR, a full style in true colour, and two long clusters.
+            params: Vec::with_capacity(SCRATCH),
+            reset_params: Vec::with_capacity(SCRATCH),
+            joined: String::with_capacity(SCRATCH),
             lowering: Lowering::new(),
         }
     }
@@ -140,7 +144,7 @@ impl Encoder {
 
     /// Turns on looking for rows that moved, which the terminal then scrolls itself.
     #[cfg_attr(
-        not(test),
+        not(any(test, feature = "unstable-encoder")),
         expect(
             dead_code,
             reason = "scroll detection stays off until the terminal matrix passes it"
@@ -195,6 +199,10 @@ impl Encoder {
         let height = usize::from(area.height);
         let mut runs = core::mem::take(&mut self.runs);
         runs.clear();
+        if runs.capacity() == 0 {
+            // A few runs a row, so later frames rarely grow it.
+            runs.reserve(height * 4);
+        }
         let mut scroll = None;
         if full {
             for y in 0..height {
@@ -370,6 +378,9 @@ impl Encoder {
         let mut cells = 0;
         let mut x = run.start;
         let mut erased = false;
+        // The column after the cell this run wrote last, when the pen and cursor are as it left
+        // them.
+        let mut plain_after = None;
         while x < run.end {
             let Some(cell) = row.get(x) else {
                 break;
@@ -389,14 +400,43 @@ impl Encoder {
                 x = run.end;
                 break;
             }
+            // A plain ASCII character in the style of the cell just written, where the cursor
+            // is, only needs its byte.
+            let abs_x = column(area, x);
+            if let [byte @ 0x20..=0x7E] = cell.inline_bytes()
+                && plain_after == Some(x)
+                && cell.extras_index() == 0
+                && self.col == Some(abs_x)
+                && x > 0
+                && row.get(x - 1).is_some_and(|before| {
+                    Buffer::same_style(before, cell)
+                        && next
+                            .cell_symbol(before)
+                            .chars()
+                            .next_back()
+                            .is_some_and(starts_no_cluster)
+                })
+            {
+                out.push(*byte);
+                let end = usize::from(abs_x) + 1;
+                self.col = u16::try_from(end)
+                    .ok()
+                    .filter(|_| end < usize::from(area.right()));
+                cells += 1;
+                x += 1;
+                plain_after = Some(x);
+                continue;
+            }
             if cell.uncertain_width() {
                 let (written, reached) = self.write_uncertain(next, &mut unit, x, allowed, out);
                 cells += written;
                 x = reached;
+                plain_after = None;
             } else {
                 let width = self.write_unit(next, &mut unit, x, false, allowed, out);
                 cells += width;
                 x += width;
+                plain_after = Some(x);
             }
         }
         unit.close_link(out);

@@ -14,6 +14,7 @@ mod run;
 mod scene;
 mod stack;
 mod stats;
+mod tuiframe_stack;
 mod workload;
 
 use std::io::{self, Write};
@@ -35,7 +36,7 @@ five replayed from frames recorded from Arko, and all includes them.
 Options:
   --frames N       timed frames per workload, instead of its own count
   --repeat N       how many times to play each workload on each stack (default 1)
-  --stack NAME     a stack to measure, or all (default). Only ratatui exists so far
+  --stack NAME     a stack to measure, ratatui, tuiframe or tuiframe-scroll, or all (default)
   --recordings DIR the directory with idle.styled, streaming.styled, scrolling.styled,
                    typing.styled and redraw.styled
   --file PATH      play the frames in a styled-text file, the first one untimed, in place of WORKLOAD
@@ -363,8 +364,14 @@ mod tests {
         assert!(lines[0].starts_with("# ratatui 0.30"), "{report}");
         assert!(lines[0].ends_with("2 repeats"), "{report}");
         assert!(lines[1].starts_with("workload"));
-        assert!(lines[2].starts_with("typing"));
-        assert!(lines[3].starts_with("idle"));
+        let stacks = stack::NAMES.len();
+        assert!(
+            lines[2..2 + stacks]
+                .iter()
+                .all(|line| line.starts_with("typing")),
+            "{report}"
+        );
+        assert!(lines[2 + stacks].starts_with("idle"), "{report}");
         assert!(
             lines.iter().any(|line| line.contains("encode_pct")),
             "{report}"

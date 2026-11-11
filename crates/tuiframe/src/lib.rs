@@ -30,6 +30,9 @@ pub mod style;
 mod sys;
 pub mod terminal;
 pub mod text;
+#[cfg(feature = "unstable-encoder")]
+#[doc(hidden)]
+pub mod unstable;
 pub mod widgets;
 
 pub use buffer::Buffer;

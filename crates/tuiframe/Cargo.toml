@@ -13,6 +13,8 @@ categories = ["command-line-interface"]
 [features]
 # The `Stream` trait on `Events`, for programs that want it.
 stream = ["dep:futures-core"]
+# The encoder on its own, for the bench in tools/bench. It isn't part of the stable API.
+unstable-encoder = []
 
 [dependencies]
 unicode-width.workspace = true

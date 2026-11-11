@@ -45,6 +45,9 @@ use crate::text::{self, Line, Span};
 const CLUSTER_TAG: u8 = 0xFF;
 /// The first byte of a cell that a wide character to its left covers.
 const CONTINUATION_TAG: u8 = 0xFE;
+/// The entries a table makes room for when it's first used.
+const TABLE_START: usize = 64;
+
 /// The most clusters a buffer's table holds, the reach of a 24-bit index.
 const MAX_CLUSTERS: usize = 1 << 24;
 
@@ -90,6 +93,11 @@ impl Cell {
     pub(crate) const fn bits(&self) -> u128 {
         let (low, high) = self.words();
         low as u128 | (high as u128) << 64
+    }
+
+    /// The index of its extras, 0 for none.
+    pub(crate) const fn extras_index(&self) -> u16 {
+        self.extras
     }
 
     pub(crate) const fn is_continuation(&self) -> bool {
@@ -372,6 +380,12 @@ impl Interner {
         if self.ends.len() >= limit {
             return None;
         }
+        if self.ends.capacity() == 0 {
+            // The working size of most screens at once, so later frames rarely grow it.
+            self.ends.reserve(TABLE_START);
+            self.text.reserve(TABLE_START * 8);
+            self.index.reserve(TABLE_START);
+        }
         self.text.push_str(s);
         self.ends.push(end);
         self.index.entry(hash).or_insert(i);
@@ -429,6 +443,10 @@ impl ExtrasTable {
         let Ok(i) = u16::try_from(self.entries.len() + 1) else {
             return 0;
         };
+        if self.entries.capacity() == 0 {
+            self.entries.reserve(TABLE_START);
+            self.index.reserve(TABLE_START);
+        }
         self.entries.push(extra);
         self.index.insert(extra, i);
         i
@@ -586,6 +604,9 @@ impl Buffer {
         let mut col = usize::from(x - self.area.x);
         let mut written = 0;
         if string.is_ascii() {
+            let row_len = usize::from(self.area.width);
+            // What the style makes of a cell, kept for the cells after it that look the same.
+            let mut patched: Option<(Cell, Cell)> = None;
             for &b in string.as_bytes() {
                 if b.is_ascii_control() {
                     continue;
@@ -593,7 +614,29 @@ impl Buffer {
                 if remaining == 0 {
                     break;
                 }
-                self.put(row, col, Glyph::ascii(b), Some(style));
+                let i = row + col;
+                let whole = |c: Option<&Cell>| c.is_none_or(|c| !c.is_continuation());
+                let plain = !self.clipped
+                    && whole(self.cells.get(i))
+                    && (col + 1 >= row_len || whole(self.cells.get(i + 1)));
+                match self.cells.get(i).copied() {
+                    Some(old) if plain => {
+                        let mut new = match patched {
+                            Some((from, to)) if Self::same_style(&from, &old) => to,
+                            _ => {
+                                let to = self.patched(old, style);
+                                patched = Some((old, to));
+                                to
+                            }
+                        };
+                        new.symbol = [b, 0, 0, 0];
+                        self.cells[i] = new;
+                        if new.extras != 0 {
+                            self.mark_rich(y);
+                        }
+                    }
+                    _ => self.put(row, col, Glyph::ascii(b), Some(style)),
+                }
                 col += 1;
                 written += 1;
                 remaining -= 1;
@@ -867,6 +910,18 @@ impl Buffer {
             }
             cell.symbol = Cell::SPACE_SYMBOL;
         }
+    }
+
+    /// `cell` with `style` merged over it, its underline colour included, and its width certain.
+    fn patched(&mut self, mut cell: Cell, style: Style) -> Cell {
+        cell.patch(style);
+        if let Some(color) = style.underline_color {
+            let mut extra = self.extras.get(cell.extras);
+            extra.underline_color = PackedColor::pack(color);
+            cell.extras = self.extras.intern(extra);
+        }
+        cell.attrs.set_uncertain(false);
+        cell
     }
 
     /// Merges `style` over the cell at `index`, its underline colour included.
