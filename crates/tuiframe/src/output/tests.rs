@@ -235,6 +235,29 @@ fn a_frame_without_a_cursor_hides_it() {
 }
 
 #[test]
+fn no_shape_is_sent_until_a_frame_asks_for_one() {
+    let caps = Capabilities {
+        cursor_shape: Support::Unknown,
+        ..full_caps()
+    };
+    let frame = Buffer::empty(AREA);
+    let mut encoder = primed(&frame, &caps);
+    let plain = Some(Cursor::at(Position::new(0, 0)));
+    encoder.redraw();
+    let got = packet(&mut encoder, &frame, &frame, plain, &caps);
+    assert!(!got.contains(" q"), "{got}");
+    let underline = Some(Cursor {
+        shape: CursorShape::Underline,
+        ..Cursor::at(Position::new(0, 0))
+    });
+    assert_eq!(
+        packet(&mut encoder, &frame, &frame, underline, &caps),
+        "␛[4 q"
+    );
+    assert_eq!(packet(&mut encoder, &frame, &frame, plain, &caps), "␛[0 q");
+}
+
+#[test]
 fn the_shape_is_sent_when_it_changes() {
     let caps = full_caps();
     let frame = Buffer::empty(AREA);
@@ -488,9 +511,18 @@ fn a_full_redraw_clears_and_writes_what_isnt_blank() {
     encoder.redraw();
     let cursor = Some(Cursor::at(Position::new(1, 0)));
     let got = packet(&mut encoder, &frame, &frame, cursor, &caps);
+    assert!(got.ends_with("␛[1;2H␛[?25h␛[?2026l"), "{got}");
+    let bar = Some(Cursor {
+        shape: CursorShape::Bar,
+        ..Cursor::at(Position::new(1, 0))
+    });
+    let got = packet(&mut encoder, &frame, &frame, bar, &caps);
+    assert_eq!(got, "␛[6 q");
+    encoder.redraw();
+    let got = packet(&mut encoder, &frame, &frame, bar, &caps);
     assert!(
-        got.ends_with("␛[1;2H␛[0 q␛[?25h␛[?2026l"),
-        "the shape is sent again: {got}"
+        got.ends_with("␛[1;2H␛[6 q␛[?25h␛[?2026l"),
+        "a shape asked for is sent again: {got}"
     );
 }
 

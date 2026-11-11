@@ -87,6 +87,9 @@ pub(crate) struct Encoder {
     col: Option<u16>,
     visible: Option<bool>,
     shape: Option<(CursorShape, bool)>,
+    /// Whether a frame has asked for a shape other than the default, before which no shape is
+    /// ever sent, since a terminal that doesn't know `CSI n SP q` may print it.
+    shape_asked: bool,
     /// `None` when unknown, so the next style starts from SGR 0.
     pen: Option<Pen>,
     redraw: bool,
@@ -108,6 +111,7 @@ impl Encoder {
             col: None,
             visible: None,
             shape: Some((CursorShape::Default, false)),
+            shape_asked: false,
             pen: None,
             redraw: false,
             scroll_detection: false,
@@ -544,7 +548,8 @@ impl Encoder {
             CursorShape::Default => (CursorShape::Default, false),
             shape => (shape, cursor.blinking),
         };
-        if allowed.cursor_shape && self.shape != Some(shape) {
+        self.shape_asked |= shape.0 != CursorShape::Default;
+        if allowed.cursor_shape && self.shape_asked && self.shape != Some(shape) {
             let n = match shape {
                 (CursorShape::Default, _) => 0,
                 (CursorShape::Block, blinking) => 2 - u8::from(blinking),
