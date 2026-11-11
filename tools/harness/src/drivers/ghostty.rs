@@ -67,8 +67,18 @@ pub fn start_command(binary: &Path, launch: &Launch) -> Command {
     ] {
         command.arg(option);
     }
-    command.arg("-e").args(&launch.command);
+    // macOS hands an argument that names a file to the app to open, and Ghostty asks before it
+    // runs one, so the program and its arguments go to `sh` as one string.
+    let quoted: Vec<String> = launch.command.iter().map(|arg| sh_quote(arg)).collect();
     command
+        .args(["-e", "sh", "-c"])
+        .arg(format!("exec {}", quoted.join(" ")));
+    command
+}
+
+/// A word quoted for `sh`.
+pub fn sh_quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', r"'\''"))
 }
 
 /// The AppleScript that presses a key in the front app, through System Events.

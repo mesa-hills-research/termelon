@@ -378,5 +378,9 @@ fn ghostty_starts_at_the_size_with_its_binding() {
     ] {
         assert!(args.iter().any(|arg| arg == wanted), "{wanted} in {args:?}");
     }
-    assert_eq!(args[args.len() - 4..], ["-e", "probe", "--scene", "text"]);
+    assert_eq!(
+        args[args.len() - 4..],
+        ["-e", "sh", "-c", "exec 'probe' '--scene' 'text'"]
+    );
+    assert_eq!(ghostty::sh_quote("it's"), r"'it'\''s'");
 }
