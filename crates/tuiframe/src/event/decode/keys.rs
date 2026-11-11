@@ -14,16 +14,17 @@ pub(super) fn char_key(ch: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(ch), modifiers)
 }
 
-/// A C0 control or DEL. LF is Ctrl+J, as in raw mode it can only be that, and of `0x7f` and `0x08`
-/// the one that isn't `erase` is Ctrl+Backspace.
+/// A C0 control or DEL, as crossterm decodes them. LF is Ctrl+J, as in raw mode it can only be
+/// that. DEL is Backspace, and so is `0x08` where `erase` says Backspace sends it, and Ctrl+H
+/// otherwise.
 pub(super) fn control(byte: u8, erase: u8) -> KeyEvent {
     let ctrl = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
     match byte {
         0x00 => ctrl(KeyCode::Char(' ')),
         0x09 => KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
         0x0d => KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-        0x08 | 0x7f if byte == erase => KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
-        0x08 | 0x7f => ctrl(KeyCode::Backspace),
+        0x7f => KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        0x08 if erase == 0x08 => KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
         0x01..=0x1a => ctrl(KeyCode::Char(char::from(b'a' + byte - 1))),
         // What Ctrl+4 to Ctrl+7 send, as crossterm names them.
         0x1c..=0x1f => ctrl(KeyCode::Char(char::from(b'4' + byte - 0x1c))),

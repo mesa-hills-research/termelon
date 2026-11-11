@@ -167,8 +167,9 @@ impl Decoder {
 }
 ```
 
-- `new` takes the byte the terminal sends for Backspace. The other of `0x7f` and `0x08` decodes as
-  Ctrl+Backspace.
+- `new` takes the byte the terminal sends for Backspace. `0x7f` is always Backspace, and `0x08` is
+  Backspace where `VERASE` says so and Ctrl+H otherwise, as crossterm has it. Ctrl+Backspace is told
+  apart only under the kitty keyboard protocol and on Windows.
 - `feed` decodes what it can and keeps an incomplete sequence for the next call, so a sequence split
   across reads decodes as if it came whole.
 - `has_pending` says whether what it holds ends in an ESC or a sequence's introducer (`ESC [`,

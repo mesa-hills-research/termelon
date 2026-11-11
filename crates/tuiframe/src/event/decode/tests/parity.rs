@@ -31,8 +31,10 @@ fn what_arko_depends_on() {
         (b"A", vec![key(KeyCode::Char('A'), SHIFT)]),
         // Shift+Enter, which only the kitty protocol tells from Enter.
         (b"\x1b[13;2u", vec![key(KeyCode::Enter, SHIFT)]),
-        // Ctrl+letters, and the cursor and word moves.
+        // Ctrl+letters, and the cursor and word moves. 0x08 is Ctrl+H, which deletes a character,
+        // unless VERASE says Backspace sends it.
         (b"\x03", vec![key(KeyCode::Char('c'), CTRL)]),
+        (b"\x08", vec![key(KeyCode::Char('h'), CTRL)]),
         (b"\x04", vec![key(KeyCode::Char('d'), CTRL)]),
         (b"\x17", vec![key(KeyCode::Char('w'), CTRL)]),
         (b"\x1b[1;5D", vec![key(KeyCode::Left, CTRL)]),
@@ -186,9 +188,6 @@ fn crossterms_own_cases() {
 #[test]
 fn departures_from_crossterm() {
     check_table(&[
-        // crossterm gives Ctrl+H. Terminals send 0x08 for Ctrl+Backspace, and Ctrl+H only where
-        // Backspace is 0x7f, so it's Ctrl+Backspace unless VERASE says 0x08 is Backspace.
-        (b"\x08", vec![key(KeyCode::Backspace, CTRL)]),
         // crossterm gives Esc for ESC ESC and loses an Alt-prefixed sequence.
         (b"\x1b\x1b", vec![key(KeyCode::Esc, ALT)]),
         (b"\x1b\x1b[A", vec![key(KeyCode::Up, ALT)]),

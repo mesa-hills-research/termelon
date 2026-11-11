@@ -16,14 +16,14 @@ fn c0_controls() {
         (b"\x0a", vec![key(KeyCode::Char('j'), CTRL)]),
         (b"\x0d", vec![key(KeyCode::Enter, NONE)]),
         (b"\x7f", vec![key(KeyCode::Backspace, NONE)]),
-        (b"\x08", vec![key(KeyCode::Backspace, CTRL)]),
+        (b"\x08", vec![key(KeyCode::Char('h'), CTRL)]),
         (b"\x1c", vec![key(KeyCode::Char('4'), CTRL)]),
         (b"\x1d", vec![key(KeyCode::Char('5'), CTRL)]),
         (b"\x1e", vec![key(KeyCode::Char('6'), CTRL)]),
         (b"\x1f", vec![key(KeyCode::Char('7'), CTRL)]),
     ];
     let letters: Vec<[u8; 1]> = (1..=26u8)
-        .filter(|&byte| ![0x08, 0x09, 0x0a, 0x0d].contains(&byte))
+        .filter(|&byte| ![0x09, 0x0a, 0x0d].contains(&byte))
         .map(|byte| [byte])
         .collect();
     for byte in &letters {
@@ -34,17 +34,22 @@ fn c0_controls() {
 }
 
 #[test]
-fn backspace_is_the_erase_byte_and_the_other_is_ctrl_backspace() {
+fn bs_is_backspace_only_where_verase_says_so() {
     let bs = DecoderOptions { erase: 0x08 };
     assert_eq!(
         decode_with(bs, b"\x08\x7f"),
-        [key(KeyCode::Backspace, NONE), key(KeyCode::Backspace, CTRL)]
+        [key(KeyCode::Backspace, NONE), key(KeyCode::Backspace, NONE)]
+    );
+    let del = DecoderOptions { erase: 0x7f };
+    assert_eq!(
+        decode_with(del, b"\x7f\x08"),
+        [key(KeyCode::Backspace, NONE), key(KeyCode::Char('h'), CTRL)]
     );
     // An erase byte that is neither counts as DEL.
     let other = DecoderOptions { erase: 0xff };
     assert_eq!(
         decode_with(other, b"\x7f\x08"),
-        [key(KeyCode::Backspace, NONE), key(KeyCode::Backspace, CTRL)]
+        [key(KeyCode::Backspace, NONE), key(KeyCode::Char('h'), CTRL)]
     );
 }
 
@@ -103,7 +108,7 @@ fn escape_prefix_is_alt() {
         (b"\x1bA", vec![key(KeyCode::Char('A'), ALT | SHIFT)]),
         (b"\x1b\x14", vec![key(KeyCode::Char('t'), ALT | CTRL)]),
         (b"\x1b\x7f", vec![key(KeyCode::Backspace, ALT)]),
-        (b"\x1b\x08", vec![key(KeyCode::Backspace, ALT | CTRL)]),
+        (b"\x1b\x08", vec![key(KeyCode::Char('h'), ALT | CTRL)]),
         (b"\x1b\r", vec![key(KeyCode::Enter, ALT)]),
         (b"\x1b\t", vec![key(KeyCode::Tab, ALT)]),
         (b"\x1b\x00", vec![key(KeyCode::Char(' '), ALT | CTRL)]),
