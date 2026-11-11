@@ -1722,6 +1722,7 @@ dependencies = [
  "proptest",
  "rustix",
  "signal-hook 0.3.18",
+ "tuiframe-vt",
  "unicode-segmentation",
  "unicode-width",
  "windows-sys 0.61.2",
