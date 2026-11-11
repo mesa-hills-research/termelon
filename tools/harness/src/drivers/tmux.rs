@@ -1,5 +1,6 @@
 //! tmux, headless, driven with `send-keys` and read back with `capture-pane -p -e -N`.
 
+use std::cell::OnceCell;
 use std::path::Path;
 use std::process::Command;
 
@@ -9,6 +10,7 @@ use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
     work_dir,
 };
+use crate::drivers::version_numbers;
 use crate::keys;
 use crate::readback::{ansi_screen, set_cursor};
 
@@ -31,6 +33,8 @@ pub struct Tmux {
     dir: WorkDir,
     size: Option<(u16, u16)>,
     width: WidthRules,
+    /// The version's numbers, once asked.
+    version: OnceCell<Vec<u64>>,
 }
 
 impl Tmux {
@@ -58,6 +62,7 @@ impl Tmux {
             dir,
             size: None,
             width: WidthRules::default(),
+            version: OnceCell::new(),
         })
     }
 
@@ -92,6 +97,25 @@ impl Tmux {
     pub fn pane_tty(&self) -> Result<String, Error> {
         let out = self.tmux(&["display-message", "-p", "-t", TARGET, "#{pane_tty}"])?;
         Ok(String::from_utf8_lossy(&out).trim().to_owned())
+    }
+
+    /// Whether `send-keys` would type this key's name rather than press it. tmux before 3.5 does
+    /// that for a key it can't encode while the program hasn't asked for modifyOtherKeys, such as
+    /// Shift+Enter, and the driver can't tell whether it has.
+    fn types_the_name(&self, key: Key, mods: Mods) -> bool {
+        let version = self.version.get_or_init(|| {
+            self.version()
+                .map(|version| version_numbers(&version))
+                .unwrap_or_default()
+        });
+        let shift_or_ctrl_alt = mods.contains(Mods::SHIFT) || mods.contains(Mods::CTRL | Mods::ALT);
+        let named = matches!(key, Key::Enter | Key::Escape | Key::Backspace);
+        // The characters tmux 3.4 keeps Ctrl on, rather than making a control character of them.
+        let keeps_ctrl = matches!(key, Key::Char(c) if mods.contains(Mods::CTRL)
+            && ("!#()+,-.0123456789:;<=>'`/".contains(c) || !c.is_ascii()));
+        version.as_slice() < [3, 5].as_slice()
+            && ((named && shift_or_ctrl_alt)
+                || (keeps_ctrl && mods.intersects(Mods::SHIFT | Mods::ALT)))
     }
 
     /// Whether the pane's program has ended.
@@ -205,6 +229,14 @@ impl Driver for Tmux {
     }
 
     fn send_keys(&mut self, keys: &[(Key, Mods)]) -> Result<(), Error> {
+        if keys
+            .iter()
+            .any(|&(key, mods)| self.types_the_name(key, mods))
+        {
+            return Err(Error::Unsupported(
+                "send that key, since tmux before 3.5 types its name",
+            ));
+        }
         for &(key, mods) in keys {
             let mut command = self.command();
             command.args(["send-keys", "-t", TARGET]);
