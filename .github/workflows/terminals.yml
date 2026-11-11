@@ -402,3 +402,89 @@ jobs:
           name: ghostty-macos-26
           path: harness-out
           if-no-files-found: ignore
+
+  windows-terminal:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Server 2025 has Windows Terminal 1.23. Server 2022 has none, so it gets the portable
+        # build of 1.25.
+        os: [windows-2025, windows-2022]
+    runs-on: ${{ matrix.os }}
+    env:
+      # Windows Terminal 1.25.2733.0, from 2026-10-02, checked against this SHA-256 before it's
+      # used.
+      WT_ZIP: https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_x64.zip
+      WT_SHA256: bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc043cdf831852e796
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install Windows Terminal's portable build
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'wt.zip'
+          Invoke-WebRequest -Uri $env:WT_ZIP -OutFile $zip -UserAgent 'termelon-ci'
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:WT_SHA256) { throw "the Windows Terminal zip's SHA-256 is $hash" }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'wt'
+          Expand-Archive -Path $zip -DestinationPath $unpacked
+          $exe = Get-ChildItem $unpacked -Recurse -Filter WindowsTerminal.exe | Select-Object -First 1
+          New-Item -ItemType File -Path (Join-Path (Split-Path $exe.FullName) '.portable') | Out-Null
+          "HARNESS_WINDOWS_TERMINAL=$($exe.FullName)" >> $env:GITHUB_ENV
+      - run: cargo build -p harness -p probe --locked
+      - shell: bash
+        run: target/debug/harness version windows-terminal
+      - shell: bash
+        run: target/debug/harness smoke windows-terminal
+      - shell: bash
+        run: target/debug/harness run windows-terminal --probe target/debug/probe.exe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-terminal-${{ matrix.os }}
+          path: harness-out
+          if-no-files-found: ignore
+
+  conhost:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # A new console opens in the default terminal, so this makes it conhost, by its id.
+      - name: Open new consoles in conhost
+        shell: pwsh
+        run: |
+          $conhost = '{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}'
+          New-Item -Path 'HKCU:\Console\%%Startup' -Force | Out-Null
+          Set-ItemProperty -Path 'HKCU:\Console\%%Startup' -Name DelegationConsole -Value $conhost
+          Set-ItemProperty -Path 'HKCU:\Console\%%Startup' -Name DelegationTerminal -Value $conhost
+      - run: cargo build -p harness -p probe --locked
+      - shell: bash
+        run: target/debug/harness version conhost
+      - shell: bash
+        run: target/debug/harness smoke conhost
+      - shell: bash
+        run: target/debug/harness run conhost --probe target/debug/probe.exe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conhost-${{ matrix.os }}
+          path: harness-out
+          if-no-files-found: ignore
