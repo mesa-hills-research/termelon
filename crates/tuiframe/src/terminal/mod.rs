@@ -44,8 +44,10 @@ pub enum MouseMode {
 pub enum KeyboardRequest {
     /// The legacy encodings, where Shift+Enter arrives as Enter.
     Legacy,
-    /// The protocol's first flag, which tells apart keys the legacy encodings merge, such as
-    /// Shift+Enter and Enter, or Ctrl+I and Tab.
+    /// The protocol's flags 1 and 4, which tell apart keys the legacy encodings merge, such as
+    /// Shift+Enter and Enter, or Ctrl+I and Tab, and give the character a shifted key types.
+    /// Where the terminal lacks the protocol and is known to take xterm's modifyOtherKeys, that
+    /// is turned on instead.
     #[default]
     Disambiguate,
     /// These flags, of those the terminal has, as in kitty's `CSI > flags u`.
@@ -715,7 +717,9 @@ mod unix {
     fn enabled(options: &Options, caps: &Capabilities) -> Enabled {
         let has = |support: Support| support != Support::No;
         let keyboard = match (options.keyboard, caps.keyboard) {
-            (KeyboardRequest::Disambiguate, KeyboardSupport::Kitty { flags }) => Some(flags & 1),
+            (KeyboardRequest::Disambiguate, KeyboardSupport::Kitty { flags }) => {
+                Some(flags & 0b101)
+            }
             (KeyboardRequest::Flags(asked), KeyboardSupport::Kitty { flags }) => {
                 Some(flags & asked)
             }
@@ -734,6 +738,8 @@ mod unix {
             grapheme_clusters: caps.grapheme_clustering == Support::Yes,
             theme_reports: false,
             keyboard: keyboard.filter(|flags| *flags != 0),
+            modify_other_keys: options.keyboard != KeyboardRequest::Legacy
+                && caps.keyboard == KeyboardSupport::ModifyOtherKeys,
             save_title: options.save_title && has(caps.title_stack),
             hyperlinks: caps.hyperlinks == Support::Yes,
             // (Until a frame asks for a shape.)

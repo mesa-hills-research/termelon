@@ -40,6 +40,8 @@ pub(crate) struct Enabled {
     pub(crate) theme_reports: bool,
     /// The kitty keyboard flags pushed, if any were.
     pub(crate) keyboard: Option<u8>,
+    /// xterm's modifyOtherKeys at level 1.
+    pub(crate) modify_other_keys: bool,
     /// The window's title saved on xterm's title stack, to be put back from it.
     pub(crate) save_title: bool,
     /// Frames may hold hyperlinks, so the reset ends one left open.
@@ -103,6 +105,9 @@ impl Enabled {
         if let Some(flags) = self.keyboard {
             out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
         }
+        if self.modify_other_keys {
+            out.extend_from_slice(b"\x1b[>4;1m");
+        }
         if self.clear {
             out.extend_from_slice(b"\x1b[H\x1b[2J");
         }
@@ -128,6 +133,9 @@ impl Enabled {
         let mut out = b"\x1b[?2026l".to_vec();
         if self.keyboard.is_some() {
             out.extend_from_slice(b"\x1b[<1u");
+        }
+        if self.modify_other_keys {
+            out.extend_from_slice(b"\x1b[>4;0m");
         }
         for mode in self.modes().into_iter().rev() {
             private_mode(&mut out, mode, false);
@@ -632,6 +640,7 @@ mod tests {
             grapheme_clusters: true,
             theme_reports: true,
             keyboard: Some(1),
+            modify_other_keys: true,
             save_title: true,
             hyperlinks: true,
             cursor_shape: true,
@@ -645,11 +654,11 @@ mod tests {
         assert_eq!(
             String::from_utf8(enabled.setup()).unwrap(),
             "\x1b[22;0t\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1004h\
-             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u"
+             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u\x1b[>4;1m"
         );
         assert_eq!(
             String::from_utf8(enabled.reset()).unwrap(),
-            "\x1b[?2026l\x1b[<1u\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
+            "\x1b[?2026l\x1b[<1u\x1b[>4;0m\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
              \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[?1049l\x1b[0 q\x1b[?25h\
              \x1b[23;0t"
         );

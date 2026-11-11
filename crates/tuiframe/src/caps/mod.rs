@@ -281,6 +281,9 @@ pub(crate) fn detect(
     };
     if let Some(row) = row {
         apply_row(&mut caps, row);
+        if row.modify_other_keys == Support::Yes {
+            caps.keyboard = KeyboardSupport::ModifyOtherKeys;
+        }
     }
     if let Some(colors) = hints.colors
         && colors.rank() > caps.colors.rank()
@@ -429,6 +432,7 @@ mod tests {
         assert_eq!(konsole.keyboard, KeyboardSupport::Legacy);
 
         let xterm = detect_with(tuiframe_vt::Profile::xterm(), &[("COLORTERM", "truecolor")]);
+        assert_eq!(xterm.keyboard, KeyboardSupport::ModifyOtherKeys);
         assert_eq!(xterm.synchronized_output, Support::No);
         assert_eq!(xterm.hyperlinks, Support::No);
         assert_eq!(xterm.colors, ColorDepth::TrueColor);

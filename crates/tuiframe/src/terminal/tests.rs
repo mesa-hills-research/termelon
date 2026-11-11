@@ -203,6 +203,7 @@ fn end_to_end(
     let emulator = lock(&played.emulator);
     assert!(!emulator.alternate_screen(), "{name}");
     assert_eq!(emulator.keyboard_flags(), 0, "{name}");
+    assert_eq!(emulator.modify_other_keys(), 0, "{name}");
     for mode in [1000, 1002, 1003, 1004, 1006, 2004, 2027] {
         assert!(!emulator.mode(mode), "{name}: mode {mode} is still on");
     }
@@ -229,7 +230,8 @@ fn kitty_end_to_end() {
             assert_eq!(caps.colors, ColorDepth::TrueColor);
             assert_eq!(caps.background, Some(crate::caps::Rgb::new(0, 0, 0)));
             assert!(emulator.alternate_screen());
-            assert_eq!(emulator.keyboard_flags(), 1);
+            assert_eq!(emulator.keyboard_flags(), 0b101);
+            assert_eq!(emulator.modify_other_keys(), 0);
             // (Mode 1002 takes over from 1000, as in xterm, which tracks one mouse mode.)
             for mode in [1002, 1006, 1004, 2004] {
                 assert!(emulator.mode(mode), "mode {mode}");
@@ -247,11 +249,12 @@ fn xterm_end_to_end() {
         &[("TERM", "xterm-256color")],
         |caps, emulator| {
             assert_eq!(caps.terminal.name.as_deref(), Some("XTerm"));
-            assert_eq!(caps.keyboard, KeyboardSupport::Legacy);
+            assert_eq!(caps.keyboard, KeyboardSupport::ModifyOtherKeys);
             assert_eq!(caps.synchronized_output, Support::No);
             assert_eq!(caps.hyperlinks, Support::No);
             assert!(emulator.alternate_screen());
             assert_eq!(emulator.keyboard_flags(), 0);
+            assert_eq!(emulator.modify_other_keys(), 1);
             assert_eq!(emulator.title_stack().len(), 1);
         },
     );
@@ -283,7 +286,7 @@ fn windows_terminal_end_to_end() {
             assert!(caps.width_profile.joins_emoji);
             assert!(matches!(caps.keyboard, KeyboardSupport::Kitty { .. }));
             assert!(emulator.mode(2027));
-            assert_eq!(emulator.keyboard_flags(), 1);
+            assert_eq!(emulator.keyboard_flags(), 0b101);
         },
     );
 }
