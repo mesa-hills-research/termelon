@@ -1,6 +1,6 @@
-//! A terminal emulator in a library, for tests. It keeps the screen a terminal would show for the bytes
-//! a program writes, answers queries as a chosen terminal would, and encodes keys the way that
-//! terminal sends them.
+//! A terminal emulator library for Rust, for testing what terminal programs write. It keeps the
+//! screen a terminal would show for the bytes a program writes, answers queries as a chosen terminal
+//! would, and encodes keys the way that terminal sends them.
 //!
 //! ```
 //! use termelon_vt::{Emulator, Event, Profile};
@@ -24,9 +24,9 @@
 //! width and the full style (colours by name, index or RGB, every SGR attribute, underline styles
 //! and colour, and OSC 8 hyperlinks). It has the cursor with its visibility and shape, the main and
 //! alternate screens, autowrap with xterm's pending-wrap state, origin mode, scroll regions, line
-//! insertion and deletion, the title and its stack, OSC 52 writes, and the modes a terminal UI uses: mouse reports (9, 1000,
-//! 1002, 1003, 1006), focus (1004), bracketed paste (2004), synchronized update (2026), grapheme
-//! clusters (2027), and the kitty keyboard flags.
+//! insertion and deletion, the title and its stack, OSC 52 writes, and the modes a terminal UI
+//! uses. Those are mouse reports (9, 1000, 1002, 1003, 1006), focus (1004), bracketed paste (2004),
+//! synchronized update (2026), grapheme clusters (2027), and the kitty keyboard flags.
 //!
 //! # Strict mode
 //!
