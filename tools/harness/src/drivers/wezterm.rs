@@ -21,6 +21,8 @@ pub struct Wezterm {
     dir: WorkDir,
     child: Option<Child>,
     socket: Option<PathBuf>,
+    /// The pane's id. With no window manager, nothing has the focus for `cli` to pick by.
+    pane: Option<String>,
     window: Option<String>,
     size: Option<(u16, u16)>,
 }
@@ -36,17 +38,20 @@ impl Wezterm {
             dir: work_dir("wezterm")?,
             child: None,
             socket: None,
+            pane: None,
             window: None,
             size: None,
         })
     }
 
-    fn cli(&self) -> Result<Command, Error> {
-        let socket = self
-            .socket
-            .as_ref()
-            .ok_or(Error::Missing("a running WezTerm".to_owned()))?;
-        Ok(cli(&self.dir, socket))
+    /// A `cli` command on the pane, such as `get-text`.
+    fn pane_command(&self, subcommand: &str) -> Result<Command, Error> {
+        let (Some(socket), Some(pane)) = (&self.socket, &self.pane) else {
+            return Err(Error::Missing("a running WezTerm".to_owned()));
+        };
+        let mut command = cli(&self.dir, socket);
+        command.args([subcommand, "--pane-id", pane]);
+        Ok(command)
     }
 
     /// The window's socket, once WezTerm has made it.
@@ -154,20 +159,24 @@ impl Driver for Wezterm {
             let socket = self.find_socket()?;
             let mut list = cli(&self.dir, &socket);
             list.args(["list", "--format", "json"]);
-            run(&mut list)?;
-            Ok((socket, Some(x11::window_of(pid)?)))
+            let list = String::from_utf8_lossy(&run(&mut list)?).into_owned();
+            let pane = json_field(&list, "pane_id")
+                .ok_or_else(|| Error::Parse(format!("WezTerm listed no pane, as {list:?}")))?
+                .to_owned();
+            Ok((socket, pane, x11::window_of(pid)?))
         });
         self.child = Some(child);
-        let (socket, window) = ready?;
+        let (socket, pane, window) = ready?;
         self.socket = Some(socket);
-        self.window = window;
+        self.pane = Some(pane);
+        self.window = Some(window);
         self.size = Some((launch.cols, launch.rows));
         Ok(())
     }
 
     fn send_bytes(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        let mut command = self.cli()?;
-        command.args(["send-text", "--no-paste"]);
+        let mut command = self.pane_command("send-text")?;
+        command.arg("--no-paste");
         run_with_input(&mut command, Some(bytes)).map(drop)
     }
 
@@ -183,10 +192,13 @@ impl Driver for Wezterm {
         let (cols, rows) = self
             .size
             .ok_or(Error::Missing("a running WezTerm".to_owned()))?;
-        let mut text = self.cli()?;
-        text.args(["get-text", "--escapes"]);
+        let mut text = self.pane_command("get-text")?;
+        text.arg("--escapes");
         let text = run(&mut text)?;
-        let mut list = self.cli()?;
+        let Some(socket) = &self.socket else {
+            return Err(Error::Missing("a running WezTerm".to_owned()));
+        };
+        let mut list = cli(&self.dir, socket);
         list.args(["list", "--format", "json"]);
         let list = String::from_utf8_lossy(&run(&mut list)?).into_owned();
         Ok(parse(&text, &list, cols, rows)?
@@ -201,6 +213,7 @@ impl Driver for Wezterm {
     fn stop(&mut self) -> Result<(), Error> {
         self.size = None;
         self.socket = None;
+        self.pane = None;
         self.window = None;
         x11::kill(&mut self.child);
         Ok(())
