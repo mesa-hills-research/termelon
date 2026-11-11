@@ -795,7 +795,7 @@ mod tests {
             mouse_switch(MouseMode::ButtonsAndDrags, MouseMode::AnyMotion),
             b"\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h"
         );
-        assert!(mouse_switch(MouseMode::Off, MouseMode::Off).is_empty());
+        assert_eq!(mouse_switch(MouseMode::Off, MouseMode::Off), b"");
     }
 
     /// A handle on a writer to `terminal`, whose resets written without the writer go to
@@ -858,7 +858,7 @@ mod tests {
         assert!(handle.restore_now(LONG));
         assert!(handle.give_back(&writer, b"", LONG));
         assert_eq!(terminal.taken(), b"[reset][tail]");
-        assert!(direct.taken().is_empty());
+        assert_eq!(direct.taken(), b"");
         assert_eq!(*lock(&restored), 1);
     }
 

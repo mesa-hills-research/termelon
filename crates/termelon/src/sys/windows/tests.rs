@@ -631,7 +631,7 @@ fn replies_go_to_the_reply_slot_while_it_is_open() {
     );
     fake.type_in(&vt_records("\x1b[?62;22c"));
     nothing_more(&shared);
-    assert!(shared.replies.close().is_empty());
+    assert_eq!(shared.replies.close(), [] as [Reply; 0]);
 }
 
 /// A console whose input fails ends the events with the failure.
@@ -685,7 +685,7 @@ fn vt_bytes_are_the_characters_of_key_downs() {
         &mut surrogate,
         &mut bytes,
     );
-    assert!(bytes.is_empty());
+    assert_eq!(bytes, b"");
 }
 
 fn enabled() -> Enabled {

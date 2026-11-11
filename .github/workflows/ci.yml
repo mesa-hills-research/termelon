@@ -16,6 +16,8 @@ env:
   CARGO_INCREMENTAL: 0
 
 # Actions are pinned to commits of releases published at least 30 days before they were chosen.
+# Rust is pinned to a release too (1.99.0, and 1.89 for the oldest supported), so a new release's
+# lints change the build only when the pin moves.
 
 jobs:
   fmt:
@@ -24,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
           components: rustfmt
       - run: cargo fmt --all --check
 
@@ -38,7 +40,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -48,7 +50,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
-        toolchain: [stable, "1.89"]
+        toolchain: ["1.99.0", "1.89"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo doc --workspace --all-features --no-deps --locked
 
@@ -76,7 +78,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
           targets: x86_64-unknown-freebsd
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo check --target x86_64-unknown-freebsd -p termelon --all-features --locked

@@ -312,7 +312,7 @@ mod tests {
         );
         slot.offer(Reply::KittyKeyboard(2));
         assert!(!slot.wait(Duration::from_millis(10), is_da1));
-        assert!(slot.close().is_empty());
+        assert_eq!(slot.close(), [] as [Reply; 0]);
         // (The redraw a resize asks for stays until a frame takes it.)
         let shared = Shared::new(Size::ZERO);
         assert!(shared.redraw_pending());

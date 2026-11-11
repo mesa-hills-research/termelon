@@ -123,7 +123,7 @@ pub fn parse(
 ) -> Result<Readback, Error> {
     let mut screen = ansi_screen(capture, cols, rows, width)?;
     let (x, y, visible, shape) = cursor(cursor_line)?;
-    set_cursor(&mut screen, x, y, visible, Some(shape))?;
+    set_cursor(&mut screen, x, y, visible, shape)?;
     let reports = Reports {
         colors: Colors::AsWritten,
         attributes: Attributes::ALL,
@@ -145,13 +145,18 @@ fn shape(name: &str, blinking: bool) -> u16 {
     if blinking { steady - 1 } else { steady }
 }
 
-/// Reads `#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape} #{cursor_blinking}`.
-fn cursor(info: &str) -> Result<(u16, u16, bool, u16), Error> {
+/// Reads `#{cursor_x} #{cursor_y} #{cursor_flag} #{cursor_shape} #{cursor_blinking}`. tmux before
+/// 3.5 has no `cursor_shape` or `cursor_blinking` and leaves them empty, so the shape is `None`
+/// there.
+fn cursor(info: &str) -> Result<(u16, u16, bool, Option<u16>), Error> {
     let fields: Vec<&str> = info.split_whitespace().collect();
     let number = |i: usize| fields.get(i).and_then(|field| field.parse::<u16>().ok());
-    match (number(0), number(1), fields.get(2), fields.get(3)) {
-        (Some(x), Some(y), Some(flag), Some(name)) => {
-            Ok((x, y, *flag == "1", shape(name, fields.get(4) == Some(&"1"))))
+    match (number(0), number(1), fields.get(2)) {
+        (Some(x), Some(y), Some(flag)) => {
+            let shape = fields
+                .get(3)
+                .map(|name| shape(name, fields.get(4) == Some(&"1")));
+            Ok((x, y, *flag == "1", shape))
         }
         _ => Err(Error::Parse(format!("tmux gave the cursor as {info:?}"))),
     }
@@ -253,9 +258,11 @@ mod tests {
 
     #[test]
     fn cursor_info() {
-        assert_eq!(cursor("6 3 1 bar 1").unwrap(), (6, 3, true, 5));
-        assert_eq!(cursor("0 0 0 block 0").unwrap(), (0, 0, false, 2));
-        assert_eq!(cursor("1 2 1 default 0").unwrap(), (1, 2, true, 0));
+        assert_eq!(cursor("6 3 1 bar 1").unwrap(), (6, 3, true, Some(5)));
+        assert_eq!(cursor("0 0 0 block 0").unwrap(), (0, 0, false, Some(2)));
+        assert_eq!(cursor("1 2 1 default 0").unwrap(), (1, 2, true, Some(0)));
+        // tmux 3.4 has no cursor_shape or cursor_blinking.
+        assert_eq!(cursor("11 7 1  \n").unwrap(), (11, 7, true, None));
         assert!(cursor("x").is_err());
     }
 }

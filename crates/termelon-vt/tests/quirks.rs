@@ -29,7 +29,7 @@ fn ignoring_autowrap_off_keeps_wrapping() {
         Emulator::with_profile(Profile::kitty().with_quirk(Quirk::IgnoresAutowrapOff), 3, 2);
     term.feed(b"\x1b[?7l").unwrap();
     assert!(term.mode(7));
-    assert!(term.events().is_empty());
+    assert_eq!(term.events(), []);
 }
 
 #[test]

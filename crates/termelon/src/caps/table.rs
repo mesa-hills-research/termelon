@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn every_row_names_its_source() {
         for row in ROWS {
-            assert!(!row.name.is_empty());
+            assert_ne!(row.name, "");
             assert_eq!(key(row.name), row.name, "{} isn't its own key", row.name);
             assert!(row.source.len() > 10, "{} has no source", row.name);
         }

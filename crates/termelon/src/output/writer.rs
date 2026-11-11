@@ -1175,7 +1175,7 @@ pub(crate) mod tests {
         assert_eq!(writer.wait(tail, SHORT), Finish::TimedOut);
         let direct = Gate::default();
         assert_eq!(reset_to(&writer, &direct, LONG), Direct::Unneeded);
-        assert!(direct.taken().is_empty());
+        assert_eq!(direct.taken(), b"");
         gate.hold(false);
     }
 
@@ -1218,7 +1218,7 @@ pub(crate) mod tests {
             })
         };
         assert_eq!(refused, Direct::Failed);
-        assert!(direct.taken().is_empty());
+        assert_eq!(direct.taken(), b"");
 
         // Not started, in flight, written, with two at once and one more that gives up waiting.
         direct.hold(true);
@@ -1253,7 +1253,7 @@ pub(crate) mod tests {
         );
         let unused = Gate::default();
         assert_eq!(reset_to(&refusing, &unused, LONG), Direct::Failed);
-        assert!(unused.taken().is_empty());
+        assert_eq!(unused.taken(), b"");
     }
 
     /// A reset whose thread didn't start while something else held the writer's lock is left for
@@ -1372,7 +1372,7 @@ pub(crate) mod tests {
         let writer = Writer::spawn(gate.clone(), b"[reset]".to_vec()).unwrap();
         writer.send(b"[before]".to_vec()).unwrap();
         assert!(writer.wait_idle(LONG));
-        assert!(writer.take_recorded().is_empty());
+        assert_eq!(writer.take_recorded(), b"");
         writer.record(true);
         writer.send(b"[frame]".to_vec()).unwrap();
         writer.hold(Hold::Bell, b"[bell]".to_vec()).unwrap();
@@ -1382,7 +1382,7 @@ pub(crate) mod tests {
         assert_eq!(writer.wait(ticket, LONG), Finish::Written);
         assert_eq!(writer.take_recorded(), b"[reset][tail]");
         writer.record(false);
-        assert!(writer.take_recorded().is_empty());
+        assert_eq!(writer.take_recorded(), b"");
     }
 
     /// Out-of-band commands held while the terminal is busy go with the next packet the writer
@@ -1477,7 +1477,7 @@ pub(crate) mod tests {
         let ticket = writer.ticket();
         assert_eq!(writer.wait(ticket, LONG), Finish::Written);
         let spare = writer.spare_buffer();
-        assert!(spare.is_empty());
+        assert_eq!(spare, b"");
         assert!(spare.capacity() >= 4096);
         // A new reset replaces the one given at the start.
         writer.set_reset(b"[new reset]".to_vec());

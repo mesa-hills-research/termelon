@@ -906,7 +906,7 @@ mod tests {
     fn lines_split_strings_into_spans() {
         assert_eq!(Line::raw("a\nb").spans, [Span::raw("a"), Span::raw("b")]);
         assert_eq!(Line::from(String::from("a\r\nb")).spans.len(), 2);
-        assert!(Line::raw("").spans.is_empty());
+        assert_eq!(Line::raw("").spans, [] as [Span<'_>; 0]);
         let line = Line::styled("ab", Style::new().fg(Color::Blue));
         assert_eq!(line.style, Style::new().fg(Color::Blue));
         assert_eq!(line.spans, [Span::raw("ab")]);

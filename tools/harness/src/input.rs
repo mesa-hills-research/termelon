@@ -374,7 +374,7 @@ mod tests {
         let fixture = parse_fixture(&text).unwrap();
         assert_eq!(fixture[0], ("a".to_owned(), b"a".to_vec()));
         assert_eq!(fixture[2], ("f13".to_owned(), Vec::new()));
-        assert!(changes(&fixture, &recording).is_empty());
+        assert_eq!(changes(&fixture, &recording), Vec::<String>::new());
         assert!(parse_fixture("a\t6").is_err());
         assert!(parse_fixture("a 61").is_err());
     }

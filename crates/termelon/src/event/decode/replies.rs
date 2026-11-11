@@ -103,12 +103,13 @@ fn xtgettcap(entry: &[u8], found: bool) -> Option<Reply> {
 
 /// Text written as pairs of hex digits.
 fn from_hex(hex: &[u8]) -> Option<String> {
-    if !hex.len().is_multiple_of(2) {
+    let (pairs, rest) = hex.as_chunks::<2>();
+    if !rest.is_empty() {
         return None;
     }
-    let bytes = hex
-        .chunks_exact(2)
-        .map(|pair| Some(hex_digit(*pair.first()?)? << 4 | hex_digit(*pair.get(1)?)?))
+    let bytes = pairs
+        .iter()
+        .map(|&[high, low]| Some(hex_digit(high)? << 4 | hex_digit(low)?))
         .collect::<Option<Vec<u8>>>()?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }

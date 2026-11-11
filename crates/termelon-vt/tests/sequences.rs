@@ -809,7 +809,7 @@ fn synchronized_update() {
 fn a_mode_the_terminal_lacks_is_ignored_without_error() {
     let term = run(5, 1, b"\x1b[?2026h\x1b[?2027h");
     assert!(!term.mode(2026) && !term.mode(2027));
-    assert!(term.events().is_empty());
+    assert_eq!(term.events(), []);
 }
 
 #[test]
@@ -894,7 +894,7 @@ fn kitty_query() {
 fn kitty_sequences_are_ignored_where_the_terminal_lacks_them() {
     let term = run(5, 1, b"\x1b[>1u\x1b[?u\x1b[=1u\x1b[<u");
     assert_eq!(term.keyboard_flags(), 0);
-    assert!(term.output().is_empty());
+    assert_eq!(term.output(), []);
 }
 
 #[test]
@@ -957,7 +957,7 @@ fn size_report() {
 fn title_stack() {
     let term = run(5, 1, b"\x1b]2;one\x07\x1b[22;0t\x1b]2;two\x07\x1b[23;0t");
     assert_eq!(term.title(), "one");
-    assert!(term.title_stack().is_empty());
+    assert_eq!(term.title_stack(), []);
     let titles: Vec<&Event> = term
         .events()
         .iter()
@@ -1055,7 +1055,7 @@ fn osc_52_writes_are_recorded() {
         (writes[0].selection.as_str(), writes[0].data.as_slice()),
         ("c", &b"hello"[..])
     );
-    assert!(writes[1].data.is_empty());
+    assert_eq!(writes[1].data, b"");
     assert_eq!(unknown(b"\x1b]52;c;@@\x07"), ["`\\e]52;c;@@\\x07`"]);
 }
 
@@ -1190,10 +1190,10 @@ fn cursor_moves_are_events_but_drawing_is_not() {
 fn take_events_clears_them() {
     let mut term = run(5, 1, b"\x07");
     assert_eq!(term.take_events(), [Event::Bell]);
-    assert!(term.events().is_empty());
+    assert_eq!(term.events(), []);
     term.set_record_events(false);
     term.feed(b"\x07").unwrap();
-    assert!(term.events().is_empty());
+    assert_eq!(term.events(), []);
 }
 
 // The Linux console.

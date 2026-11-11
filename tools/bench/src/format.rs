@@ -600,8 +600,8 @@ style 0 4 13 fg=#d8dee9 bold
 
     #[test]
     fn an_empty_file_has_no_frames() {
-        assert!(parse("").unwrap().is_empty());
-        assert!(parse("\n# nothing\n").unwrap().is_empty());
+        assert_eq!(parse("").unwrap(), [] as [Frame; 0]);
+        assert_eq!(parse("\n# nothing\n").unwrap(), [] as [Frame; 0]);
     }
 
     #[test]

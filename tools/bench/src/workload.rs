@@ -289,7 +289,7 @@ mod tests {
         let mut timer_changes = 0;
         for pair in frames.windows(2) {
             let cells = changed(pair[0], pair[1]);
-            assert!(!cells.is_empty());
+            assert_ne!(cells, [] as [(u16, u16); 0]);
             assert!(cells.len() <= 16, "{} cells", cells.len());
             assert!(
                 cells.iter().all(|(x, y)| {
@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(workload.frames.len(), 3);
         assert!(!workload.repaint);
         let single = from_frames("one", vec![Frame::new(2, 2)], false);
-        assert!(single.warmup.is_empty());
+        assert_eq!(single.warmup, [] as [Frame; 0]);
         assert_eq!(single.frames.len(), 1);
         // A repainting workload times every frame, and draws the first once before.
         let repainting = from_frames("resize", frames, true);

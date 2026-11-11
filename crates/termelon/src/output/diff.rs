@@ -389,14 +389,14 @@ mod tests {
     #[test]
     fn equal_rows_give_no_runs() {
         let a = buffer(&["hello", "world"]);
-        assert!(runs(&a, &a.clone()).is_empty());
+        assert_eq!(runs(&a, &a.clone()), [] as [(usize, usize, usize); 0]);
         let mut rich = buffer(&["a👨\u{200d}👩\u{200d}👧b"]);
         rich.set_link(Rect::new(0, 0, 1, 1), Some("u"));
         let mut other = buffer(&["a👨\u{200d}👩\u{200d}👧b"]);
         other.set_string(0, 0, "x", Style::new());
         other.set_string(0, 0, "a", Style::new());
         other.set_link(Rect::new(0, 0, 1, 1), Some("u"));
-        assert!(runs(&rich, &other).is_empty());
+        assert_eq!(runs(&rich, &other), [] as [(usize, usize, usize); 0]);
     }
 
     #[test]
@@ -456,7 +456,7 @@ mod tests {
             Rect::new(1, 0, 3, 1),
             Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
         );
-        assert!(runs(&a, &b).is_empty());
+        assert_eq!(runs(&a, &b), [] as [(usize, usize, usize); 0]);
         b.set_style(
             Rect::new(2, 0, 1, 1),
             Style::new().add_modifier(Modifier::REVERSED),

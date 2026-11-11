@@ -427,7 +427,7 @@ fn strings_go_only_where_they_are_known() {
             .any(|event| matches!(event, termelon_vt::Event::Bell))
     });
     assert_eq!(lock(&played.emulator).title(), "");
-    assert!(lock(&played.emulator).clipboard().is_empty());
+    assert_eq!(lock(&played.emulator).clipboard(), []);
     terminal.close().unwrap();
 }
 
@@ -1020,11 +1020,11 @@ fn the_record_replays_to_the_same_screen() {
         assert_eq!(replayed.cursor(), emulator.cursor());
         assert_eq!(replayed.title(), "title");
     }
-    assert!(terminal.take_written().is_empty());
+    assert_eq!(terminal.take_written(), b"");
     terminal.close().unwrap();
     let (unrecorded, signals) = Played::new(Profile::kitty());
     let mut terminal = open(&unrecorded, signals, &[], &Options::default());
     wait_until_written(&terminal);
-    assert!(terminal.take_written().is_empty());
+    assert_eq!(terminal.take_written(), b"");
     terminal.close().unwrap();
 }

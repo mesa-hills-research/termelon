@@ -105,7 +105,7 @@ mod tests {
     fn changes_name_the_field() {
         let before = answers(&report("Legacy")).unwrap();
         let now = answers(&report("Kitty")).unwrap();
-        assert!(changes(&before, &before).is_empty());
+        assert_eq!(changes(&before, &before), Vec::<String>::new());
         assert_eq!(
             changes(&before, &now),
             [r#"capabilities.keyboard: "Legacy" before, "Kitty" now"#]

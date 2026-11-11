@@ -158,7 +158,7 @@ mod tests {
         let table = tables(&rows);
         let lines: Vec<&str> = table.lines().collect();
         assert_eq!(lines.len(), 5, "{table}");
-        assert!(lines[2].is_empty());
+        assert_eq!(lines[2], "");
         assert_eq!(
             lines[3],
             "workload         stack    repeats render_us_min render_us_max render_pct encode_us_min encode_us_max encode_pct"

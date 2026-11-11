@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install tmux
         run: |
@@ -76,7 +76,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install screen and tmux
         run: |
@@ -112,7 +112,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install kitty and a display
         run: sudo apt-get update && sudo apt-get install -y kitty xvfb x11-utils xdotool imagemagick
@@ -145,7 +145,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # xfonts-base has the 9x15 bitmap font the driver asks for.
       - name: Install xterm and a display
@@ -182,7 +182,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install WezTerm and a display
         run: |
@@ -216,7 +216,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Node comes with the runner image. The lock file pins @xterm/headless and node-pty with
       # their hashes, and node-pty builds with the image's compiler.
@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install Alacritty and a display
         run: sudo apt-get update && sudo apt-get install -y alacritty xvfb x11-utils xdotool imagemagick
@@ -281,7 +281,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install VTE and a display
         run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91 xvfb x11-utils imagemagick
@@ -316,7 +316,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install Konsole and a display
         run: sudo apt-get update && sudo apt-get install -y konsole dbus-x11 libglib2.0-bin xvfb x11-utils xdotool imagemagick
@@ -346,7 +346,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install foot and sway
         run: sudo apt-get update && sudo apt-get install -y foot sway wtype
@@ -382,7 +382,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
         with:
-          toolchain: stable
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install Ghostty
         run: |

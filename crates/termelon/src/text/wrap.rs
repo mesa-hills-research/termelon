@@ -493,8 +493,8 @@ mod tests {
         let empty = Line::default();
         let rows_of_empty = wrap_with(&empty, 5, true, WidthProfile::default());
         assert_eq!(rows_of_empty.len(), 1);
-        assert!(rows_of_empty[0].spans.is_empty());
-        assert!(rows("abc", 0, true).is_empty());
+        assert_eq!(rows_of_empty[0].spans, [] as [Span<'_>; 0]);
+        assert_eq!(rows("abc", 0, true), Vec::<String>::new());
     }
 
     #[test]

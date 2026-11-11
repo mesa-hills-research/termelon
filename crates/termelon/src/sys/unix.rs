@@ -892,9 +892,12 @@ pub(crate) mod tests {
             }
         }
 
-        /// The slave's modes, all of them, as text.
+        /// The slave's modes, all of them but `PENDIN`, as text. macOS sets `PENDIN` itself each
+        /// time canonical mode comes back, so it says nothing about what the program restored.
         pub(crate) fn modes(&self) -> String {
-            format!("{:?}", termios::tcgetattr(&self.slave).unwrap())
+            let mut modes = termios::tcgetattr(&self.slave).unwrap();
+            modes.local_modes.remove(LocalModes::PENDIN);
+            format!("{modes:?}")
         }
 
         /// Whether the slave is in raw mode.

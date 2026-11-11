@@ -171,7 +171,7 @@ fn the_linux_console_prints_osc_and_dcs_queries() {
     let mut term = Emulator::with_profile(Profile::linux_console(), 80, 2);
     term.set_strict(false);
     term.feed(b"\x1b]11;?\x1b\\\x1bP+q5463\x1b\\").unwrap();
-    assert!(term.take_output().is_empty());
+    assert_eq!(term.take_output(), b"");
     assert_eq!(term.row_text(0).as_deref(), Some("1;?q5463"));
     assert_eq!(term.unknown_sequences().len(), 2);
 }
@@ -263,5 +263,5 @@ fn the_silent_terminal_still_draws() {
     let mut term = Emulator::with_profile(Profile::silent(), 10, 1);
     term.feed(b"\x1b[1mhi\x1b[c\x1b[6n").unwrap();
     assert_eq!(term.row_text(0).as_deref(), Some("hi"));
-    assert!(term.output().is_empty());
+    assert_eq!(term.output(), []);
 }

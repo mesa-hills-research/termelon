@@ -270,7 +270,7 @@ mod tests {
     fn what_each_terminal_leaves_unanswered() {
         let konsole = answers(&replies(Profile::konsole(), &queries(false)));
         assert!(konsole.complete);
-        assert!(konsole.modes.is_empty());
+        assert_eq!(konsole.modes, [] as [(u16, Support); 0]);
         assert_eq!(konsole.terminal, None);
         assert_eq!(konsole.keyboard, None);
         assert_eq!(konsole.truecolor, None);

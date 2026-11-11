@@ -389,9 +389,9 @@ pub(crate) fn turn(turn: usize) -> Vec<Item> {
     let mut items = vec![
         Item::User(format!(
             "Turn {turn}: {}",
-            fill(rng.pick(&ASKS), file, command)
+            fill(rng.pick::<&str>(&ASKS), file, command)
         )),
-        Item::Thinking(fill(rng.pick(&THOUGHTS), file, command)),
+        Item::Thinking(fill(rng.pick::<&str>(&THOUGHTS), file, command)),
         Item::Reply(words(&inline(
             &format!("Reading **{file}** first, then running `{command}`:"),
             text(),
@@ -432,7 +432,7 @@ pub(crate) fn turn(turn: usize) -> Vec<Item> {
                 .collect(),
         ));
     }
-    let summary = fill(rng.pick(&SUMMARIES), file, command);
+    let summary = fill(rng.pick::<&str>(&SUMMARIES), file, command);
     items.push(Item::Reply(words(&inline(&summary, text()))));
     items.push(Item::Turn(format!(
         "{} s · $0.0{:02}",
@@ -577,7 +577,7 @@ mod tests {
             inline("plain text", dim()),
             [Span::new("plain text", dim())]
         );
-        assert!(inline("", dim()).is_empty());
+        assert_eq!(inline("", dim()), [] as [Span; 0]);
     }
 
     #[test]
@@ -635,7 +635,7 @@ mod tests {
         let spans = join_blanks(highlight("    let x = 1;"));
         let texts: Vec<&str> = spans.iter().map(|span| span.text.as_str()).collect();
         assert_eq!(texts, ["    let", " x", " = ", "1", ";"]);
-        assert!(join_blanks(highlight("   ")).is_empty());
+        assert_eq!(join_blanks(highlight("   ")), [] as [Span; 0]);
     }
 
     #[test]

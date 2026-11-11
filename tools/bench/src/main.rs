@@ -320,7 +320,7 @@ mod tests {
         assert!(options.dump);
         let options = parse_args(&args("--file frames.txt")).unwrap();
         assert_eq!(options.file, Some(PathBuf::from("frames.txt")));
-        assert!(options.workloads.is_empty());
+        assert_eq!(options.workloads, Vec::<String>::new());
         assert_eq!(
             parse_args(&args("all --stack all"))
                 .unwrap()
@@ -469,8 +469,9 @@ mod tests {
         assert!(error.contains("takes the place"), "{error}");
         let options = parse_args(&args("idle-rec --recordings /nowhere/at/all")).unwrap();
         let error = load(&options).unwrap_err();
+        let missing = Path::new("/nowhere/at/all").join("idle.styled");
         assert!(
-            error.contains("couldn't read /nowhere/at/all/idle.styled"),
+            error.contains(&format!("couldn't read {}", missing.display())),
             "{error}"
         );
         // Without the option, only the generated ones run.

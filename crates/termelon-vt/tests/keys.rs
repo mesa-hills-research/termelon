@@ -375,7 +375,7 @@ const LEFT: MouseButton = MouseButton::Left;
 #[test]
 fn no_mouse_reports_without_a_mode() {
     let term = term(Profile::xterm(), b"\x1b[?1006h");
-    assert!(mouse(&term, MouseKind::Press(LEFT), 0, 0, NONE).is_empty());
+    assert_eq!(mouse(&term, MouseKind::Press(LEFT), 0, 0, NONE), b"");
 }
 
 #[test]
@@ -394,13 +394,13 @@ fn x10_encoded_reports() {
         b"\x1b[M2\"#"
     );
     assert_eq!(mouse(&term, MouseKind::ScrollUp, 2, 3, NONE), b"\x1b[M`#$");
-    assert!(mouse(&term, MouseKind::Drag(LEFT), 0, 0, NONE).is_empty());
-    assert!(mouse(&term, MouseKind::Move, 0, 0, NONE).is_empty());
+    assert_eq!(mouse(&term, MouseKind::Drag(LEFT), 0, 0, NONE), b"");
+    assert_eq!(mouse(&term, MouseKind::Move, 0, 0, NONE), b"");
     assert_eq!(
         mouse(&term, MouseKind::Press(LEFT), 222, 0, NONE),
         b"\x1b[M \xff!"
     );
-    assert!(mouse(&term, MouseKind::Press(LEFT), 223, 0, NONE).is_empty());
+    assert_eq!(mouse(&term, MouseKind::Press(LEFT), 223, 0, NONE), b"");
 }
 
 #[test]
@@ -447,7 +447,7 @@ fn drags_with_mode_1002_and_motion_with_1003() {
         mouse(&button, MouseKind::Drag(LEFT), 1, 1, NONE),
         b"\x1b[<32;2;2M"
     );
-    assert!(mouse(&button, MouseKind::Move, 1, 1, NONE).is_empty());
+    assert_eq!(mouse(&button, MouseKind::Move, 1, 1, NONE), b"");
     let any = term(Profile::xterm(), b"\x1b[?1003;1006h");
     assert_eq!(mouse(&any, MouseKind::Move, 0, 0, NONE), b"\x1b[<35;1;1M");
     assert_eq!(
@@ -463,8 +463,8 @@ fn x10_mode_reports_presses_without_modifiers() {
         mouse(&term, MouseKind::Press(LEFT), 0, 0, SHIFT),
         b"\x1b[M !!"
     );
-    assert!(mouse(&term, MouseKind::Release(LEFT), 0, 0, NONE).is_empty());
-    assert!(mouse(&term, MouseKind::ScrollUp, 0, 0, NONE).is_empty());
+    assert_eq!(mouse(&term, MouseKind::Release(LEFT), 0, 0, NONE), b"");
+    assert_eq!(mouse(&term, MouseKind::ScrollUp, 0, 0, NONE), b"");
 }
 
 #[test]
@@ -477,7 +477,7 @@ fn paste() {
 
 #[test]
 fn focus() {
-    assert!(term(Profile::xterm(), b"").encode_focus(true).is_empty());
+    assert_eq!(term(Profile::xterm(), b"").encode_focus(true), b"");
     let term = term(Profile::xterm(), b"\x1b[?1004h");
     assert_eq!(term.encode_focus(true), b"\x1b[I");
     assert_eq!(term.encode_focus(false), b"\x1b[O");

@@ -68,7 +68,7 @@ fn a_lone_esc_is_esc_once_nothing_more_is_pending() {
     let mut decoder = Decoder::new(DecoderOptions::default());
     let mut out = Vec::new();
     decoder.feed(b"\x1b", &mut out);
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [Decoded; 0]);
     assert!(decoder.has_pending());
     decoder.flush_pending(&mut out);
     assert_eq!(out, [key(KeyCode::Esc, NONE)]);

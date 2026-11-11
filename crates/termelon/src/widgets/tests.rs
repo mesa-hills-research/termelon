@@ -118,7 +118,7 @@ fn lines_take_their_style_across_the_row_and_sit_as_aligned() {
 #[test]
 fn an_empty_line_leaves_its_row_alone() {
     let buf = draw(3, 1, Line::from("").style(ON_BLUE));
-    assert!(styles(&buf).is_empty());
+    assert_eq!(styles(&buf), Vec::<String>::new());
 }
 
 #[test]
