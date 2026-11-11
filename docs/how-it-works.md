@@ -335,7 +335,8 @@ pub struct FrameStats {
   every cell that isn't blank and sends the cursor's state and the pen again.
 - `set_scroll_detection` turns on looking for rows that moved when more than half of a frame's
   rows changed. When scrolling a region of rows saves bytes, the terminal scrolls them itself
-  (`DECSTBM` and `CSI n S` or `CSI n T`) and only the rest is written. It's off until the terminal
+  (`DECSTBM`, then delete or insert lines with `CSI n M` or `CSI n L` at the region's top, which
+  every VT102 descendant has, the Linux console too) and only the rest is written. It's off until the terminal
   matrix passes it.
 
 `Cursor` is the frame's cursor request (`position`, `shape`, `blinking`), and `FrameStats` reaches the

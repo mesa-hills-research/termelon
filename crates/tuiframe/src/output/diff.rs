@@ -198,7 +198,7 @@ pub(crate) struct Scroll {
     pub(crate) bottom: usize,
     /// How many rows the content moves.
     pub(crate) by: usize,
-    /// Whether it moves up (`CSI n S`) rather than down (`CSI n T`).
+    /// Whether it moves up (delete line, `CSI n M`) rather than down (insert line, `CSI n L`).
     pub(crate) up: bool,
 }
 

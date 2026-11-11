@@ -1,7 +1,7 @@
 //! The diff and the encoder against `tuiframe-vt`, and the bytes of small frames.
 
 use proptest::prelude::*;
-use tuiframe_vt::{Emulator, Event, Profile, Underline, WidthRules};
+use tuiframe_vt::{Emulator, Event, Profile, Quirk, Underline, WidthRules};
 
 use super::encode::Encoder;
 use super::{CompletedFrame, Cursor, CursorShape, FrameStats};
@@ -635,7 +635,7 @@ fn streaming_one_row_up_writes_one_row_of_text() {
     let got = packet(&mut encoder, &before, &after, None, &caps);
     assert_eq!(
         got,
-        "␛[?2026h␛[1;12r␛[S␛[r␛[12Hline 12 of a long reply␛[?2026l"
+        "␛[?2026h␛[1;12r␛[M␛[r␛[12Hline 12 of a long reply␛[?2026l"
     );
     feed(&mut term, &got);
     check_screen(&term, &after, None, &caps).unwrap();
@@ -677,7 +677,8 @@ fn the_cursor_is_never_visible_on_a_cell_being_drawn() {
 
 // The emulator checks.
 
-fn emulator(profile: WidthProfile, area: Rect, bce: bool) -> Emulator {
+/// xterm measuring by `profile`, with hyperlinks, and BCE as `bce` says.
+fn xterm(profile: WidthProfile, bce: bool) -> Profile {
     let mut vt = Profile::xterm();
     vt.hyperlinks = true;
     vt.bce = bce;
@@ -686,6 +687,15 @@ fn emulator(profile: WidthProfile, area: Rect, bce: bool) -> Emulator {
         vs16_widens: profile.vs16_widens,
         ambiguous_wide: profile.ambiguous_wide,
     };
+    vt
+}
+
+fn emulator(profile: WidthProfile, area: Rect, bce: bool) -> Emulator {
+    emulator_for(xterm(profile, bce), area)
+}
+
+/// An emulator playing `vt` over `area`, with autowrap off as the terminal opens it.
+fn emulator_for(vt: Profile, area: Rect) -> Emulator {
     let mut term = Emulator::with_profile(vt, area.right(), area.bottom());
     feed(&mut term, "␛[?7l");
     term
@@ -1167,8 +1177,19 @@ fn run_frames(
     scroll: bool,
     frames: &[Frame],
 ) -> Result<(), String> {
+    run_frames_on(xterm(profile, bce), profile, caps, scroll, frames)
+}
+
+/// [`run_frames`] on the terminal `vt` plays, with buffers that measure by `profile`.
+fn run_frames_on(
+    vt: Profile,
+    profile: WidthProfile,
+    caps: &Capabilities,
+    scroll: bool,
+    frames: &[Frame],
+) -> Result<(), String> {
     let area = Rect::new(0, 0, W, H);
-    let mut term = emulator(profile, area, bce);
+    let mut term = emulator_for(vt, area);
     let mut encoder = Encoder::new();
     encoder.set_scroll_detection(scroll);
     let mut prev = Buffer::with_width_profile(area, profile);
@@ -1363,6 +1384,30 @@ proptest! {
     ) {
         if let Err(e) = run_frames(profile, &caps, bce, scroll, &frames) {
             prop_assert!(false, "{}", e);
+        }
+    }
+
+    /// The same on kitty with each quirk a terminal may have, with the capabilities a probe of
+    /// that terminal would report, and scroll detection off where it can't scroll a region.
+    #[test]
+    fn the_terminal_shows_every_frame_whatever_its_quirks(
+        frames in prop::collection::vec(frame(), 1..5),
+    ) {
+        for quirk in Quirk::ALL {
+            let vt = Profile::kitty().with_quirk(quirk);
+            let profile = WidthProfile {
+                joins_emoji: vt.width.joins_emoji,
+                vs16_widens: vt.width.vs16_widens,
+                ambiguous_wide: vt.width.ambiguous_wide,
+            };
+            let caps = Capabilities {
+                synchronized_output: if quirk == Quirk::NoSync { Support::No } else { Support::Yes },
+                ..full_caps()
+            };
+            let scroll = quirk != Quirk::NoInsertDeleteLines;
+            if let Err(e) = run_frames_on(vt, profile, &caps, scroll, &frames) {
+                prop_assert!(false, "with {:?}, {}", quirk, e);
+            }
         }
     }
 

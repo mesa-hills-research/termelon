@@ -318,22 +318,29 @@ impl Encoder {
             .truncate(kept + usize::from(!self.columns.is_empty()));
     }
 
-    /// Scrolls rows of the terminal as `scroll` says, with the background reset first, so
+    /// Scrolls rows of the terminal as `scroll` says, with delete line (`CSI n M`) or insert
+    /// line (`CSI n L`) inside a scroll region, and the background reset first, so
     /// terminals that fill new rows with the pen's background and those that don't agree.
     fn write_scroll(&mut self, scroll: Scroll, area: Rect, allowed: Allowed, out: &mut Vec<u8>) {
         self.set_pen(Pen::DEFAULT, allowed, out);
-        let top = usize::from(area.y) + scroll.top + 1;
+        let top = usize::from(area.y) + scroll.top;
         let bottom = usize::from(area.y) + scroll.bottom;
         out.extend_from_slice(b"\x1b[");
-        push_number(out, top);
+        push_number(out, top + 1);
         out.push(b';');
         push_number(out, bottom);
         out.push(b'r');
+        // Setting the region puts the cursor home. Deleting or inserting lines at the region's
+        // top moves the rows below within the region, which every VT102 descendant does, the
+        // Linux console too, which has no CSI S or T.
+        self.row = Some(0);
+        self.col = Some(0);
+        self.move_to(0, u16::try_from(top).unwrap_or(u16::MAX), false, out);
         out.extend_from_slice(b"\x1b[");
         if scroll.by > 1 {
             push_number(out, scroll.by);
         }
-        out.push(if scroll.up { b'S' } else { b'T' });
+        out.push(if scroll.up { b'M' } else { b'L' });
         out.extend_from_slice(b"\x1b[r");
         self.row = Some(0);
         self.col = Some(0);
