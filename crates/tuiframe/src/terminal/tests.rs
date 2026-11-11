@@ -203,6 +203,7 @@ fn end_to_end(
     let emulator = lock(&played.emulator);
     assert!(!emulator.alternate_screen(), "{name}");
     assert_eq!(emulator.keyboard_flags(), 0, "{name}");
+    assert_eq!(emulator.modify_other_keys(), 0, "{name}");
     for mode in [1000, 1002, 1003, 1004, 1006, 2004, 2027] {
         assert!(!emulator.mode(mode), "{name}: mode {mode} is still on");
     }
@@ -229,7 +230,8 @@ fn kitty_end_to_end() {
             assert_eq!(caps.colors, ColorDepth::TrueColor);
             assert_eq!(caps.background, Some(crate::caps::Rgb::new(0, 0, 0)));
             assert!(emulator.alternate_screen());
-            assert_eq!(emulator.keyboard_flags(), 1);
+            assert_eq!(emulator.keyboard_flags(), 0b101);
+            assert_eq!(emulator.modify_other_keys(), 0);
             // (Mode 1002 takes over from 1000, as in xterm, which tracks one mouse mode.)
             for mode in [1002, 1006, 1004, 2004] {
                 assert!(emulator.mode(mode), "mode {mode}");
@@ -247,11 +249,12 @@ fn xterm_end_to_end() {
         &[("TERM", "xterm-256color")],
         |caps, emulator| {
             assert_eq!(caps.terminal.name.as_deref(), Some("XTerm"));
-            assert_eq!(caps.keyboard, KeyboardSupport::Legacy);
+            assert_eq!(caps.keyboard, KeyboardSupport::ModifyOtherKeys);
             assert_eq!(caps.synchronized_output, Support::No);
             assert_eq!(caps.hyperlinks, Support::No);
             assert!(emulator.alternate_screen());
             assert_eq!(emulator.keyboard_flags(), 0);
+            assert_eq!(emulator.modify_other_keys(), 1);
             assert_eq!(emulator.title_stack().len(), 1);
         },
     );
@@ -283,7 +286,7 @@ fn windows_terminal_end_to_end() {
             assert!(caps.width_profile.joins_emoji);
             assert!(matches!(caps.keyboard, KeyboardSupport::Kitty { .. }));
             assert!(emulator.mode(2027));
-            assert_eq!(emulator.keyboard_flags(), 1);
+            assert_eq!(emulator.keyboard_flags(), 0b101);
         },
     );
 }
@@ -333,7 +336,7 @@ fn linux_console_end_to_end() {
 fn a_silent_terminal_times_the_probe_out() {
     let (mut played, signals) = Played::new(Profile::silent());
     let options = Options {
-        probe_timeout: Duration::from_millis(200),
+        probe_timeout: Some(Duration::from_millis(200)),
         ..Options::default()
     };
     let started = Instant::now();
@@ -341,7 +344,13 @@ fn a_silent_terminal_times_the_probe_out() {
     let took = started.elapsed();
     assert!(took >= Duration::from_millis(200), "{took:?}");
     assert!(took < Duration::from_secs(2), "{took:?}");
-    assert_eq!(terminal.capabilities(), &Capabilities::default());
+    assert_eq!(
+        terminal.capabilities(),
+        &Capabilities {
+            probe: crate::caps::Probe::TimedOut,
+            ..Capabilities::default()
+        }
+    );
     played.send(
         b"\x1b[?62;c\x1b[?2026;2$y\x1b[?0u\x1bP>|kitty(0.32.2)\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\",
     );
@@ -440,19 +449,20 @@ fn width_probes_measure_the_terminal() {
 /// terminal's input is still open.
 #[test]
 fn a_writer_that_fails_ends_the_events() {
+    use crate::output::writer::tests::block_on;
     let pty = Pty::open(Size::new(80, 24));
     let (read, write) = std::io::pipe().unwrap();
-    drop(read);
     let tty = Tty {
         input: pty.slave.try_clone().unwrap(),
         output: write.into(),
     };
     let (signals, _resize, _resume) = Signals::unregistered().unwrap();
-    let options = Options {
-        capabilities: Some(Capabilities::default()),
-        ..Options::default()
-    };
+    let options = Options::default().capabilities(Capabilities::default());
     let mut terminal = Terminal::open_on(tty, options, &Vars(&[]), signals).unwrap();
+    // The terminal goes away once the setup was taken, and the next write fails.
+    assert!(block_on(terminal.written(), LONG));
+    drop(read);
+    terminal.bell().unwrap();
     assert!(matches!(
         terminal.events().next_timeout(LONG),
         Err(Error::Closed)
@@ -808,4 +818,100 @@ fn what_a_terminal_prints_of_the_probe_stays_off_the_main_screen() {
         "{:?}",
         emulator.rows()
     );
+}
+
+/// A lone ESC waits 20 ms for more, or 100 ms where the kitty protocol is on, then it's Esc.
+#[test]
+fn a_lone_escape_waits_longer_under_the_kitty_protocol() {
+    for (profile, wait) in [(Profile::xterm(), 20), (Profile::kitty(), 100)] {
+        let (mut played, signals) = Played::new(profile);
+        let terminal = open(&played, signals, &[], &Options::default());
+        let typed = Instant::now();
+        played.send(b"\x1b");
+        assert_eq!(next(&terminal), key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            typed.elapsed() >= Duration::from_millis(wait),
+            "{:?}",
+            typed.elapsed()
+        );
+        terminal.close().unwrap();
+    }
+}
+
+/// A frame reads the size from the terminal, since SIGWINCH reaches the foreground process group
+/// alone, and a terminal that says 0x0 gets `COLUMNS` and `LINES`, or 80x24.
+#[test]
+fn frames_read_the_size_from_the_terminal() {
+    let (played, signals) = Played::new(Profile::kitty());
+    let mut terminal = open(&played, signals, &[], &Options::default());
+    played.pty.resize(Size::new(90, 20));
+    wait_until_written(&terminal);
+    let drawn = terminal.draw(|frame| {
+        assert_eq!(frame.area(), crate::layout::Rect::new(0, 0, 90, 20));
+    });
+    assert!(matches!(drawn, Ok(Drawn::Written(_))));
+    assert_eq!(terminal.size(), Size::new(90, 20));
+    terminal.close().unwrap();
+
+    for (vars, size) in [
+        (
+            &[("COLUMNS", "100"), ("LINES", "40")][..],
+            Size::new(100, 40),
+        ),
+        (&[("COLUMNS", "0")][..], Size::new(80, 24)),
+    ] {
+        let (played, signals) = Played::new(Profile::kitty());
+        played.pty.resize(Size::ZERO);
+        let options = Options::default().capabilities(Capabilities::default());
+        let terminal = Terminal::open_on(played.tty(), options, &Vars(vars), signals).unwrap();
+        assert_eq!(terminal.size(), size);
+        terminal.close().unwrap();
+    }
+}
+
+/// While the terminal is busy, titles, copies and bells wait for the next packet, where the last
+/// title and copy win and the bells ring once.
+#[test]
+fn out_of_band_commands_wait_for_a_busy_terminal() {
+    use crate::output::writer::tests::{block_on, full_pipe};
+    let pty = Pty::open(Size::new(80, 24));
+    let (mut read, write, filled) = full_pipe();
+    let tty = Tty {
+        input: pty.slave.try_clone().unwrap(),
+        output: write.into(),
+    };
+    let (signals, _resize, _resume) = Signals::unregistered().unwrap();
+    let caps = Capabilities {
+        title: Support::Yes,
+        clipboard_write: Support::Yes,
+        ..Capabilities::default()
+    };
+    let options = Options::default()
+        .capabilities(caps)
+        .probe_timeout(Duration::from_millis(50));
+    let mut terminal = Terminal::open_on(tty, options, &Vars(&[]), signals).unwrap();
+    for title in ["first", "second", "third"] {
+        terminal.set_title(title).unwrap();
+        terminal.bell().unwrap();
+    }
+    terminal.copy_to_clipboard("old").unwrap();
+    terminal.copy_to_clipboard("new").unwrap();
+    let mut shown = vec![0; filled];
+    read.read_exact(&mut shown).unwrap();
+    assert!(block_on(terminal.written(), LONG));
+    assert!(matches!(terminal.draw(|_| {}), Ok(Drawn::Written(_))));
+    assert!(block_on(terminal.written(), LONG));
+    terminal.close().unwrap();
+    drop(pty);
+    let mut rest = Vec::new();
+    let _ = read.read_to_end(&mut rest);
+    let rest = String::from_utf8_lossy(&rest).into_owned();
+    assert!(rest.contains("\x1b]0;third\x1b\\"), "{rest:?}");
+    assert!(
+        !rest.contains("first") && !rest.contains("second"),
+        "{rest:?}"
+    );
+    assert!(rest.contains(&format!("\x1b]52;c;{}\x1b\\", super::base64(b"new"))));
+    assert!(!rest.contains(&super::base64(b"old")));
+    assert_eq!(rest.matches('\x07').count(), 1, "{rest:?}");
 }

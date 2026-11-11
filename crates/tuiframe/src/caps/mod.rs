@@ -40,6 +40,7 @@ pub enum Support {
 }
 
 /// How many colours the terminal shows. Colours a frame uses are lowered to this depth.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorDepth {
     /// 24-bit colour.
@@ -59,6 +60,7 @@ pub enum ColorDepth {
 /// With no rule set, a cluster takes the sum of its characters' widths (at most 7 cells), so a
 /// sequence the terminal doesn't join keeps the row aligned. The default sets none, which is what
 /// most terminals do.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WidthProfile {
     /// An emoji ZWJ or skin-tone sequence is one wide cluster rather than its emoji summed, as
@@ -70,7 +72,20 @@ pub struct WidthProfile {
     pub ambiguous_wide: bool,
 }
 
+impl WidthProfile {
+    /// The profile with these rules.
+    #[must_use]
+    pub const fn new(joins_emoji: bool, vs16_widens: bool, ambiguous_wide: bool) -> Self {
+        Self {
+            joins_emoji,
+            vs16_widens,
+            ambiguous_wide,
+        }
+    }
+}
+
 /// How the terminal can report keys.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyboardSupport {
     /// The kitty keyboard protocol, which tells Shift+Enter from Enter and can report releases.
@@ -88,6 +103,7 @@ pub enum KeyboardSupport {
 }
 
 /// Whether the terminal's font has box drawing and braille.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GlyphSupport {
     /// It has them.
@@ -98,7 +114,22 @@ pub enum GlyphSupport {
     Limited,
 }
 
+/// How the startup probe went.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Probe {
+    /// It didn't run, as the program gave the capabilities.
+    #[default]
+    NotRun,
+    /// The terminal answered DA1, so every answer that was coming came.
+    Complete,
+    /// The terminal didn't answer DA1 in time, so what it supports comes from the environment and
+    /// the table alone.
+    TimedOut,
+}
+
 /// The terminal's name and version, from its XTVERSION or DA2 answer or its environment.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct TerminalId {
     /// The name, such as `kitty` or `WezTerm`.
@@ -109,6 +140,7 @@ pub struct TerminalId {
 
 /// A terminal multiplexer between the program and the terminal. It answers the probe's queries
 /// itself, since it's the one drawing.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Multiplexer {
     /// tmux.
@@ -147,8 +179,11 @@ impl Rgb {
 /// is unknown, since terminals ignore modes they don't know, and strings (OSC and DCS sequences) are
 /// sent only where support is known. A program reads these to adapt what it shows, such as
 /// offering another chord where Shift+Enter can't be told from Enter.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Capabilities {
+    /// How the startup probe went.
+    pub probe: Probe,
     /// The terminal's name and version.
     pub terminal: TerminalId,
     /// The multiplexer the program runs in, if any.
@@ -210,7 +245,14 @@ pub(crate) fn detect(
     hints: &env::Hints,
     overrides: Option<&str>,
 ) -> Capabilities {
-    let mut caps = Capabilities::default();
+    let mut caps = Capabilities {
+        probe: if answers.complete {
+            Probe::Complete
+        } else {
+            Probe::TimedOut
+        },
+        ..Capabilities::default()
+    };
     // (A reply names what answered, which a leaked variable can't.)
     let replied = answers.terminal.is_some() || answers.multiplexer.is_some();
     caps.multiplexer = if replied {
@@ -239,6 +281,9 @@ pub(crate) fn detect(
     };
     if let Some(row) = row {
         apply_row(&mut caps, row);
+        if row.modify_other_keys == Support::Yes {
+            caps.keyboard = KeyboardSupport::ModifyOtherKeys;
+        }
     }
     if let Some(colors) = hints.colors
         && colors.rank() > caps.colors.rank()
@@ -387,6 +432,7 @@ mod tests {
         assert_eq!(konsole.keyboard, KeyboardSupport::Legacy);
 
         let xterm = detect_with(tuiframe_vt::Profile::xterm(), &[("COLORTERM", "truecolor")]);
+        assert_eq!(xterm.keyboard, KeyboardSupport::ModifyOtherKeys);
         assert_eq!(xterm.synchronized_output, Support::No);
         assert_eq!(xterm.hyperlinks, Support::No);
         assert_eq!(xterm.colors, ColorDepth::TrueColor);
@@ -425,7 +471,14 @@ mod tests {
         assert_eq!(no_color.colors, ColorDepth::None);
 
         let silent = detect_with(tuiframe_vt::Profile::silent(), &[]);
-        assert_eq!(silent, Capabilities::default());
+        assert_eq!(
+            silent,
+            Capabilities {
+                probe: Probe::TimedOut,
+                ..Capabilities::default()
+            }
+        );
+        assert_eq!(console.probe, Probe::Complete);
 
         let hints = env::hints(&env::Vars(&[("TERM", "xterm-kitty")]));
         let caps = detect(

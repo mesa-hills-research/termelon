@@ -124,9 +124,10 @@ A frame that changes no cell writes only a cursor move when the cursor moved, an
 
 Closing gives the terminal back in every way a program can end. The reset packet is built at open
 from what was enabled. It ends any synchronized update, pops the kitty keyboard flags, turns off the
-reports that were on, resets the pen, turns autowrap back on, leaves the alternate screen, shows the
-cursor and restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now`
-writes CAN and the reset from a thread of its own, once.
+reports that were on, resets the pen, turns autowrap back on, resets the scroll region, leaves the
+alternate screen, shows the cursor and restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now`
+writes CAN, ST and the reset from a thread of its own, once, and the writer stops within the 4 KiB
+chunk it was writing.
 
 ## Input
 
@@ -381,8 +382,8 @@ impl Writer {
 - `ticket` stands for everything sent so far, and `wait` says what became of it within the timeout.
 - `close` drops the packets not yet started, then queues the reset and the program's `tail`, and says
   whether this call ended the output. Its ticket counts as written only once the reset is.
-- `takeover` gives what writes CAN and the reset from a thread of its own when the writer is stuck
-  or died, with a record outside the writer's lock, so the reset is never written twice.
+- `takeover` gives what writes CAN, ST and the reset from a thread of its own when the writer is
+  stuck or died, with a record outside the writer's lock, so the reset is never written twice.
   `RestoreHandle` (`Clone + Send + Sync`) keeps one, and its `restore_now(timeout)` uses it.
 - `failure` is set once a write fails or the thread ends. The terminal ends the event stream then.
 

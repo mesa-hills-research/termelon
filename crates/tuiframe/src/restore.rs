@@ -40,6 +40,8 @@ pub(crate) struct Enabled {
     pub(crate) theme_reports: bool,
     /// The kitty keyboard flags pushed, if any were.
     pub(crate) keyboard: Option<u8>,
+    /// xterm's modifyOtherKeys at level 1.
+    pub(crate) modify_other_keys: bool,
     /// The window's title saved on xterm's title stack, to be put back from it.
     pub(crate) save_title: bool,
     /// Frames may hold hyperlinks, so the reset ends one left open.
@@ -103,6 +105,9 @@ impl Enabled {
         if let Some(flags) = self.keyboard {
             out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
         }
+        if self.modify_other_keys {
+            out.extend_from_slice(b"\x1b[>4;1m");
+        }
         if self.clear {
             out.extend_from_slice(b"\x1b[H\x1b[2J");
         }
@@ -129,6 +134,9 @@ impl Enabled {
         if self.keyboard.is_some() {
             out.extend_from_slice(b"\x1b[<1u");
         }
+        if self.modify_other_keys {
+            out.extend_from_slice(b"\x1b[>4;0m");
+        }
         for mode in self.modes().into_iter().rev() {
             private_mode(&mut out, mode, false);
         }
@@ -136,7 +144,8 @@ impl Enabled {
         if self.hyperlinks {
             out.extend_from_slice(b"\x1b]8;;\x1b\\");
         }
-        out.extend_from_slice(b"\x1b[?7h");
+        // (Autowrap back on, then the whole screen as the scroll region, before leaving.)
+        out.extend_from_slice(b"\x1b[?7h\x1b[r");
         if self.alternate_screen {
             out.extend_from_slice(b"\x1b[?1049l");
         }
@@ -214,8 +223,8 @@ impl RestoreHandle {
 
     /// Gives the terminal back now, without waiting for the writer, for a program about to end.
     ///
-    /// It writes CAN, which cancels an escape sequence that a write left half done, then the
-    /// reset, from a thread of its own, waits at most `timeout` for them, and puts the terminal's
+    /// It writes CAN and ST, which end an escape sequence or a string that a write left half done,
+    /// then the reset, from a thread of its own, waits at most `timeout` for them, and puts the terminal's
     /// modes back as the program found them. Returns whether the reset reached the terminal, from
     /// this call or an earlier one. Once the terminal was given back, it writes nothing more.
     pub fn restore_now(&self, timeout: Duration) -> bool {
@@ -376,7 +385,7 @@ pub(crate) mod screen {
 
     use super::{CLOSE_WAIT, Enabled, RestoreHandle, register, unregister};
     use crate::output::writer::{Writer, lock};
-    use std::os::fd::AsFd;
+    use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 
     use crate::event::decode::Query;
     use crate::layout::Size;
@@ -395,7 +404,17 @@ pub(crate) mod screen {
         modes: Arc<Modes>,
         /// What takes the terminal, sent again when the program runs again after a stop.
         setup: Arc<Mutex<Vec<u8>>>,
+        /// The terminal, for its size.
+        size_fd: OwnedFd,
         closed: bool,
+    }
+
+    /// The size of the terminal `fd` is on, unless it says 0x0.
+    fn cells(fd: BorrowedFd<'_>) -> Option<Size> {
+        window_size(fd)
+            .ok()
+            .map(|size| size.cells)
+            .filter(|size| size.width > 0 && size.height > 0)
     }
 
     /// The terminal's output for a reset written without the writer, a descriptor kept from open,
@@ -427,9 +446,20 @@ pub(crate) mod screen {
         ) -> io::Result<Self> {
             let Tty { input, output } = tty;
             let modes = Arc::new(Modes::enter(input.as_fd())?);
-            let size = window_size(output.as_fd())
-                .or_else(|_| window_size(input.as_fd()))
-                .map_or(Size::ZERO, |size| size.cells);
+            // (The output is the screen, unless it isn't a terminal.)
+            let size_fd = if rustix::termios::isatty(&output) {
+                output.try_clone()
+            } else {
+                input.try_clone()
+            };
+            let size_fd = match size_fd {
+                Ok(fd) => fd,
+                Err(error) => {
+                    let _ = modes.restore();
+                    return Err(error);
+                }
+            };
+            let size = cells(size_fd.as_fd()).unwrap_or(Size::ZERO);
             let shared = Arc::new(Shared::new(size));
             let started = output.try_clone().and_then(|direct| {
                 let writer = Writer::spawn(File::from(output), Enabled::default().reset())?;
@@ -489,6 +519,7 @@ pub(crate) mod screen {
                     restore,
                     modes,
                     setup,
+                    size_fd,
                     closed: false,
                 }),
                 Err(error) => {
@@ -497,6 +528,11 @@ pub(crate) mod screen {
                     Err(error)
                 }
             }
+        }
+
+        /// The terminal's size as it says now, or `None` when it doesn't say or says 0x0.
+        pub(crate) fn window_size(&self) -> Option<Size> {
+            cells(self.size_fd.as_fd())
         }
 
         pub(crate) fn writer(&self) -> &Writer {
@@ -520,6 +556,13 @@ pub(crate) mod screen {
         pub(crate) fn expect(&self, query: Query) {
             if let Some(reader) = &self.reader {
                 reader.expect(query);
+            }
+        }
+
+        /// Makes a lone ESC wait `timeout` for a following byte from now on.
+        pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+            if let Some(reader) = &self.reader {
+                reader.set_escape_timeout(timeout);
             }
         }
 
@@ -625,6 +668,7 @@ mod tests {
             grapheme_clusters: true,
             theme_reports: true,
             keyboard: Some(1),
+            modify_other_keys: true,
             save_title: true,
             hyperlinks: true,
             cursor_shape: true,
@@ -638,17 +682,20 @@ mod tests {
         assert_eq!(
             String::from_utf8(enabled.setup()).unwrap(),
             "\x1b[22;0t\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1004h\
-             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u"
+             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u\x1b[>4;1m"
         );
         assert_eq!(
             String::from_utf8(enabled.reset()).unwrap(),
-            "\x1b[?2026l\x1b[<1u\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
-             \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[?1049l\x1b[0 q\x1b[?25h\
+            "\x1b[?2026l\x1b[<1u\x1b[>4;0m\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
+             \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[r\x1b[?1049l\x1b[0 q\x1b[?25h\
              \x1b[23;0t"
         );
         let nothing = Enabled::default();
         assert_eq!(nothing.setup(), b"\x1b[?25l\x1b[?7l");
-        assert_eq!(nothing.reset(), b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[?25h");
+        assert_eq!(
+            nothing.reset(),
+            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[r\x1b[?25h"
+        );
         let motion = Enabled {
             mouse: MouseMode::AnyMotion,
             ..Enabled::default()
@@ -666,7 +713,7 @@ mod tests {
         assert_eq!(console.setup(), b"\x1b[?25l\x1b[?7l\x1b[H\x1b[2J");
         assert_eq!(
             console.reset(),
-            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[H\x1b[2J\x1b[?25h"
+            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[r\x1b[H\x1b[2J\x1b[?25h"
         );
         assert_eq!(
             mouse_switch(MouseMode::ButtonsAndDrags, MouseMode::AnyMotion),
@@ -710,7 +757,7 @@ mod tests {
             assert!(thread.join().unwrap());
         }
         assert!(handle.restore_now(LONG));
-        assert_eq!(direct.taken(), b"\x18[reset]");
+        assert_eq!(direct.taken(), b"\x18\x1b\\[reset]");
         assert_eq!(*lock(&restored), 1);
         assert!(handle.is_given_back());
         // The writer writes nothing more.
@@ -745,7 +792,7 @@ mod tests {
         writer.send(b"[frame]".to_vec()).unwrap();
         assert!(writer.wait_idle(LONG));
         assert!(handle.give_back(&writer, b"", LONG));
-        assert_eq!(direct.taken(), b"\x18[reset]");
+        assert_eq!(direct.taken(), b"\x18\x1b\\[reset]");
         assert_eq!(*lock(&restored), 1);
     }
 

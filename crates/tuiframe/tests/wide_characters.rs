@@ -94,11 +94,7 @@ fn op() -> impl Strategy<Value = Op> {
 }
 
 fn profile() -> impl Strategy<Value = WidthProfile> {
-    (any::<bool>(), any::<bool>(), any::<bool>()).prop_map(|(j, v, a)| WidthProfile {
-        joins_emoji: j,
-        vs16_widens: v,
-        ambiguous_wide: a,
-    })
+    (any::<bool>(), any::<bool>(), any::<bool>()).prop_map(|(j, v, a)| WidthProfile::new(j, v, a))
 }
 
 fn apply(buffer: &mut Buffer, op: &Op) {

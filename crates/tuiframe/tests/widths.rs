@@ -24,11 +24,7 @@ const GRAPHEME_BREAK_PROPERTY: &str = include_str!("data/GraphemeBreakProperty.t
 const MAX_WIDTH: usize = 7;
 
 fn profiles() -> impl Iterator<Item = WidthProfile> {
-    (0..8u8).map(|bits| WidthProfile {
-        joins_emoji: bits & 1 != 0,
-        vs16_widens: bits & 2 != 0,
-        ambiguous_wide: bits & 4 != 0,
-    })
+    (0..8u8).map(|bits| WidthProfile::new(bits & 1 != 0, bits & 2 != 0, bits & 4 != 0))
 }
 
 fn data_lines(file: &str) -> impl Iterator<Item = &str> {
