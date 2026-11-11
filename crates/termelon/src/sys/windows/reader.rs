@@ -367,10 +367,14 @@ impl<I: Input, D: Decode> Loop<I, D> {
                     if let Ok(window) = self.input.window() {
                         self.window = window;
                     }
+                    // (A console sends one at the start, and for buffer changes that leave the
+                    // window as it was, so only a new size is a resize.)
                     let size = self.window.size();
-                    self.ended.shared.set_size(size);
-                    self.ended.shared.request_redraw();
-                    out.push(Decoded::Event(Event::Resize(size)));
+                    if size != self.ended.shared.size() {
+                        self.ended.shared.set_size(size);
+                        self.ended.shared.request_redraw();
+                        out.push(Decoded::Event(Event::Resize(size)));
+                    }
                 }
                 InputRecord::Focus(_) if !self.settings.focus.load(Ordering::Acquire) => {
                     burst = false;

@@ -435,6 +435,25 @@ fn reading(
     (reader, shared)
 }
 
+/// A window size record that leaves the window as it was is no resize. Consoles send one at the
+/// start and for changes to the buffer alone.
+#[test]
+fn a_window_size_record_without_a_new_size_is_no_resize() {
+    let fake = Fake::new();
+    let settings = Arc::new(Settings::default());
+    let (reader, shared) = reading(&fake, &settings, Duration::ZERO);
+    assert!(shared.take_redraw());
+    fake.type_in(&[
+        InputRecord::WindowSize(WindowSizeRecord {
+            size: Size::new(80, 9000),
+        }),
+        key_record(true, 0x5a, u16::from(b'z'), 0),
+    ]);
+    assert_eq!(next(&shared), key(KeyCode::Char('z'), KeyModifiers::NONE));
+    assert!(!shared.take_redraw());
+    reader.stop();
+}
+
 /// Key records come out as keys, a window size record as the window's size (not the buffer's),
 /// and mouse records at the window's cells.
 #[test]

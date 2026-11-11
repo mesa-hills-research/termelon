@@ -288,7 +288,11 @@ mod tests {
             terminal.close().unwrap();
             return;
         }
-        let played = Played::spawn(TEST, Profile::silent());
+        // (The pseudoconsole itself asks its terminal where the cursor is as it starts, and waits
+        // for the answer, so this terminal answers that alone.)
+        let mut silent = Profile::silent();
+        silent.cursor_report = true;
+        let played = Played::spawn(TEST, silent);
         played.until_shown("ready");
         played.key(Key::Char('q'), Mods::NONE);
         played.finish();
