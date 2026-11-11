@@ -44,7 +44,7 @@ pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent
 pub use frame::Frame;
 pub use layout::{Alignment, Constraint, Layout, Position, Rect, Size};
 pub use output::{CompletedFrame, Cursor, CursorShape, FrameStats};
-pub use restore::{RestoreHandle, install_panic_hook};
+pub use restore::{RestoreHandle, install_panic_hook, is_writer_thread};
 pub use style::{Color, Modifier, Style, UnderlineStyle};
 pub use terminal::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Result};
 #[cfg(any(unix, windows))]

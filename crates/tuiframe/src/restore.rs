@@ -306,6 +306,15 @@ pub(crate) fn unregister(handle: &RestoreHandle) {
     }
 }
 
+/// Whether the current thread is one of the library's writer threads, which write to the terminal.
+///
+/// A program with a panic hook of its own uses it to tell a panic on the writer's thread, which
+/// can't give the terminal back through the writer, from one elsewhere, and calls
+/// [`RestoreHandle::restore_now`] there, which writes the reset without the writer.
+pub fn is_writer_thread() -> bool {
+    writer::on_writer_thread()
+}
+
 /// Makes a panic give the terminal back before its message prints, so the message shows on the
 /// main screen, in the modes the program found.
 ///

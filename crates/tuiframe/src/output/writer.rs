@@ -693,6 +693,7 @@ impl Drop for Ended {
 /// The writer's thread. It writes what is sent to `out`, all that waits at once, until no handle
 /// is left.
 fn write_all(shared: &Weak<Shared>, mut out: impl Write) {
+    ON_WRITER.with(|on| on.set(true));
     if let Some(shared) = shared.upgrade() {
         let _ = shared.thread.set(std::thread::current().id());
     }
@@ -762,6 +763,16 @@ fn write_all(shared: &Weak<Shared>, mut out: impl Write) {
             shared.notify_failure();
         }
     }
+}
+
+thread_local! {
+    /// This thread is a writer's.
+    static ON_WRITER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether this thread is a writer's.
+pub(crate) fn on_writer_thread() -> bool {
+    ON_WRITER.with(std::cell::Cell::get)
 }
 
 /// Writes `bytes` to `out` a chunk at a time, and stops between chunks once an end that couldn't
@@ -1331,6 +1342,27 @@ pub(crate) mod tests {
         assert_eq!(first.join().unwrap(), Direct::Written);
         assert_eq!(direct, Direct::TimedOut);
         assert!(waited < Duration::from_millis(400), "it waited {waited:?}");
+    }
+
+    /// A writer's thread knows it's one, and no other thread thinks it is.
+    #[test]
+    fn the_writer_thread_knows_itself() {
+        struct Asks(Arc<Mutex<Vec<bool>>>);
+        impl Write for Asks {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                lock(&self.0).push(on_writer_thread());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let answers = Arc::new(Mutex::new(Vec::new()));
+        let writer = Writer::spawn(Asks(answers.clone()), Vec::new()).unwrap();
+        writer.send(b"[frame]".to_vec()).unwrap();
+        assert!(writer.wait_idle(LONG));
+        assert_eq!(*lock(&answers), [true]);
+        assert!(!on_writer_thread());
     }
 
     /// The record holds what was written, in order, once it's on, and nothing while it's off.
