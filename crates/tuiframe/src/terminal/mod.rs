@@ -13,6 +13,7 @@ use crate::output::CompletedFrame;
 
 /// What [`Terminal::draw`] did.
 #[derive(Debug)]
+#[non_exhaustive]
 #[must_use = "a held frame is drawn again once the terminal takes the last one"]
 pub enum Drawn<'a> {
     /// The terminal hasn't taken the last frame yet, so this one wasn't drawn. Draw again once
@@ -51,8 +52,20 @@ pub enum KeyboardRequest {
     Flags(u8),
 }
 
-/// The choices made at open. The defaults suit most full-screen programs.
+/// The choices made at open. The defaults suit most full-screen programs, and each field has a
+/// builder method of its name.
+///
+/// ```
+/// use std::time::Duration;
+/// use tuiframe::{MouseMode, Options};
+///
+/// let options = Options::default()
+///     .mouse(MouseMode::Off)
+///     .escape_timeout(Duration::from_millis(25));
+/// assert!(options.bracketed_paste);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Options {
     /// Which mouse reports to turn on. `ButtonsAndDrags` by default.
     pub mouse: MouseMode,
@@ -90,6 +103,49 @@ impl Default for Options {
             escape_timeout: Duration::ZERO,
             capabilities: None,
         }
+    }
+}
+
+macro_rules! builders {
+    ($($(#[$doc:meta])* $field:ident: $ty:ty,)*) => {
+        impl Options {
+            $(
+                $(#[$doc])*
+                #[must_use]
+                pub fn $field(mut self, $field: $ty) -> Self {
+                    self.$field = $field;
+                    self
+                }
+            )*
+        }
+    };
+}
+
+builders! {
+    /// Sets [`mouse`](Options::mouse).
+    mouse: MouseMode,
+    /// Sets [`bracketed_paste`](Options::bracketed_paste).
+    bracketed_paste: bool,
+    /// Sets [`focus_events`](Options::focus_events).
+    focus_events: bool,
+    /// Sets [`keyboard`](Options::keyboard).
+    keyboard: KeyboardRequest,
+    /// Sets [`save_title`](Options::save_title).
+    save_title: bool,
+    /// Sets [`probe_timeout`](Options::probe_timeout).
+    probe_timeout: Duration,
+    /// Sets [`width_probes`](Options::width_probes).
+    width_probes: bool,
+    /// Sets [`escape_timeout`](Options::escape_timeout).
+    escape_timeout: Duration,
+}
+
+impl Options {
+    /// Sets [`capabilities`](Options::capabilities), which skips the probe.
+    #[must_use]
+    pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
+        self.capabilities = Some(capabilities);
+        self
     }
 }
 

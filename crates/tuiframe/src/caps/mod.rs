@@ -40,6 +40,7 @@ pub enum Support {
 }
 
 /// How many colours the terminal shows. Colours a frame uses are lowered to this depth.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorDepth {
     /// 24-bit colour.
@@ -59,6 +60,7 @@ pub enum ColorDepth {
 /// With no rule set, a cluster takes the sum of its characters' widths (at most 7 cells), so a
 /// sequence the terminal doesn't join keeps the row aligned. The default sets none, which is what
 /// most terminals do.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WidthProfile {
     /// An emoji ZWJ or skin-tone sequence is one wide cluster rather than its emoji summed, as
@@ -70,7 +72,20 @@ pub struct WidthProfile {
     pub ambiguous_wide: bool,
 }
 
+impl WidthProfile {
+    /// The profile with these rules.
+    #[must_use]
+    pub const fn new(joins_emoji: bool, vs16_widens: bool, ambiguous_wide: bool) -> Self {
+        Self {
+            joins_emoji,
+            vs16_widens,
+            ambiguous_wide,
+        }
+    }
+}
+
 /// How the terminal can report keys.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyboardSupport {
     /// The kitty keyboard protocol, which tells Shift+Enter from Enter and can report releases.
@@ -88,6 +103,7 @@ pub enum KeyboardSupport {
 }
 
 /// Whether the terminal's font has box drawing and braille.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GlyphSupport {
     /// It has them.
@@ -99,6 +115,7 @@ pub enum GlyphSupport {
 }
 
 /// The terminal's name and version, from its XTVERSION or DA2 answer or its environment.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct TerminalId {
     /// The name, such as `kitty` or `WezTerm`.
@@ -109,6 +126,7 @@ pub struct TerminalId {
 
 /// A terminal multiplexer between the program and the terminal. It answers the probe's queries
 /// itself, since it's the one drawing.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Multiplexer {
     /// tmux.
@@ -147,6 +165,7 @@ impl Rgb {
 /// is unknown, since terminals ignore modes they don't know, and strings (OSC and DCS sequences) are
 /// sent only where support is known. A program reads these to adapt what it shows, such as
 /// offering another chord where Shift+Enter can't be told from Enter.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct Capabilities {
     /// The terminal's name and version.
