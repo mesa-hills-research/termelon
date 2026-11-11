@@ -449,19 +449,20 @@ fn width_probes_measure_the_terminal() {
 /// terminal's input is still open.
 #[test]
 fn a_writer_that_fails_ends_the_events() {
+    use crate::output::writer::tests::block_on;
     let pty = Pty::open(Size::new(80, 24));
     let (read, write) = std::io::pipe().unwrap();
-    drop(read);
     let tty = Tty {
         input: pty.slave.try_clone().unwrap(),
         output: write.into(),
     };
     let (signals, _resize, _resume) = Signals::unregistered().unwrap();
-    let options = Options {
-        capabilities: Some(Capabilities::default()),
-        ..Options::default()
-    };
+    let options = Options::default().capabilities(Capabilities::default());
     let mut terminal = Terminal::open_on(tty, options, &Vars(&[]), signals).unwrap();
+    // The terminal goes away once the setup was taken, and the next write fails.
+    assert!(block_on(terminal.written(), LONG));
+    drop(read);
+    terminal.bell().unwrap();
     assert!(matches!(
         terminal.events().next_timeout(LONG),
         Err(Error::Closed)
