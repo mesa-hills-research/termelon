@@ -1647,6 +1647,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "termelon"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "portable-pty",
+ "proptest",
+ "rustix",
+ "signal-hook 0.3.18",
+ "termelon-vt",
+ "tokio",
+ "unicode-segmentation",
+ "unicode-width",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "termelon-vt"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "proptest",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "termina"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1812,32 +1838,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.8",
-]
-
-[[package]]
-name = "termelon"
-version = "0.1.0"
-dependencies = [
- "futures-core",
- "portable-pty",
- "proptest",
- "rustix",
- "signal-hook 0.3.18",
- "tokio",
- "termelon-vt",
- "unicode-segmentation",
- "unicode-width",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "termelon-vt"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "proptest",
- "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]
