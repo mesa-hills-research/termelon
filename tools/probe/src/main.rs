@@ -3,6 +3,7 @@
 //! ```text
 //! probe --list
 //! probe --scene NAME --record FILE [--report FILE] [--size COLSxROWS] [--hold SECONDS]
+//! probe --keys MODE --input FILE [--record FILE] [--hold SECONDS]
 //! ```
 //!
 //! It opens the terminal with the framework, which asks what the terminal supports and measures
@@ -11,7 +12,13 @@
 //! its input ends, `q` is pressed, or `--hold` seconds pass (300 by default). It saves to
 //! `--record` every byte the framework wrote, for the harness to compute the screen the terminal
 //! should show, and writes its report as JSON.
+//!
+//! With `--keys`, it saves instead the raw bytes the terminal sends to `--input`, in a mode of
+//! `legacy`, `disambiguate` (the kitty keyboard protocol's flag 1) or `modify-other-keys`
+//! (xterm's level 2), each with SGR mouse reports on, and the bytes that set the mode to
+//! `--record`.
 
+mod input;
 mod report;
 mod scenes;
 
@@ -26,25 +33,27 @@ use crate::report::Report;
 /// How long the probe holds the screen, at most, by default.
 const HOLD: Duration = Duration::from_secs(300);
 
-/// Standard output, for `--list`, before the terminal is open.
+/// Standard output, for `--list` and `--keys`, which don't open the terminal with the framework.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the probe lists its scenes before it opens the terminal"
+    reason = "the probe lists its scenes and sets up `--keys` without the framework's terminal"
 )]
 fn stdout() -> io::Stdout {
     io::stdout()
 }
 
-/// Standard error, for a bad command line, before the terminal is open.
+/// Standard error, for a bad command line and the errors of `--keys`, without the framework's
+/// terminal.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the probe reports a bad command line before it opens the terminal"
+    reason = "the probe reports a bad command line, and `--keys` its errors, without the framework's terminal"
 )]
 fn stderr() -> io::Stderr {
     io::stderr()
 }
 
-const USAGE: &str = "usage: probe --list | probe --scene NAME --record FILE [--report FILE] [--size COLSxROWS] [--hold SECONDS]";
+const USAGE: &str = "usage: probe --list | probe --scene NAME --record FILE [--report FILE] [--size COLSxROWS] \
+                     [--hold SECONDS] | probe --keys MODE --input FILE [--record FILE] [--hold SECONDS]";
 
 struct Args {
     scene: &'static scenes::Scene,
@@ -156,12 +165,53 @@ fn block_on(future: impl Future<Output = ()>, timeout: Duration) {
     }
 }
 
+/// The options of `--keys MODE`.
+fn parse_keys(mode: &str, args: &[String]) -> Option<input::Options> {
+    let mut options = input::Options {
+        mode: mode.to_owned(),
+        input: String::new(),
+        record: None,
+        hold: HOLD,
+    };
+    let mut args = args.iter();
+    while let Some(flag) = args.next() {
+        let value = args.next()?;
+        match flag.as_str() {
+            "--input" => options.input.clone_from(value),
+            "--record" => options.record = Some(value.clone()),
+            "--hold" => options.hold = Duration::from_secs(value.parse().ok()?),
+            _ => return None,
+        }
+    }
+    (!options.input.is_empty()).then_some(options)
+}
+
+/// `--keys MODE` with the options after it.
+fn keys(mode: &str, args: &[String]) -> ExitCode {
+    let Some(options) = parse_keys(mode, args) else {
+        let _ = writeln!(stderr(), "{USAGE}");
+        return ExitCode::from(2);
+    };
+    match input::record(&options, &mut stdout()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            let _ = writeln!(stderr(), "probe: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args == ["--list"] {
         let names: Vec<&str> = scenes::SCENES.iter().map(|scene| scene.name).collect();
         let _ = writeln!(stdout(), "{}", names.join(" "));
         return ExitCode::SUCCESS;
+    }
+    if let [flag, mode, rest @ ..] = args.as_slice()
+        && flag == "--keys"
+    {
+        return keys(mode, rest);
     }
     let Some(args) = parse(&args) else {
         let _ = writeln!(stderr(), "{USAGE}");
