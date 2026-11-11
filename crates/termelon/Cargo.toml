@@ -1,6 +1,6 @@
 [package]
 name = "termelon"
-description = "A terminal UI framework in pure Rust, from raw mode and input to diffed, synchronized frames"
+description = "A terminal user interface library for Rust."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

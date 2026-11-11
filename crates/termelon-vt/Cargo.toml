@@ -1,6 +1,6 @@
 [package]
 name = "termelon-vt"
-description = "A terminal emulator in a library, for testing what terminal programs write"
+description = "A terminal emulator library for Rust, for testing what terminal programs write."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

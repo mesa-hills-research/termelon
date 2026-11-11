@@ -1,6 +1,7 @@
 # Termelon
 
-A terminal UI framework in pure Rust. It covers the whole stack a full-screen terminal program needs:
+A terminal user interface library for Rust. It covers the whole stack a full-screen terminal program
+needs, in pure Rust:
 
 - terminal setup and raw mode on Linux, macOS and Windows (conhost and Windows Terminal)
 - input, with the kitty keyboard protocol, Windows key records, SGR mouse, bracketed paste and focus
