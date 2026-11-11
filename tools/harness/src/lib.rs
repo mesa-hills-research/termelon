@@ -18,6 +18,10 @@
 //! | WezTerm | `start --always-new-process`, under X | xdotool, bytes with `cli send-text` | `cli get-text --escapes` and `cli list` |
 //! | xterm.js | `@xterm/headless` on `node-pty`, by a node script | bytes only | the buffer, as SGR rows |
 //! | VTE | a `Vte.Terminal` in an offscreen GTK window, by a Python script | GTK key events, bytes with `feed_child` | `get_text_format(HTML)` |
+//! | Alacritty | `--ref-test`, under X | xdotool | `grid.json`, as the window closes |
+//! | Konsole | `--separate --nofork`, under X | xdotool, bytes with D-Bus `sendText` | D-Bus `getAllDisplayedText` |
+//! | foot | `--window-size-chars`, under Wayland | wtype | `pipe-visible` on a key binding |
+//! | Ghostty | the app's binary with flags, on macOS | System Events | `write_screen_file:copy` on a key binding |
 
 pub mod compare;
 pub mod driver;

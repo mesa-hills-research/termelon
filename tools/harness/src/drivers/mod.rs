@@ -1,6 +1,10 @@
 //! One driver per terminal.
 
+pub mod alacritty;
+pub mod foot;
+pub mod ghostty;
 pub mod kitty;
+pub mod konsole;
 pub mod lines;
 pub mod screen;
 pub mod tmux;
@@ -15,8 +19,18 @@ use tuiframe_vt::{Profile, WidthRules};
 use crate::driver::{Driver, Error};
 
 /// The terminals the harness has drivers for.
-pub const TERMINALS: [&str; 7] = [
-    "tmux", "screen", "kitty", "xterm", "wezterm", "xtermjs", "vte",
+pub const TERMINALS: [&str; 11] = [
+    "tmux",
+    "screen",
+    "kitty",
+    "xterm",
+    "wezterm",
+    "xtermjs",
+    "vte",
+    "alacritty",
+    "konsole",
+    "foot",
+    "ghostty",
 ];
 
 /// A driver for a terminal by name.
@@ -37,6 +51,10 @@ pub fn driver(name: &str) -> Result<Box<dyn Driver>, Error> {
         "wezterm" => Box::new(wezterm::Wezterm::new()?),
         "xtermjs" => Box::new(xtermjs::XtermJs::new()?),
         "vte" => Box::new(vte::Vte::new()?),
+        "alacritty" => Box::new(alacritty::Alacritty::new()?),
+        "konsole" => Box::new(konsole::Konsole::new()?),
+        "foot" => Box::new(foot::Foot::new()?),
+        "ghostty" => Box::new(ghostty::Ghostty::new()?),
         _ => return Err(Error::Missing(format!("a driver for {name}"))),
     })
 }
@@ -85,6 +103,35 @@ pub fn profile(name: &str) -> Option<Profile> {
             hyperlinks: true,
             ..Profile::xterm()
         }),
+        "alacritty" => {
+            let mut profile = Profile {
+                name: "alacritty".to_owned(),
+                hyperlinks: true,
+                ..Profile::xterm()
+            };
+            profile.modes.push(2026);
+            Some(profile)
+        }
+        "konsole" => Some(Profile::konsole()),
+        // foot and Ghostty join clusters once a program sets mode 2027, and Ghostty has it on from
+        // the start and widens VS16.
+        "foot" | "ghostty" => {
+            let mut profile = Profile {
+                name: name.to_owned(),
+                hyperlinks: true,
+                kitty_keyboard: true,
+                ..Profile::xterm()
+            };
+            if name == "ghostty" {
+                profile.width = WidthRules {
+                    joins_emoji: true,
+                    vs16_widens: true,
+                    ambiguous_wide: false,
+                };
+            }
+            profile.modes.extend([2026, 2027]);
+            Some(profile)
+        }
         _ => None,
     }
 }
