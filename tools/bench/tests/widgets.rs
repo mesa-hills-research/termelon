@@ -10,15 +10,19 @@
 use ratatui::buffer::Buffer as RBuffer;
 use ratatui::layout::{Alignment as RAlignment, Rect as RRect};
 use ratatui::style::{Color as RColor, Modifier as RModifier, Style as RStyle};
+use ratatui::symbols::border::Set as RSet;
 use ratatui::text::{Line as RLine, Span as RSpan, Text as RText};
-use ratatui::widgets::{Clear as RClear, Widget as RWidget};
+use ratatui::widgets::{
+    Block as RBlock, Borders as RBorders, Clear as RClear, Padding as RPadding,
+    TitlePosition as RTitlePosition, Widget as RWidget,
+};
 use unicode_width::UnicodeWidthStr;
 
 use tuiframe::buffer::Buffer;
 use tuiframe::layout::{Alignment, Rect};
 use tuiframe::style::{Color, Modifier, Style};
 use tuiframe::text::{Line, Span, Text};
-use tuiframe::widgets::{Clear, Widget};
+use tuiframe::widgets::{Block, BorderSet, Borders, Clear, Padding, TitlePosition, Widget};
 
 fn r_color(color: Color) -> RColor {
     match color {
@@ -82,6 +86,19 @@ fn r_text(text: &Text<'_>) -> RText<'static> {
         RText::from(text.lines.iter().map(r_line).collect::<Vec<_>>()).style(r_style(text.style));
     r.alignment = text.alignment.map(r_alignment);
     r
+}
+
+fn r_set(set: BorderSet) -> RSet<'static> {
+    RSet {
+        top_left: set.top_left,
+        top_right: set.top_right,
+        bottom_left: set.bottom_left,
+        bottom_right: set.bottom_right,
+        vertical_left: set.vertical_left,
+        vertical_right: set.vertical_right,
+        horizontal_top: set.horizontal_top,
+        horizontal_bottom: set.horizontal_bottom,
+    }
 }
 
 /// What a terminal shows of a row, cell by cell, with a wide character's covered cells left out.
@@ -313,5 +330,258 @@ fn clear_draws_as_ratatuis() {
         Clear.render(area, &mut a);
         RClear.render(r_rect(area), &mut b);
         same(&a, &b, &area);
+    }
+}
+
+/// One block, to build for both.
+#[derive(Debug, Clone, Default)]
+struct BlockCase {
+    borders: u8,
+    set: BorderSet,
+    titles: Vec<(Option<TitlePosition>, Line<'static>)>,
+    title_style: Style,
+    title_alignment: Alignment,
+    title_position: TitlePosition,
+    border_style: Style,
+    style: Style,
+    padding: Padding,
+}
+
+impl BlockCase {
+    fn ours(&self) -> Block<'static> {
+        let mut block = Block::default()
+            .borders(Borders::from_bits_truncate(self.borders))
+            .border_set(self.set)
+            .border_style(self.border_style)
+            .style(self.style)
+            .title_style(self.title_style)
+            .title_alignment(self.title_alignment)
+            .title_position(self.title_position)
+            .padding(self.padding);
+        for (position, title) in &self.titles {
+            block = match position {
+                None => block.title(title.clone()),
+                Some(TitlePosition::Top) => block.title_top(title.clone()),
+                Some(TitlePosition::Bottom) => block.title_bottom(title.clone()),
+            };
+        }
+        block
+    }
+
+    fn theirs(&self) -> RBlock<'static> {
+        let p = self.padding;
+        let mut block = RBlock::default()
+            .borders(RBorders::from_bits_truncate(self.borders))
+            .border_set(r_set(self.set))
+            .border_style(r_style(self.border_style))
+            .style(r_style(self.style))
+            .title_style(r_style(self.title_style))
+            .title_alignment(r_alignment(self.title_alignment))
+            .title_position(match self.title_position {
+                TitlePosition::Top => RTitlePosition::Top,
+                TitlePosition::Bottom => RTitlePosition::Bottom,
+            })
+            .padding(RPadding::new(p.left, p.right, p.top, p.bottom));
+        for (position, title) in &self.titles {
+            let title = r_line(title);
+            block = match position {
+                None => block.title(title),
+                Some(TitlePosition::Top) => block.title_top(title),
+                Some(TitlePosition::Bottom) => block.title_bottom(title),
+            };
+        }
+        block
+    }
+}
+
+const SETS: [BorderSet; 5] = [
+    BorderSet::PLAIN,
+    BorderSet::ROUNDED,
+    BorderSet::THICK,
+    BorderSet::DOUBLE,
+    BorderSet::ASCII,
+];
+
+const SIZES: [(u16, u16); 9] = [
+    (0, 0),
+    (1, 1),
+    (2, 1),
+    (1, 2),
+    (2, 2),
+    (3, 3),
+    (5, 2),
+    (7, 4),
+    (16, 5),
+];
+
+fn check_block(case: &BlockCase) {
+    for (width, height) in SIZES {
+        let area = Rect::new(1, 1, width, height);
+        let (mut a, mut b) = buffers(18, 7);
+        let (block, r_block) = (case.ours(), case.theirs());
+        let inner = block.inner(area);
+        assert_eq!(
+            r_rect(inner),
+            r_block.inner(r_rect(area)),
+            "{case:#?} {area:?}"
+        );
+        (&block).render(area, &mut a);
+        (&r_block).render(r_rect(area), &mut b);
+        same(&a, &b, &(case, area));
+    }
+}
+
+#[test]
+fn borders_draw_as_ratatuis() {
+    for set in SETS {
+        for borders in 0..16 {
+            check_block(&BlockCase {
+                borders,
+                set,
+                border_style: RED,
+                style: Style::new().fg(Color::White).bg(Color::Black),
+                ..BlockCase::default()
+            });
+        }
+    }
+}
+
+/// The boxes of Arko's overlays and answer panel, a bordered block with a bold title over a
+/// cleared area.
+#[test]
+fn overlay_boxes_draw_as_ratatuis() {
+    let custom = BorderSet::ASCII;
+    for set in [BorderSet::PLAIN, BorderSet::ROUNDED, custom] {
+        for title in [" Keys ", "A question that runs long", ""] {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_set(set)
+                .border_style(Style::new().fg(Color::Reset))
+                .style(
+                    Style::new()
+                        .bg(Color::Rgb(30, 30, 40))
+                        .fg(Color::Rgb(200, 200, 200)),
+                )
+                .title(Line::from(Span::styled(
+                    title,
+                    Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+                )));
+            let r_block = RBlock::default()
+                .borders(RBorders::ALL)
+                .border_set(r_set(set))
+                .border_style(RStyle::new().fg(RColor::Reset))
+                .style(
+                    RStyle::new()
+                        .bg(RColor::Rgb(30, 30, 40))
+                        .fg(RColor::Rgb(200, 200, 200)),
+                )
+                .title(RLine::from(RSpan::styled(
+                    title,
+                    RStyle::new()
+                        .fg(RColor::White)
+                        .add_modifier(RModifier::BOLD),
+                )));
+            for (width, height) in SIZES {
+                let area = Rect::new(1, 1, width, height);
+                let (mut a, mut b) = buffers(18, 7);
+                Clear.render(area, &mut a);
+                RClear.render(r_rect(area), &mut b);
+                assert_eq!(r_rect(block.inner(area)), r_block.inner(r_rect(area)));
+                (&block).render(area, &mut a);
+                (&r_block).render(r_rect(area), &mut b);
+                same(&a, &b, &(title, area));
+            }
+        }
+    }
+}
+
+#[test]
+fn titles_draw_as_ratatuis() {
+    let at = |alignment: Option<Alignment>, text: &'static str, style: Style| {
+        let mut line = Line::from(Span::styled(text, style));
+        line.alignment = alignment;
+        line
+    };
+    let title_sets: Vec<Vec<(Option<TitlePosition>, Line<'static>)>> = vec![
+        vec![(None, at(None, " Title ", BOLD))],
+        vec![
+            (None, at(None, "L1", RED)),
+            (None, at(None, "L2", Style::new())),
+            (None, at(Some(Alignment::Center), "C", BOLD)),
+            (None, at(Some(Alignment::Right), "R1", RED)),
+            (None, at(Some(Alignment::Right), "R2", Style::new())),
+            (Some(TitlePosition::Bottom), at(None, "b", Style::new())),
+            (
+                Some(TitlePosition::Bottom),
+                at(Some(Alignment::Right), "e", RED),
+            ),
+        ],
+        vec![
+            (None, at(Some(Alignment::Center), "abc", RED)),
+            (None, at(Some(Alignment::Center), "defgh", Style::new())),
+            (
+                Some(TitlePosition::Top),
+                at(Some(Alignment::Center), "i", BOLD),
+            ),
+        ],
+        vec![
+            (None, at(None, "a long left title", RED)),
+            (None, at(Some(Alignment::Right), "right", BOLD)),
+        ],
+        vec![
+            (None, at(None, "left", Style::new())),
+            (None, at(Some(Alignment::Right), "a long right title", BOLD)),
+            (
+                Some(TitlePosition::Bottom),
+                at(Some(Alignment::Center), "centre", RED),
+            ),
+        ],
+        vec![(None, at(None, "界界 wide 界", Style::new()))],
+        vec![(None, at(Some(Alignment::Right), "界 wide 界界", RED))],
+        vec![(None, at(Some(Alignment::Center), "界界 wide 界界", RED))],
+        vec![
+            (None, at(None, "", RED)),
+            (None, at(Some(Alignment::Right), "", RED)),
+        ],
+    ];
+    for titles in title_sets {
+        for borders in [0, 0b1111, 0b0101, 0b1010] {
+            for title_alignment in [Alignment::Left, Alignment::Center, Alignment::Right] {
+                for title_position in [TitlePosition::Top, TitlePosition::Bottom] {
+                    check_block(&BlockCase {
+                        borders,
+                        titles: titles.clone(),
+                        title_style: ON_BLUE,
+                        title_alignment,
+                        title_position,
+                        border_style: Style::new().fg(Color::DarkGray),
+                        ..BlockCase::default()
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn padding_draws_as_ratatuis() {
+    for padding in [
+        Padding::ZERO,
+        Padding::uniform(1),
+        Padding::new(1, 2, 0, 3),
+        Padding::horizontal(9),
+        Padding::symmetric(2, 1),
+    ] {
+        for borders in [0, 0b1111, 0b0011] {
+            check_block(&BlockCase {
+                borders,
+                padding,
+                titles: vec![
+                    (None, Line::from("t")),
+                    (Some(TitlePosition::Bottom), Line::from("b")),
+                ],
+                ..BlockCase::default()
+            });
+        }
     }
 }

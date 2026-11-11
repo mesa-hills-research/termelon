@@ -1,29 +1,35 @@
 //! Widgets, which draw themselves into an area of a [`Buffer`].
 //!
 //! [`Widget`] has ratatui's shape, so a widget written for one ports to the other by changing its
-//! imports. Text is a widget (`&str`, `String`, [`Span`], [`Line`] and [`Text`]), and so is
-//! [`Clear`]. Each draws only inside its area and the buffer, and measures text with the buffer's
-//! [`WidthProfile`].
+//! imports. Text is a widget (`&str`, `String`, [`Span`], [`Line`] and [`Text`]), and so are
+//! [`Clear`] and [`Block`]. Each draws only inside its area and the buffer, and measures text
+//! with the buffer's [`WidthProfile`].
 //!
 //! ```
 //! use tuiframe::buffer::Buffer;
 //! use tuiframe::layout::Rect;
-//! use tuiframe::text::Line;
-//! use tuiframe::widgets::{Clear, Widget};
+//! use tuiframe::widgets::{Block, Borders, Clear, Widget};
 //!
-//! let area = Rect::new(0, 0, 8, 1);
+//! let area = Rect::new(0, 0, 12, 3);
 //! let mut buffer = Buffer::empty(area);
-//! "old text".render(area, &mut buffer);
 //! Clear.render(area, &mut buffer);
-//! Line::from("Saved").centered().render(area, &mut buffer);
-//! let row: String = (0..8).map(|x| buffer.symbol((x, 0))).collect();
-//! assert_eq!(row, " Saved  ");
+//! let block = Block::default().borders(Borders::ALL).title(" Notes ");
+//! let inner = block.inner(area);
+//! block.render(area, &mut buffer);
+//! "Saved".render(inner, &mut buffer);
+//!
+//! let row = |y| (0..12).map(|x| buffer.symbol((x, y))).collect::<String>();
+//! assert_eq!(row(0), "┌ Notes ───┐");
+//! assert_eq!(row(1), "│Saved     │");
+//! assert_eq!(row(2), "└──────────┘");
 //! ```
 
+mod block;
 mod clear;
 #[cfg(test)]
 mod tests;
 
+pub use block::{Block, BorderSet, Borders, Padding, TitlePosition};
 pub use clear::Clear;
 
 use crate::buffer::Buffer;
@@ -35,7 +41,7 @@ use crate::text::{self, Line, Span, Text};
 /// Something that draws itself into an area of a buffer.
 ///
 /// A widget is usually built for one frame and consumed by drawing it. Widgets that are worth
-/// keeping implement it for a reference too, as the text types do.
+/// keeping implement it for a reference too, as [`Block`] does.
 ///
 /// ```
 /// use tuiframe::buffer::Buffer;

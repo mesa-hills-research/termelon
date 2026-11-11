@@ -1,7 +1,7 @@
 //! Goldens for each widget, as the rows a terminal would show and the runs of styled cells.
 
 use super::*;
-use crate::style::Color;
+use crate::style::{Color, Modifier};
 
 /// Each row's text, continuation cells left out.
 fn rows(buf: &Buffer) -> Vec<String> {
@@ -73,6 +73,7 @@ fn filled(width: u16, height: u16) -> Buffer {
 
 const RED: Style = Style::new().fg(Color::Red);
 const ON_BLUE: Style = Style::new().bg(Color::Blue);
+const BOLD: Style = Style::new().add_modifier(Modifier::BOLD);
 
 #[test]
 fn strings_write_the_first_row_cut_at_the_width() {
@@ -193,4 +194,231 @@ fn clear_blanks_a_wide_character_across_its_edge_whole() {
     buf.set_string(0, 0, "a界b界", Style::new());
     (&Clear).render(Rect::new(2, 0, 3, 1), &mut buf);
     assert_eq!(rows(&buf), ["a     "]);
+}
+
+#[test]
+fn each_border_set_draws_its_box() {
+    let sets = [
+        (BorderSet::PLAIN, ["┌──┐", "│  │", "└──┘"]),
+        (BorderSet::ROUNDED, ["╭──╮", "│  │", "╰──╯"]),
+        (BorderSet::THICK, ["┏━━┓", "┃  ┃", "┗━━┛"]),
+        (BorderSet::DOUBLE, ["╔══╗", "║  ║", "╚══╝"]),
+        (BorderSet::ASCII, ["+--+", "|  |", "+--+"]),
+    ];
+    for (set, expected) in sets {
+        let buf = draw(4, 3, Block::bordered().border_set(set));
+        assert_eq!(rows(&buf), expected, "{set:?}");
+    }
+    assert_eq!(BorderSet::default(), BorderSet::PLAIN);
+}
+
+#[test]
+fn a_border_set_of_its_own_draws_each_side_with_its_symbol() {
+    let set = BorderSet {
+        top_left: "1",
+        top_right: "2",
+        bottom_left: "3",
+        bottom_right: "4",
+        vertical_left: "l",
+        vertical_right: "r",
+        horizontal_top: "t",
+        horizontal_bottom: "b",
+    };
+    let buf = draw(4, 3, Block::bordered().border_set(set));
+    assert_eq!(rows(&buf), ["1tt2", "l  r", "3bb4"]);
+}
+
+#[test]
+fn borders_draw_only_the_sides_they_name() {
+    let cases = [
+        (Borders::NONE, ["    ", "    ", "    "]),
+        (Borders::TOP, ["────", "    ", "    "]),
+        (Borders::BOTTOM, ["    ", "    ", "────"]),
+        (Borders::LEFT, ["│   ", "│   ", "│   "]),
+        (Borders::RIGHT, ["   │", "   │", "   │"]),
+        (Borders::TOP | Borders::LEFT, ["┌───", "│   ", "│   "]),
+        (Borders::ALL - Borders::TOP, ["│  │", "│  │", "└──┘"]),
+        (Borders::LEFT | Borders::RIGHT, ["│  │", "│  │", "│  │"]),
+    ];
+    for (borders, expected) in cases {
+        let buf = draw(4, 3, Block::new().borders(borders));
+        assert_eq!(rows(&buf), expected, "{borders:?}");
+    }
+}
+
+#[test]
+fn small_areas_draw_corners_over_sides() {
+    assert_eq!(rows(&draw(1, 1, Block::bordered())), ["┌"]);
+    assert_eq!(rows(&draw(2, 1, Block::bordered())), ["┌┐"]);
+    assert_eq!(rows(&draw(1, 2, Block::bordered())), ["┌", "└"]);
+    assert_eq!(rows(&draw(2, 2, Block::bordered())), ["┌┐", "└┘"]);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 2, 2));
+    Block::bordered().render(Rect::new(1, 1, 0, 3), &mut buf);
+    Block::bordered().render(Rect::new(5, 5, 3, 3), &mut buf);
+    assert_eq!(rows(&buf), ["  ", "  "]);
+}
+
+#[test]
+fn the_block_style_goes_under_its_borders() {
+    let block = Block::bordered()
+        .style(Style::new().fg(Color::White).bg(Color::Black))
+        .border_style(RED);
+    let buf = draw(4, 3, block);
+    assert_eq!(
+        styles(&buf),
+        [
+            "0 0..4 fg=Red bg=Black",
+            "1 0..1 fg=Red bg=Black",
+            "1 1..3 fg=White bg=Black",
+            "1 3..4 fg=Red bg=Black",
+            "2 0..4 fg=Red bg=Black",
+        ]
+    );
+}
+
+#[test]
+fn a_block_over_text_keeps_the_text_inside() {
+    let mut buf = filled(5, 3);
+    Block::bordered().render(buf.area(), &mut buf);
+    assert_eq!(rows(&buf), ["┌───┐", "│xxx│", "└───┘"]);
+}
+
+#[test]
+fn a_border_over_a_wide_character_blanks_the_rest_of_it() {
+    let mut buf = Buffer::empty(Rect::new(0, 0, 5, 2));
+    buf.set_string(0, 0, "a界界", Style::new());
+    Block::new()
+        .borders(Borders::LEFT)
+        .render(Rect::new(2, 0, 3, 2), &mut buf);
+    assert_eq!(rows(&buf), ["a │界", "  │  "]);
+}
+
+/// An overlay's box, a bordered block with a bold title over a cleared area.
+#[test]
+fn a_titled_box_draws_over_a_cleared_area() {
+    let mut buf = filled(14, 4);
+    let area = Rect::new(1, 0, 12, 4);
+    Clear.render(area, &mut buf);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(BorderSet::ROUNDED)
+        .border_style(Style::new().fg(Color::DarkGray))
+        .style(Style::new().bg(Color::Indexed(236)).fg(Color::Gray))
+        .title(Line::from(Span::styled(" Keys ", BOLD.fg(Color::White))));
+    let inner = block.inner(area);
+    block.render(area, &mut buf);
+    assert_eq!(inner, Rect::new(2, 1, 10, 2));
+    assert_eq!(
+        rows(&buf),
+        [
+            "x╭ Keys ────╮x",
+            "x│          │x",
+            "x│          │x",
+            "x╰──────────╯x",
+        ]
+    );
+    assert_eq!(
+        styles(&buf),
+        [
+            "0 1..2 fg=DarkGray bg=Indexed(236)",
+            "0 2..8 fg=White bg=Indexed(236) Modifier(BOLD)",
+            "0 8..13 fg=DarkGray bg=Indexed(236)",
+            "1 1..2 fg=DarkGray bg=Indexed(236)",
+            "1 2..12 fg=Gray bg=Indexed(236)",
+            "1 12..13 fg=DarkGray bg=Indexed(236)",
+            "2 1..2 fg=DarkGray bg=Indexed(236)",
+            "2 2..12 fg=Gray bg=Indexed(236)",
+            "2 12..13 fg=DarkGray bg=Indexed(236)",
+            "3 1..13 fg=DarkGray bg=Indexed(236)",
+        ]
+    );
+}
+
+#[test]
+fn titles_sit_left_in_the_middle_or_right_on_either_border() {
+    let block = Block::bordered()
+        .title("L1")
+        .title("L2")
+        .title(Line::from("C").centered())
+        .title(Line::from("R1").right_aligned())
+        .title(Line::from("R2").right_aligned())
+        .title_bottom("b")
+        .title_bottom(Line::from("e").right_aligned());
+    let buf = draw(16, 3, block);
+    assert_eq!(
+        rows(&buf),
+        ["┌L1─L2─C──R1─R2┐", "│              │", "└b────────────e┘"]
+    );
+}
+
+#[test]
+fn the_title_position_and_alignment_set_the_default_place() {
+    let block = Block::bordered()
+        .title_position(TitlePosition::Bottom)
+        .title_alignment(Alignment::Center)
+        .title("mid")
+        .title_top(Line::from("top").left_aligned());
+    let buf = draw(9, 3, block);
+    assert_eq!(rows(&buf), ["┌top────┐", "│       │", "└──mid──┘"]);
+}
+
+#[test]
+fn titles_without_borders_take_their_row_and_the_inner_area_skips_it() {
+    let block = Block::new().title("t").title_bottom("b");
+    assert_eq!(block.inner(Rect::new(0, 0, 3, 4)), Rect::new(0, 1, 3, 2));
+    assert_eq!(rows(&draw(3, 4, block)), ["t  ", "   ", "   ", "b  "]);
+}
+
+#[test]
+fn titles_too_long_for_the_border_are_cut() {
+    let left = Block::bordered().title("abcdef").title("gh");
+    assert_eq!(rows(&draw(6, 2, left))[0], "┌abcd┐");
+    let right = Block::bordered()
+        .title(Line::from("abcdef").right_aligned())
+        .title(Line::from("gh").right_aligned());
+    assert_eq!(rows(&draw(6, 2, right))[0], "┌f─gh┐");
+    let centre = Block::bordered()
+        .title(Line::from("abc").centered())
+        .title(Line::from("def").centered());
+    assert_eq!(rows(&draw(6, 2, centre))[0], "┌bc─d┐");
+}
+
+#[test]
+fn the_title_style_goes_under_each_title() {
+    let block = Block::bordered()
+        .title_style(ON_BLUE)
+        .title(Line::from(Span::styled("ab", RED)));
+    let buf = draw(5, 2, block);
+    assert_eq!(styles(&buf), ["0 1..3 fg=Red bg=Blue"]);
+}
+
+#[test]
+fn padding_shrinks_the_inner_area() {
+    let area = Rect::new(2, 1, 10, 6);
+    let block = Block::bordered().padding(Padding::new(1, 2, 0, 1));
+    assert_eq!(block.inner(area), Rect::new(4, 2, 5, 3));
+    assert_eq!(
+        Block::new().padding(Padding::uniform(9)).inner(area),
+        Rect::new(11, 10, 0, 0)
+    );
+    assert_eq!(Padding::symmetric(1, 2), Padding::new(1, 1, 2, 2));
+    assert_eq!(Padding::vertical(3), Padding::new(0, 0, 3, 3));
+    assert_eq!(
+        Block::bordered().inner(Rect::new(0, 0, 1, 1)),
+        Rect::new(1, 1, 0, 0)
+    );
+    assert_eq!(Block::default(), Block::new());
+}
+
+#[test]
+fn borders_combine_as_flags() {
+    assert_eq!(
+        Borders::ALL,
+        Borders::TOP | Borders::RIGHT | Borders::BOTTOM | Borders::LEFT
+    );
+    assert_eq!(format!("{:?}", Borders::NONE), "Borders(NONE)");
+    assert_eq!(
+        format!("{:?}", Borders::TOP | Borders::LEFT),
+        "Borders(TOP | LEFT)"
+    );
 }
