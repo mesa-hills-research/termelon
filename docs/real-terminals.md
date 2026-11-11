@@ -41,6 +41,33 @@ Alacritty reports its screen only as its window closes, so a readback ends the p
 driver reads once after the program has had a moment to draw. xterm.js takes keys only as browser
 events, so its driver sends bytes, and mouse events through xterm.js's own mouse service.
 
+## Keys and mouse
+
+`keys` runs the probe as `probe --keys MODE`, which turns the mode on, shows a marker and saves
+every byte it reads. The harness presses a fixed list of keys and mouse events through the
+terminal's own encoder, with a `|` after each, and holds what the terminal sent against what
+`tuiframe-vt` sends under that terminal's profile. The modes are `legacy`, `disambiguate` (the
+kitty keyboard protocol's flag 1) and `modify-other-keys` (xterm's level 2). Mouse events go in
+the legacy mode alone, since the keyboard modes leave them as they are.
+
+```sh
+target/debug/harness keys tmux --probe target/debug/probe --out harness-out
+```
+
+| Terminal | Keys | Mouse |
+|---|---|---|
+| tmux | `send-keys`, all but ctrl+backspace, which tmux 3.6 has no name for | none |
+| GNU screen | the tmux pane's `send-keys`, all but ctrl+backspace and ctrl+a, screen's command key | none |
+| VTE | GTK key events | GTK button and scroll events |
+| xterm.js | none, since it takes keys as browser events | its mouse service |
+
+The other drivers press keys with the tools in the table above, and make no mouse events.
+
+Each terminal, version and mode has a fixture in `crates/tuiframe/tests/fixtures/input`, with a
+line per event and the bytes in hex. `keys` names every change since the fixture, and `--update`
+writes it again. The decoder's tests decode each fixture, and the `decoded.txt` beside it lists
+the events that decode as another, such as ctrl+1, which these terminals send as `1`.
+
 Under X, start Xvfb first and set `DISPLAY`, and for foot a headless sway and `WAYLAND_DISPLAY`, as
 `.github/workflows/terminals.yml` does. Screenshots
 are taken with ImageMagick's `import` where it's installed. They're for a person to look at, and

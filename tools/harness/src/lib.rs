@@ -26,10 +26,12 @@
 pub mod compare;
 pub mod driver;
 pub mod drivers;
+pub mod input;
 pub mod json;
 pub mod keys;
 pub mod readback;
 pub mod run;
+pub mod script;
 
 pub use compare::{Mismatch, compare};
 pub use driver::{Attributes, Colors, Driver, Error, Launch, Readback, Reports};

@@ -162,6 +162,13 @@ impl Driver for Screen {
     }
 
     fn send_keys(&mut self, keys: &[(Key, Mods)]) -> Result<(), Error> {
+        // ctrl+a is screen's command key, which starts a command rather than reaching the program.
+        if keys
+            .iter()
+            .any(|&(key, mods)| key == Key::Char('a') && mods.contains(Mods::CTRL))
+        {
+            return Err(Error::Unsupported("send ctrl+a, its command key"));
+        }
         self.outer.send_keys(keys)
     }
 

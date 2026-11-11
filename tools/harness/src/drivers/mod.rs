@@ -14,7 +14,7 @@ pub mod x11;
 pub mod xterm;
 pub mod xtermjs;
 
-use tuiframe_vt::{Profile, WidthRules};
+use tuiframe_vt::{KeyEncoding, Profile, WidthRules};
 
 use crate::driver::{Driver, Error};
 
@@ -64,12 +64,15 @@ pub fn profile(name: &str) -> Option<Profile> {
     match name {
         "tmux" => Some(Profile::tmux_3_4()),
         // screen erases without the background colour and keeps no alternate screen or links
-        // with its default options.
+        // with its default options. It sends Home and End as tmux does, and ignores
+        // modifyOtherKeys.
         "screen" => {
             let mut profile = Profile {
                 name: "screen".to_owned(),
                 bce: false,
                 hyperlinks: false,
+                modify_other_keys: false,
+                keys: KeyEncoding::Tmux,
                 ..Profile::xterm()
             };
             profile
@@ -98,9 +101,11 @@ pub fn profile(name: &str) -> Option<Profile> {
             hyperlinks: true,
             ..Profile::xterm()
         }),
+        // VTE ignores modifyOtherKeys and sends its legacy keys.
         "vte" => Some(Profile {
             name: "vte".to_owned(),
             hyperlinks: true,
+            modify_other_keys: false,
             ..Profile::xterm()
         }),
         "alacritty" => {
