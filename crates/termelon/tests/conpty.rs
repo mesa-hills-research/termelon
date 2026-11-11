@@ -245,6 +245,8 @@ mod tests {
             assert_eq!(next(&terminal), Event::Resize(Size::new(100, 30)));
             assert_eq!(terminal.size(), Size::new(100, 30));
             say(&mut terminal, "done");
+            // (Closing goes back to the main screen, so the terminal looks before it lets go.)
+            assert_eq!(next(&terminal), key(KeyCode::Char('q'), KeyModifiers::NONE));
             terminal.close().unwrap();
             return;
         }
@@ -256,6 +258,7 @@ mod tests {
         }
         played.resize(Size::new(100, 30));
         played.until_shown("done");
+        played.key(Key::Char('q'), Mods::NONE);
         played.finish();
     }
 
