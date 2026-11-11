@@ -156,7 +156,7 @@ mod unix {
     use crate::layout::Rect;
     use crate::layout::Size;
     use crate::output::encode::Encoder;
-    use crate::output::{CompletedFrame, Cursor};
+    use crate::output::{CompletedFrame, Cursor, CursorShape};
     use crate::restore::screen::Screen;
     use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
     use crate::sys::unix::{Signals, Tty, window_size};
@@ -305,6 +305,7 @@ mod unix {
             let mut frame = Frame::new(&mut self.back, None);
             render(&mut frame);
             let cursor = frame.into_cursor();
+            note_shape(&mut self.enabled, &self.caps, &self.screen, cursor);
             let full = self.screen.shared().take_redraw();
             if full {
                 self.encoder.redraw();
@@ -369,6 +370,7 @@ mod unix {
             let mut frame = Frame::new(&mut self.front, self.cursor);
             render(&mut frame);
             let cursor = frame.into_cursor();
+            note_shape(&mut self.enabled, &self.caps, &self.screen, cursor);
             self.front.clear_clip();
             let mut packet = writer.spare_buffer();
             let stats = self.encoder.encode_regions(
@@ -567,6 +569,21 @@ mod unix {
         Ok(window_size(tty.output.as_fd())?.cells)
     }
 
+    /// Makes the reset put the cursor's default shape back once a frame asks for another, and not
+    /// before, since the shape the user's shell set is theirs.
+    fn note_shape(
+        enabled: &mut Enabled,
+        caps: &Capabilities,
+        screen: &Screen,
+        cursor: Option<Cursor>,
+    ) {
+        let shaped = cursor.is_some_and(|cursor| cursor.shape != CursorShape::Default);
+        if shaped && !enabled.cursor_shape && caps.cursor_shape != Support::No {
+            enabled.cursor_shape = true;
+            screen.set_enabled(enabled);
+        }
+    }
+
     /// Writes `queries` and waits at most `timeout` for the replies, which DA1's ends. The decoder
     /// first learns of `cursor_reports` cursor reports to expect.
     fn ask(
@@ -611,7 +628,8 @@ mod unix {
             keyboard: keyboard.filter(|flags| *flags != 0),
             save_title: options.save_title && has(caps.title_stack),
             hyperlinks: caps.hyperlinks == Support::Yes,
-            cursor_shape: has(caps.cursor_shape),
+            // (Until a frame asks for a shape.)
+            cursor_shape: false,
         }
     }
 }

@@ -702,3 +702,72 @@ fn the_tail_follows_the_reset_on_the_main_screen() {
     assert_eq!(emulator.row_text(0).as_deref(), Some("one"));
     assert_eq!(emulator.row_text(1).as_deref(), Some("two"));
 }
+
+/// The cursor's shape is the user's until a frame asks for another, so neither a redraw nor the
+/// reset sends the default before then, and the reset puts the default back after.
+#[test]
+fn the_cursor_keeps_the_users_shape_until_a_frame_sets_one() {
+    use crate::output::writer::tests::block_on;
+    use crate::output::{Cursor, CursorShape};
+    let pty = Pty::open(Size::new(80, 24));
+    let (mut read, write) = std::io::pipe().unwrap();
+    let write = std::os::fd::OwnedFd::from(write);
+    let caps = Capabilities {
+        cursor_shape: Support::Yes,
+        ..Capabilities::default()
+    };
+    let options = Options {
+        capabilities: Some(caps),
+        ..Options::default()
+    };
+    let shown = Arc::new(Mutex::new(Vec::new()));
+    let reading = {
+        let shown = shown.clone();
+        std::thread::spawn(move || {
+            let mut buffer = [0; 4096];
+            while let Ok(count) = read.read(&mut buffer) {
+                if count == 0 {
+                    return;
+                }
+                lock(&shown).extend_from_slice(&buffer[..count]);
+            }
+        })
+    };
+    let run = |shape: Option<CursorShape>| {
+        let tty = Tty {
+            input: pty.slave.try_clone().unwrap(),
+            output: write.try_clone().unwrap(),
+        };
+        let (signals, _resize, _resume) = Signals::unregistered().unwrap();
+        let mut terminal = Terminal::open_on(tty, options.clone(), &Vars(&[]), signals).unwrap();
+        for _ in 0..2 {
+            assert!(block_on(terminal.written(), LONG));
+            terminal.clear();
+            let drawn = terminal.draw(|frame| {
+                frame.set_cursor(Some(Cursor {
+                    shape: shape.unwrap_or_default(),
+                    ..Cursor::at((1, 1).into())
+                }));
+            });
+            assert!(matches!(drawn, Ok(Drawn::Written(_))));
+        }
+        terminal.close().unwrap();
+    };
+    run(None);
+    std::thread::sleep(Duration::from_millis(50));
+    let unshaped = lock(&shown).split_off(0);
+    assert!(find(&unshaped, b"\x1b[?25h").is_some());
+    assert_eq!(
+        find(&unshaped, b" q"),
+        None,
+        "{:?}",
+        String::from_utf8_lossy(&unshaped)
+    );
+    run(Some(CursorShape::Bar));
+    std::thread::sleep(Duration::from_millis(50));
+    let shaped = lock(&shown).split_off(0);
+    let bar = find(&shaped, b"\x1b[6 q").expect("the bar");
+    assert!(find(&shaped[bar..], b"\x1b[0 q").is_some());
+    drop(write);
+    reading.join().unwrap();
+}
