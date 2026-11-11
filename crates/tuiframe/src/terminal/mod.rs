@@ -101,6 +101,10 @@ pub struct Options {
     /// the program as it would have. Off by default, since a program usually has its own policy
     /// for these. Once the terminal closes, they act as they did before.
     pub restore_on_signals: bool,
+    /// Keeps a record of every byte the terminal is sent, the setup, the probe, each frame and the
+    /// out-of-band commands, in order, for [`Terminal::take_written`]. Off by default, and it costs
+    /// nothing then.
+    pub record_output: bool,
 }
 
 impl Default for Options {
@@ -117,6 +121,7 @@ impl Default for Options {
             capabilities: None,
             panic_hook: true,
             restore_on_signals: false,
+            record_output: false,
         }
     }
 }
@@ -153,6 +158,8 @@ builders! {
     panic_hook: bool,
     /// Sets [`restore_on_signals`](Options::restore_on_signals).
     restore_on_signals: bool,
+    /// Sets [`record_output`](Options::record_output).
+    record_output: bool,
 }
 
 impl Options {
@@ -398,6 +405,7 @@ mod platform {
         /// Asks the terminal on `screen` what it supports, turns on what `options` ask for, and
         /// makes the terminal the program has.
         fn start(screen: Screen, options: Options, env: &dyn Environment) -> Result<Self> {
+            screen.writer().record(options.record_output);
             let overrides = env.var("TUIFRAME_CAPS");
             let hints = caps::env::hints(env);
             let probe_timeout = options.probe_timeout.unwrap_or(if hints.ssh {
@@ -736,6 +744,13 @@ mod platform {
                 .writer()
                 .failure()
                 .map(|failure| io::Error::from(failure).kind())
+        }
+
+        /// The bytes the terminal took since open or the last call, in order, where
+        /// [`Options::record_output`] is on, and none otherwise. A frame is in it once the
+        /// terminal took it, which [`written`](Self::written) waits for.
+        pub fn take_written(&mut self) -> Vec<u8> {
+            self.screen.writer().take_recorded()
         }
 
         /// How long the terminal has kept the write going on waiting, for a program that tells

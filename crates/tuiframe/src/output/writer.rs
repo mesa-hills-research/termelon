@@ -150,6 +150,8 @@ struct State {
     wakers: Vec<Waker>,
     /// Out-of-band commands that go with the next packet the writer takes, one of each kind.
     held: Vec<(Hold, Vec<u8>)>,
+    /// What the writer wrote, in order, while it keeps a record.
+    record: Option<Vec<u8>>,
 }
 
 /// An out-of-band command that waits for the next packet, where a later one of its kind replaces
@@ -286,6 +288,7 @@ impl Writer {
                 failed: None,
                 wakers: Vec::new(),
                 held: Vec::new(),
+                record: None,
             }),
             changed: Condvar::new(),
             record: Arc::new(Record {
@@ -385,6 +388,26 @@ impl Writer {
         }
         self.shared.changed.notify_all();
         Ok(())
+    }
+
+    /// Keeps a record of what the writer writes from now on, or stops keeping one.
+    pub(crate) fn record(&self, on: bool) {
+        let mut state = lock(&self.shared.state);
+        if on {
+            state.record.get_or_insert_with(Vec::new);
+        } else {
+            state.record = None;
+        }
+    }
+
+    /// What the writer wrote since the record started or was last taken, empty while it keeps
+    /// none.
+    pub(crate) fn take_recorded(&self) -> Vec<u8> {
+        lock(&self.shared.state)
+            .record
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     /// A written packet's buffer, emptied, or a new one, so a frame reuses it rather than
@@ -753,7 +776,11 @@ fn write_all(shared: &Weak<Shared>, mut out: impl Write) {
 fn write_chunks(shared: &Shared, out: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
     for chunk in bytes.chunks(CHUNK) {
         out.write_all(chunk)?;
-        if lock(&shared.state).taken_over {
+        let mut state = lock(&shared.state);
+        if let Some(record) = &mut state.record {
+            record.extend_from_slice(chunk);
+        }
+        if state.taken_over {
             break;
         }
     }
@@ -1311,6 +1338,26 @@ pub(crate) mod tests {
         assert_eq!(first.join().unwrap(), Direct::Written);
         assert_eq!(direct, Direct::TimedOut);
         assert!(waited < Duration::from_millis(400), "it waited {waited:?}");
+    }
+
+    /// The record holds what was written, in order, once it's on, and nothing while it's off.
+    #[test]
+    fn the_record_holds_what_was_written() {
+        let gate = Gate::default();
+        let writer = Writer::spawn(gate.clone(), b"[reset]".to_vec()).unwrap();
+        writer.send(b"[before]".to_vec()).unwrap();
+        assert!(writer.wait_idle(LONG));
+        assert!(writer.take_recorded().is_empty());
+        writer.record(true);
+        writer.send(b"[frame]".to_vec()).unwrap();
+        writer.hold(Hold::Bell, b"[bell]".to_vec()).unwrap();
+        assert!(writer.wait_idle(LONG));
+        assert_eq!(writer.take_recorded(), b"[frame][bell]");
+        let (ticket, _) = writer.close(b"[tail]");
+        assert_eq!(writer.wait(ticket, LONG), Finish::Written);
+        assert_eq!(writer.take_recorded(), b"[reset][tail]");
+        writer.record(false);
+        assert!(writer.take_recorded().is_empty());
     }
 
     /// Out-of-band commands held while the terminal is busy go with the next packet the writer

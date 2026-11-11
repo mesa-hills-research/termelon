@@ -991,3 +991,46 @@ fn open_installs_the_panic_hook() {
     );
     assert_eq!(pty.modes(), before);
 }
+
+/// With the record on, the bytes the terminal took come out in order, and replayed through
+/// another emulator they give the same screen.
+#[test]
+fn the_record_replays_to_the_same_screen() {
+    use crate::style::Style;
+    let (played, signals) = Played::new(Profile::kitty());
+    let mut terminal = open(
+        &played,
+        signals,
+        &[],
+        &Options::default().record_output(true),
+    );
+    wait_until_written(&terminal);
+    let drawn = terminal.draw(|frame| {
+        frame
+            .buffer_mut()
+            .set_string(2, 1, "recorded", Style::new());
+        frame.set_cursor_position((4, 3));
+    });
+    assert!(matches!(drawn, Ok(Drawn::Written(_))));
+    terminal.set_title("title").unwrap();
+    wait_until_written(&terminal);
+    let written = terminal.take_written();
+    let mut replayed = Emulator::with_profile(Profile::kitty(), 80, 24);
+    replayed.feed(&written).unwrap();
+    played.until("drawn", |emulator| {
+        emulator.row_text(1).as_deref() == Some("  recorded")
+    });
+    {
+        let emulator = lock(&played.emulator);
+        assert_eq!(replayed.rows(), emulator.rows());
+        assert_eq!(replayed.cursor(), emulator.cursor());
+        assert_eq!(replayed.title(), "title");
+    }
+    assert!(terminal.take_written().is_empty());
+    terminal.close().unwrap();
+    let (unrecorded, signals) = Played::new(Profile::kitty());
+    let mut terminal = open(&unrecorded, signals, &[], &Options::default());
+    wait_until_written(&terminal);
+    assert!(terminal.take_written().is_empty());
+    terminal.close().unwrap();
+}
