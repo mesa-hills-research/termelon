@@ -3,8 +3,9 @@
 //!
 //! The probe runs as `probe --keys MODE --input FILE --record FILE`. It turns the mode on, shows
 //! `probe-keys:ready`, and saves every byte it reads. The harness presses each event and then a
-//! `|`, which no event in the script sends, so the bytes split into one piece per event however
-//! the terminal's writes come. A fixture keeps the pieces, a line per event with its name
+//! `/`, which no event in the script sends and a US keyboard types without Shift, so it comes as
+//! itself in every mode, and the bytes split into one piece per event however the terminal's
+//! writes come. A fixture keeps the pieces, a line per event with its name
 //! and the bytes in hex, for the decoder's tests in `crates/termelon`.
 
 use std::fmt::Write as _;
@@ -26,7 +27,7 @@ pub const READY: &str = "probe-keys:ready";
 pub const MODES: [&str; 3] = ["legacy", "disambiguate", "modify-other-keys"];
 
 /// What the harness sends after each event.
-const SEPARATOR: u8 = b'|';
+const SEPARATOR: u8 = b'/';
 
 /// How long the terminal may take to send everything.
 const INPUT_TIMEOUT: Duration = Duration::from_secs(10);
