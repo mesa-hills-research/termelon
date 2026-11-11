@@ -46,12 +46,7 @@ impl Wezterm {
             .socket
             .as_ref()
             .ok_or(Error::Missing("a running WezTerm".to_owned()))?;
-        let mut command = clean_command("wezterm");
-        command
-            .env("XDG_RUNTIME_DIR", &self.dir)
-            .env("WEZTERM_UNIX_SOCKET", socket)
-            .arg("cli");
-        Ok(command)
+        Ok(cli(&self.dir, socket))
     }
 
     /// The window's socket, once WezTerm has made it.
@@ -66,6 +61,17 @@ impl Wezterm {
             })
             .ok_or_else(|| Error::Missing("WezTerm's socket".to_owned()))
     }
+}
+
+/// A `wezterm cli` command for the window listening on `socket`. It never starts a server of its
+/// own, which it would do where the window doesn't answer.
+pub fn cli(runtime_dir: &Path, socket: &Path) -> Command {
+    let mut command = clean_command("wezterm");
+    command
+        .env("XDG_RUNTIME_DIR", runtime_dir)
+        .env("WEZTERM_UNIX_SOCKET", socket)
+        .args(["cli", "--no-auto-start"]);
+    command
 }
 
 /// The command line that starts WezTerm at a size, with no update check, no close prompt, no tab
@@ -142,8 +148,13 @@ impl Driver for Wezterm {
         x11::require_display()?;
         let mut child = x11::spawn(start_command(launch, &self.dir), &self.dir)?;
         let pid = child.id();
-        let ready = x11::wait_until(&mut child, || {
-            Ok((self.find_socket()?, x11::window_of(pid).ok()))
+        // The socket's file comes before the window listens on it.
+        let ready = x11::wait_until(&mut child, &self.dir, || {
+            let socket = self.find_socket()?;
+            let mut list = cli(&self.dir, &socket);
+            list.args(["list", "--format", "json"]);
+            run(&mut list)?;
+            Ok((socket, Some(x11::window_of(pid)?)))
         });
         self.child = Some(child);
         let (socket, window) = ready?;

@@ -277,7 +277,7 @@ impl Driver for Alacritty {
         )?;
         let pid = child.id();
         let pid_file = self.pid_file();
-        let ready = x11::wait_until(&mut child, || {
+        let ready = x11::wait_until(&mut child, &self.dir, || {
             std::fs::read_to_string(&pid_file)
                 .map_err(|error| Error::Io("the pid file".to_owned(), error))
         });

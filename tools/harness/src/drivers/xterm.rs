@@ -158,7 +158,7 @@ impl Driver for Xterm {
         let _ = std::fs::remove_file(&tty_file);
         let mut child = x11::spawn(start_command(launch, &self.dir, &tty_file), &self.dir)?;
         let pid = child.id();
-        let ready = x11::wait_until(&mut child, || {
+        let ready = x11::wait_until(&mut child, &self.dir, || {
             let tty = std::fs::read_to_string(&tty_file)
                 .map_err(|error| Error::Io("the tty file".to_owned(), error))?;
             let window = x11::window_of(pid)?;

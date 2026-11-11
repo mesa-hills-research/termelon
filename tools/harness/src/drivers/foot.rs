@@ -151,7 +151,7 @@ impl Driver for Foot {
         let mut child = x11::spawn(start_command(launch, &config_file), &self.dir)?;
         self.size = Some((launch.cols, launch.rows));
         // foot has no way to say it's up, so the first readback waits for the window.
-        let ready = x11::wait_until(&mut child, || {
+        let ready = x11::wait_until(&mut child, &self.dir, || {
             self.read_once(Duration::from_millis(500)).map(drop)
         });
         self.child = Some(child);

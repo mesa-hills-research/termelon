@@ -115,7 +115,7 @@ impl Driver for Kitty {
         self.stop()?;
         x11::require_display()?;
         let mut child = x11::spawn(start_command(launch, &self.socket()), &self.dir)?;
-        let ready = x11::wait_until(&mut child, || {
+        let ready = x11::wait_until(&mut child, &self.dir, || {
             let mut command = self.kitten();
             command.arg("ls");
             run(&mut command)

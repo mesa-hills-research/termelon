@@ -47,13 +47,15 @@ pub fn spawn(mut command: Command, dir: &Path) -> Result<Child, Error> {
     command.spawn().map_err(|error| Error::Io(described, error))
 }
 
-/// Polls `ready` every 100 ms until it succeeds or `START_TIMEOUT` passes.
+/// Polls `ready` every 100 ms until it succeeds or `START_TIMEOUT` passes. `dir` is where
+/// [`spawn`] put the terminal's log, whose end goes into the error.
 ///
 /// # Errors
 ///
-/// The last error, when time runs out or the terminal ends.
+/// When the terminal ends, or when time runs out, with the last error.
 pub fn wait_until<T>(
     child: &mut Child,
+    dir: &Path,
     mut ready: impl FnMut() -> Result<T, Error>,
 ) -> Result<T, Error> {
     let deadline = Instant::now() + START_TIMEOUT;
@@ -66,14 +68,27 @@ pub fn wait_until<T>(
             return Err(Error::Failed {
                 command: "the terminal".to_owned(),
                 status: status.to_string(),
-                stderr: String::new(),
+                stderr: log_tail(dir),
             });
         }
         if Instant::now() >= deadline {
-            return Err(error);
+            let log = log_tail(dir);
+            if log.trim().is_empty() {
+                return Err(error);
+            }
+            return Err(Error::Parse(format!(
+                "{error}, and the terminal's log ends {log:?}"
+            )));
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+/// The last 2000 bytes of the log [`spawn`] keeps in `dir`.
+pub fn log_tail(dir: &Path) -> String {
+    let log = std::fs::read(dir.join("terminal.log")).unwrap_or_default();
+    let start = log.len().saturating_sub(2000);
+    String::from_utf8_lossy(&log[start..]).into_owned()
 }
 
 /// The X window of a process, from xdotool.

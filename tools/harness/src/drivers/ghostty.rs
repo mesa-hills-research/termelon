@@ -170,7 +170,7 @@ impl Driver for Ghostty {
         self.stop()?;
         let mut child = x11::spawn(start_command(&self.binary, launch), &self.dir)?;
         self.size = Some((launch.cols, launch.rows));
-        let ready = x11::wait_until(&mut child, || {
+        let ready = x11::wait_until(&mut child, &self.dir, || {
             self.read_once(Duration::from_secs(1)).map(drop)
         });
         self.child = Some(child);

@@ -90,8 +90,8 @@ pub fn run_scene(
         "--size",
         &size,
     ];
-    driver.start(&Launch::new(cols, rows, &args))?;
-    let result = driver.wait_for(&marker(scene), SCENE_TIMEOUT);
+    let started = driver.start(&Launch::new(cols, rows, &args));
+    let result = started.and_then(|()| driver.wait_for(&marker(scene), SCENE_TIMEOUT));
     let screenshot = out.join(format!("{stem}.png"));
     let screenshot = match driver.screenshot(&screenshot) {
         Ok(true) => Some(screenshot),

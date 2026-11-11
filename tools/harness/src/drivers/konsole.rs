@@ -55,21 +55,27 @@ impl Konsole {
             .as_ref()
             .ok_or(Error::Missing("a running Konsole".to_owned()))?
             .id();
-        let mut command = clean_command("gdbus");
-        command.args([
-            "call",
-            "--session",
-            "--dest",
-            &format!("org.kde.konsole-{pid}"),
-            "--object-path",
-            "/Sessions/1",
-        ]);
-        command
-            .arg("--method")
-            .arg(format!("org.kde.konsole.Session.{method}"))
-            .args(args);
-        Ok(String::from_utf8_lossy(&run(&mut command)?).into_owned())
+        call(pid, method, args)
     }
+}
+
+/// A call to a method of the first session of the Konsole with process id `pid`, with GVariant
+/// arguments.
+fn call(pid: u32, method: &str, args: &[&str]) -> Result<String, Error> {
+    let mut command = clean_command("gdbus");
+    command.args([
+        "call",
+        "--session",
+        "--dest",
+        &format!("org.kde.konsole-{pid}"),
+        "--object-path",
+        "/Sessions/1",
+    ]);
+    command
+        .arg("--method")
+        .arg(format!("org.kde.konsole.Session.{method}"))
+        .args(args);
+    Ok(String::from_utf8_lossy(&run(&mut command)?).into_owned())
 }
 
 /// The command line that starts Konsole at a size, in a process of its own.
@@ -214,23 +220,12 @@ impl Driver for Konsole {
             .map_err(|error| Error::Io(config.display().to_string(), error))?;
         std::fs::write(config.join("konsolerc"), KONSOLERC)
             .map_err(|error| Error::Io("konsolerc".to_owned(), error))?;
-        let child = x11::spawn(start_command(launch, &config), &self.dir)?;
+        let mut child = x11::spawn(start_command(launch, &config), &self.dir)?;
         let pid = child.id();
+        let ready = x11::wait_until(&mut child, &self.dir, || {
+            call(pid, "getAllDisplayedText", &[]).map(drop)
+        });
         self.child = Some(child);
-        let ready = {
-            let probe = || self.call("getAllDisplayedText", &[]).map(drop);
-            let mut tries = 0;
-            loop {
-                match probe() {
-                    Ok(()) => break Ok(()),
-                    Err(error) if tries >= 200 => break Err(error),
-                    Err(_) => {
-                        tries += 1;
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                }
-            }
-        };
         ready?;
         self.window = x11::window_of(pid).ok();
         self.size = Some((launch.cols, launch.rows));
