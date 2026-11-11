@@ -1,6 +1,7 @@
 //! Round trips through tuiframe-vt's encoders. Each profile's emulator, in each mode a program can
-//! set, encodes every key with every modifier, and the decoder gives back the key. Where an encoding
-//! can't carry a modifier or an event type, the expectation drops it, as `legacy` spells out.
+//! set, encodes every key with every modifier, and the decoder gives back the key. Where an
+//! encoding can't carry a modifier or an event type, the expectation drops it, as `legacy` spells
+//! out.
 
 use tuiframe_vt::{Emulator, Key, KeyEncoding, KeyKind, Mods, Mouse, MouseKind, Profile};
 
@@ -135,6 +136,17 @@ fn code(key: Key, mods: Mods) -> KeyCode {
     }
 }
 
+/// The key code a key sent with its modifiers as a parameter decodes to, where a letter held with
+/// Ctrl or Alt stays lowercase, as crossterm gives it.
+fn parameterized_code(key: Key, mods: Mods) -> KeyCode {
+    match key {
+        Key::Char(c) if mods.intersects(Mods::CTRL | Mods::ALT) && c.is_alphabetic() => {
+            KeyCode::Char(c)
+        }
+        other => code(other, mods),
+    }
+}
+
 /// The C0 byte xterm sends for Ctrl with a character.
 fn control_byte(c: char) -> Option<u8> {
     match c {
@@ -249,8 +261,11 @@ fn every_key_and_modifier_under_each_profile() {
                                 (true, KeyKind::Release) => KeyEventKind::Release,
                                 _ => KeyEventKind::Press,
                             };
-                            let event =
-                                KeyEvent::new_with_kind(code(key, mods), modifiers(mods), kind);
+                            let event = KeyEvent::new_with_kind(
+                                parameterized_code(key, mods),
+                                modifiers(mods),
+                                kind,
+                            );
                             Decoded::Event(Event::Key(event))
                         } else {
                             legacy(key, mods)

@@ -105,7 +105,10 @@ impl KeyEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum KeyCode {
-    /// A key that types a character, as it types it with the modifiers held (`'A'` with Shift).
+    /// A key that types a character, as it types it with Shift held (`'A'` with Shift). With Ctrl
+    /// or Alt held as well, the kitty keyboard protocol and modifyOtherKeys give a letter
+    /// lowercase, as crossterm does, so a `Char('c')` arm with Ctrl takes Ctrl+Shift+C there as it
+    /// does where the terminal sends 0x03 for both.
     Char(char),
     /// Enter, or Return.
     Enter,

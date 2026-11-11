@@ -26,6 +26,10 @@ pub(crate) struct DecoderOptions {
     /// The most bytes of a paste held at once, 64 MiB by default. A longer paste arrives as
     /// several [`Event::Paste`]s of about this size, in order.
     pub(crate) max_paste: usize,
+    /// Every key in Windows records, as the kitty protocol's flag 8 reports them, the modifier
+    /// and lock keys alone and the keypad's middle key included. Off by default, which drops
+    /// those, as crossterm does.
+    pub(crate) all_keys: bool,
 }
 
 /// The default bound of a paste.
@@ -36,6 +40,7 @@ impl Default for DecoderOptions {
         Self {
             erase: 0x7f,
             max_paste: MAX_PASTE,
+            all_keys: false,
         }
     }
 }
@@ -125,7 +130,7 @@ impl Decoder {
                 erase: if options.erase == 0x08 { 0x08 } else { 0x7f },
                 cursor_reports: 0,
             },
-            windows: WindowsState::default(),
+            windows: WindowsState::new(options.all_keys),
         }
     }
 
@@ -145,8 +150,8 @@ impl Decoder {
         self.tokenizer.has_pending()
     }
 
-    /// Decodes what [`Decoder::has_pending`] counts as keys typed, since no more input follows, so a
-    /// lone ESC becomes Esc and `ESC [` becomes Alt+[. Afterwards nothing is pending. A sequence
+    /// Decodes what [`Decoder::has_pending`] counts as keys typed, since no more input follows, so
+    /// a lone ESC becomes Esc and `ESC [` becomes Alt+[. Afterwards nothing is pending. A sequence
     /// with more of it (`ESC [ 1 ;`), a string, a paste or part of a UTF-8 character stays for the
     /// next read, since only a split read leaves those unfinished.
     pub(crate) fn flush_pending(&mut self, out: &mut Vec<Decoded>) {
