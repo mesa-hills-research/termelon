@@ -203,3 +203,103 @@ real console uses to check that the code pages stay as the library found them.
 
 `GetConsoleCP` and `GetConsoleOutputCP` take nothing and read the console of the process. Zero
 means failure, which returns the system's error.
+
+## harness-free-console
+
+`tools/harness/src/windows.rs`, in `attach_console`, which the harness's console helper calls
+before it attaches to a program's console.
+
+`FreeConsole` takes nothing and detaches the process from its console. It fails, harmlessly, for a
+process with none, which is how the helper starts, and the result is ignored.
+
+## harness-attach-console
+
+`tools/harness/src/windows.rs`, in `attach_console`.
+
+`AttachConsole` takes a process id, which the call checks. A process that is gone, or has no
+console, fails the call, which returns the system's error, and the helper tries again for ten
+seconds before it gives up.
+
+## harness-buffer-info
+
+`tools/harness/src/windows.rs`, in `info`, which reads the window, the buffer's size and the
+cursor of a screen buffer.
+
+`GetConsoleScreenBufferInfo` needs an open screen buffer handle and a `CONSOLE_SCREEN_BUFFER_INFO`
+to write. The handle is borrowed from a `File` for the call, and the structure is a local of the
+call's own type, made with `Default` and passed through `&raw mut`. A failed call returns the
+system's error.
+
+## harness-console-size
+
+`tools/harness/src/windows.rs`, in `set_console_size`, which makes a new console the size a
+driver asked for.
+
+`SetConsoleWindowInfo` reads a `SMALL_RECT` and `SetConsoleScreenBufferSize` takes a `COORD` by
+value. Each needs an open screen buffer handle, borrowed from a `File` for the call, and the
+rectangles are locals that live through it. A size the console refuses fails the call, which
+returns the system's error and changes nothing.
+
+## harness-read-output
+
+`tools/harness/src/windows.rs`, in `read_window`, which reads the cells of a console's window.
+
+`ReadConsoleOutputW` writes the cells of a region into a buffer whose size it's told, and writes
+back the region it read.
+
+- The buffer is a vector of `cols` times `rows` cells, and the size the call is given is `cols` by
+  `rows`, so the call writes inside it.
+- The region is the window, whose size is the same `cols` by `rows`, read from the console just
+  before. A window that changed meanwhile is clipped to the buffer's size by the call.
+- The region is a local written through `&raw mut`, and the handle is borrowed from a `File`.
+
+A failed call returns the system's error. A change here must keep the buffer's length and the
+size the call is given the same.
+
+## harness-char-union
+
+`tools/harness/src/windows.rs`, in `read_window`.
+
+A `CHAR_INFO`'s `Char` is a union of two integers in the same place, so reading either is
+defined, and `ReadConsoleOutputW` fills `UnicodeChar`.
+
+## harness-cursor-info
+
+`tools/harness/src/windows.rs`, in `read_window`.
+
+`GetConsoleCursorInfo` needs an open screen buffer handle, borrowed from a `File` for the call, and
+a `CONSOLE_CURSOR_INFO` to write, a local of the call's own type passed through `&raw mut`. A
+failed call returns the system's error.
+
+## harness-write-input
+
+`tools/harness/src/windows.rs`, in `write_input`, which types key records into a console.
+
+`WriteConsoleInputW` reads `nLength` records from the buffer and writes the count it wrote. The
+records are a vector and `nLength` its length, the count is a local `u32`, and the handle is
+borrowed from a `File`. Each record is built whole, its union holding the `KeyEvent` its event
+type names.
+
+## harness-send-input
+
+`tools/harness/src/windows.rs`, in `send`, which presses keys in Windows Terminal's window.
+
+`SendInput` reads `cInputs` structures of `cbSize` bytes each. The inputs are a slice whose length
+is `cInputs`, `cbSize` is the size of `INPUT`, and each is a keyboard input built whole, its union
+holding the `ki` its type names. Fewer inputs sent than given returns the system's error.
+
+## harness-find-window
+
+`tools/harness/src/windows.rs`, in `press_in_window`, which finds Windows Terminal's window.
+
+`FindWindowW` reads a NUL-terminated UTF-16 class name and an optional window name. The class
+name is a vector ending in 0 that lives through the call, and the window name is null, which
+matches any window. No window found is a null handle, which the driver reports.
+
+## harness-foreground
+
+`tools/harness/src/windows.rs`, in `press_in_window`.
+
+`GetForegroundWindow` takes nothing. `SetForegroundWindow` takes a window handle, here the one
+`FindWindowW` gave just before. A window that closed since makes the call fail, which changes
+nothing, and the driver then finds the window isn't in front and reports it.

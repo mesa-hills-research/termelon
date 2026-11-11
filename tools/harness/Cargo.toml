@@ -12,5 +12,10 @@ publish = false
 # bytes the probe wrote, so the two compare cell by cell.
 termelon-vt.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# The console, window and keyboard calls the Windows Terminal and conhost drivers make, in
+# `src/windows.rs`.
+windows-sys = { workspace = true, features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
 [lints]
 workspace = true

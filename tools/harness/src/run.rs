@@ -27,8 +27,15 @@ pub fn marker(scene: &str) -> String {
 ///
 /// When the terminal doesn't start or the text doesn't show.
 pub fn smoke(driver: &mut dyn Driver) -> Result<(), Error> {
+    #[cfg(not(windows))]
     let script = format!("echo {SMOKE_MARKER}; exec sleep 60");
-    driver.start(&Launch::new(40, 10, &["sh", "-c", &script]))?;
+    #[cfg(not(windows))]
+    let command = ["sh", "-c", &script];
+    #[cfg(windows)]
+    let script = format!("echo {SMOKE_MARKER}& timeout /t 60 /nobreak >nul");
+    #[cfg(windows)]
+    let command = ["cmd", "/d", "/c", &script];
+    driver.start(&Launch::new(40, 10, &command))?;
     let result = driver.wait_for(SMOKE_MARKER, SCENE_TIMEOUT).map(drop);
     driver.stop()?;
     result

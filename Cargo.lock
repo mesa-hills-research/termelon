@@ -568,6 +568,7 @@ name = "harness"
 version = "0.1.0"
 dependencies = [
  "termelon-vt",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

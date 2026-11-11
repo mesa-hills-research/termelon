@@ -40,6 +40,16 @@ with 1 when a screen differs or an answer changed. A version with no report yet 
 | Konsole | Konsole 24.02 or later, an X display, a D-Bus session, gdbus | D-Bus `getAllDisplayedText` | text only |
 | foot | foot and wtype, under a Wayland compositor | `pipe-visible`, bound to a key | text only |
 | Ghostty | Ghostty on macOS, with Accessibility for `osascript` | the `write_screen_file` action | text only |
+| Windows Terminal | Windows Terminal, installed or a portable build that `HARNESS_WINDOWS_TERMINAL` names, and an interactive desktop | the `exportBuffer` action, on a key the driver's settings bind | text only |
+| conhost | Windows, with new consoles opening in conhost | `ReadConsoleOutputW`, through a helper attached to the program's console | text and cursor |
+
+On Windows the program runs under `harness-console`, a helper the harness builds beside itself,
+which starts it in the new console at the size asked for. A second one, attached to that console,
+types with `WriteConsoleInputW` and, for conhost, reads the window. Windows Terminal is read back
+by bringing its window to the front and pressing the key its `exportBuffer` action is bound to,
+with `SendInput`, and its keys go the same way. The driver writes Windows Terminal's settings and
+puts back the ones it found when it's done. Screenshots on Windows come from .NET's
+`CopyFromScreen`.
 
 Alacritty reports its screen only as its window closes, so a readback ends the program, and the
 driver reads once after the program has had a moment to draw. xterm.js takes keys only as browser
