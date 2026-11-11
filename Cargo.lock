@@ -553,6 +553,9 @@ dependencies = [
 [[package]]
 name = "harness"
 version = "0.1.0"
+dependencies = [
+ "tuiframe-vt",
+]
 
 [[package]]
 name = "hashbrown"
