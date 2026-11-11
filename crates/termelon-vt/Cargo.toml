@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+documentation = "https://docs.rs/termelon-vt"
+readme = "README.md"
 keywords = ["terminal", "emulator", "vt100", "testing", "ansi"]
 categories = ["command-line-interface", "development-tools::testing"]
 

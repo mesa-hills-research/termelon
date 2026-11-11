@@ -6,9 +6,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+documentation = "https://docs.rs/termelon"
 readme = "../../README.md"
-keywords = ["terminal", "tui", "ui", "console", "cli"]
+keywords = ["terminal", "tui", "ui", "console", "ansi"]
 categories = ["command-line-interface"]
+# Two integration tests read the repository (the Unicode data files, and the workspace's sources for
+# the unsafe inventory), so they stay out of the package. The unit tests and their fixtures go with it.
+exclude = ["/tests/data/", "/tests/widths.rs", "/tests/unsafe_inventory.rs"]
+
+[package.metadata.docs.rs]
+# The `testing` module and the `Stream` impl are behind features.
+all-features = true
 
 [features]
 # The `Stream` trait on `Events`, for programs that want it.
