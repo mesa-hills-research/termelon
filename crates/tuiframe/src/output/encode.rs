@@ -87,6 +87,9 @@ pub(crate) struct Encoder {
     col: Option<u16>,
     visible: Option<bool>,
     shape: Option<(CursorShape, bool)>,
+    /// A frame asked for a shape other than the default, so the shape is sent again after a
+    /// redraw. Until then the terminal keeps the shape its user set.
+    shaped: bool,
     /// `None` when unknown, so the next style starts from SGR 0.
     pen: Option<Pen>,
     redraw: bool,
@@ -108,6 +111,7 @@ impl Encoder {
             col: None,
             visible: None,
             shape: Some((CursorShape::Default, false)),
+            shaped: false,
             pen: None,
             redraw: false,
             scroll_detection: false,
@@ -129,11 +133,20 @@ impl Encoder {
         self.row = None;
         self.col = None;
         self.visible = None;
-        self.shape = None;
+        if self.shaped {
+            self.shape = None;
+        }
         self.pen = None;
     }
 
     /// Turns on looking for rows that moved, which the terminal then scrolls itself.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "scroll detection stays off until the terminal matrix passes it"
+        )
+    )]
     pub(crate) fn set_scroll_detection(&mut self, on: bool) {
         self.scroll_detection = on;
     }
@@ -546,6 +559,7 @@ impl Encoder {
             push_number(out, usize::from(n));
             out.extend_from_slice(b" q");
             self.shape = Some(shape);
+            self.shaped |= shape.0 != CursorShape::Default;
         }
         if !there || !shown {
             out.extend_from_slice(SHOW);

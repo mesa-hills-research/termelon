@@ -394,7 +394,7 @@ pub(crate) struct Reader { /* the thread's handle and its wake pipe or event */ 
 impl Reader {
     pub(crate) fn spawn(
         input: OwnedFd,
-        decoder: impl Decode, // feed, has_pending and flush_pending
+        decoder: impl Decode, // feed, has_pending, flush_pending and expect, as Decoder has
         shared: Arc<Shared>,
         escape_timeout: Duration,
         signals: Signals,     // a pipe each for SIGWINCH and SIGCONT
@@ -407,9 +407,9 @@ impl Reader {
 }
 ```
 
-The reply slot and `expect` come with the decoder's replies. On Unix, `restore::screen::Screen` puts
-these together. It takes the terminal (raw mode, the writer, the setup packet, the reader), closes
-it, and suspends it.
+On Unix, `restore::screen::Screen` puts these together. `Screen::open_with` takes the terminal
+(raw mode, the writer, the reader) and `enable` sends the setup the probe's answers decided on. It
+also closes the terminal and suspends it. A writer that fails ends the events.
 
 Each turn of the reader's loop does these steps.
 
