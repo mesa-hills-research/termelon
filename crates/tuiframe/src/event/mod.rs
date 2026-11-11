@@ -17,6 +17,15 @@
 use crate::flags::flags;
 use crate::layout::Size;
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the reader thread, which owns the decoder, isn't built yet"
+    )
+)]
+pub(crate) mod decode;
+
 /// Something the terminal reported.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Event {
