@@ -10,8 +10,11 @@ use crate::output::writer::lock;
 
 /// The bits of the console's modes, from `wincon.h`.
 pub(crate) mod bits {
+    #[cfg(test)]
     pub(crate) const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
+    #[cfg(test)]
     pub(crate) const ENABLE_LINE_INPUT: u32 = 0x0002;
+    #[cfg(test)]
     pub(crate) const ENABLE_ECHO_INPUT: u32 = 0x0004;
     pub(crate) const ENABLE_WINDOW_INPUT: u32 = 0x0008;
     pub(crate) const ENABLE_MOUSE_INPUT: u32 = 0x0010;
@@ -103,6 +106,7 @@ impl<C: Console> Modes<C> {
     }
 
     /// The modes as the program found them.
+    #[cfg(test)]
     pub(crate) fn saved(&self) -> Saved {
         self.saved
     }

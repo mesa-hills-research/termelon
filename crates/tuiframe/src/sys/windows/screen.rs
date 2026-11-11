@@ -22,6 +22,7 @@ pub(crate) type Screen = ScreenOn<super::WinConsole>;
 /// The console while a program has it, on any [`Console`].
 #[derive(Debug)]
 pub(crate) struct ScreenOn<C> {
+    console: Arc<C>,
     writer: Writer,
     shared: Arc<Shared>,
     reader: Option<Reader>,
@@ -99,6 +100,10 @@ impl<C: Console> ScreenOn<C> {
         );
         register(&restore);
         let shared = Arc::new(Shared::new(size));
+        writer.on_failure({
+            let shared = shared.clone();
+            move || shared.events.close()
+        });
         let settings = Arc::new(Settings::default());
         let reader = console.input().and_then(|(input, wake)| {
             Reader::spawn(
@@ -112,6 +117,7 @@ impl<C: Console> ScreenOn<C> {
         });
         match reader {
             Ok(reader) => Ok(Self {
+                console,
                 writer,
                 shared,
                 reader: Some(reader),
@@ -128,6 +134,12 @@ impl<C: Console> ScreenOn<C> {
                 Err(error)
             }
         }
+    }
+
+    /// The window's size now, or `None` when the console doesn't say or says 0x0.
+    pub(crate) fn window_size(&self) -> Option<Size> {
+        let size = self.console.window().ok()?.size();
+        (size.width > 0 && size.height > 0).then_some(size)
     }
 
     pub(crate) fn writer(&self) -> &Writer {
@@ -147,19 +159,27 @@ impl<C: Console> ScreenOn<C> {
         self.restore.draw_here();
     }
 
-    /// Turns on what `enabled` says, and makes it what the reset undoes. It sends the setup, takes
-    /// mouse records (and quick edit off) when the mouse is on, and passes focus records on when
-    /// focus reports are. The kitty keyboard flags are pushed only while keys come as bytes
-    /// ([`InputMode::Vt`]). Fails when the console's input mode couldn't change.
+    /// Turns on what `enabled` says, which the reset then undoes. The kitty keyboard flags are
+    /// pushed only while keys come as bytes ([`InputMode::Vt`]). Fails once the writer failed.
     pub(crate) fn enable(&self, enabled: &Enabled) -> io::Result<()> {
+        self.set_enabled(enabled);
+        let effective = effective(enabled, self.modes.input().mode);
+        self.writer.send(effective.setup())?;
+        Ok(())
+    }
+
+    /// Makes `enabled` what the reset undoes, takes mouse records (with quick edit off) when the
+    /// mouse is on, and passes focus records on when focus reports are. The program sends what
+    /// turns the change on. A console that refuses the input mode keeps the one it had, which
+    /// only a console gone wrong does.
+    pub(crate) fn set_enabled(&self, enabled: &Enabled) {
         *lock(&self.enabled) = enabled.clone();
         let mut input = self.modes.input();
-        let effective = effective(enabled, input.mode);
-        self.writer.set_reset(effective.reset());
-        let _ = self.writer.send(effective.setup());
+        self.writer
+            .set_reset(effective(enabled, input.mode).reset());
         self.settings.set_focus(enabled.focus);
         input.mouse = enabled.mouse != MouseMode::Off;
-        self.modes.set_input(input)
+        let _ = self.modes.set_input(input);
     }
 
     /// Switches how the console delivers keys. The probe runs in [`InputMode::Vt`], where the
@@ -191,10 +211,24 @@ impl<C: Console> ScreenOn<C> {
         }
     }
 
-    /// Makes the decoder expect the answer to `query`.
+    /// Tells the decoder of a query whose answer is outstanding, before the query is written.
     pub(crate) fn expect(&self, query: Query) {
         if let Some(reader) = &self.reader {
             reader.expect(query);
+        }
+    }
+
+    /// Makes a pending ESC among the bytes records carry wait `timeout` for what follows it.
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+        if let Some(reader) = &self.reader {
+            reader.set_escape_timeout(timeout);
+        }
+    }
+
+    /// Tells the decoder to forget the queries whose answers are outstanding.
+    pub(crate) fn cancel_expected(&self) {
+        if let Some(reader) = &self.reader {
+            reader.cancel_expected();
         }
     }
 

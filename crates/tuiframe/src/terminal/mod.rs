@@ -253,13 +253,14 @@ pub(crate) fn enabled(options: &Options, caps: &Capabilities) -> Enabled {
     }
 }
 
-#[cfg(unix)]
-pub use unix::{Terminal, terminal_size};
+#[cfg(any(unix, windows))]
+pub use platform::{Terminal, terminal_size};
 
-#[cfg(unix)]
-mod unix {
+#[cfg(any(unix, windows))]
+mod platform {
     use std::future::Future;
     use std::io;
+    #[cfg(unix)]
     use std::os::fd::AsFd;
     use std::time::Duration;
 
@@ -272,9 +273,16 @@ mod unix {
     use crate::layout::Size;
     use crate::output::writer::Hold;
     use crate::output::{Cursor, CursorShape};
+    #[cfg(unix)]
     use crate::restore::screen::Screen;
     use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
+    #[cfg(unix)]
     use crate::sys::unix::{Signals, Tty, window_size};
+    #[cfg(windows)]
+    use crate::{
+        caps::KeyboardSupport,
+        sys::windows::{Console, InputMode, WinConsole, screen::Screen},
+    };
 
     /// How long the probe waits for a terminal that doesn't answer, by default.
     const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -327,12 +335,20 @@ mod unix {
         /// [`Error::NoTerminal`] when there's no terminal, and [`Error::Io`] when setting it up
         /// failed. The terminal is then as it was.
         pub fn open(options: Options) -> Result<Self> {
-            let tty = Tty::open().map_err(Error::NoTerminal)?;
             if options.panic_hook {
                 crate::install_panic_hook();
             }
-            let signals = Signals::register(options.restore_on_signals)?;
-            let terminal = Self::open_on(tty, options, &caps::env::Process, signals)?;
+            #[cfg(unix)]
+            let terminal = {
+                let tty = Tty::open().map_err(Error::NoTerminal)?;
+                let signals = Signals::register(options.restore_on_signals)?;
+                Self::open_on(tty, options, &caps::env::Process, signals)?
+            };
+            #[cfg(windows)]
+            let terminal = {
+                let console = WinConsole::open().map_err(Error::NoTerminal)?;
+                Self::open_on(console, options, &caps::env::Process)?
+            };
             // (Text measures as the terminal draws it from now on.)
             crate::text::set_width_profile(terminal.caps.width_profile);
             Ok(terminal)
@@ -340,6 +356,7 @@ mod unix {
 
         /// [`open`](Self::open), on `tty`, with `env` for the environment and `signals` for the
         /// reader.
+        #[cfg(unix)]
         pub(crate) fn open_on(
             tty: Tty,
             options: Options,
@@ -348,16 +365,39 @@ mod unix {
         ) -> Result<Self> {
             let screen = Screen::open_with(
                 tty,
-                |erase| {
-                    Decoder::new(DecoderOptions {
-                        erase,
-                        ..DecoderOptions::default()
-                    })
-                },
+                decoder,
                 // (The probe's replies may come split, so its lone ESC waits longer.)
                 options.escape_timeout.unwrap_or(KITTY_ESCAPE_TIMEOUT),
                 signals,
             )?;
+            Self::start(screen, options, env)
+        }
+
+        /// [`open`](Self::open), on `console`, with `env` for the environment. A console without
+        /// virtual terminal processing gives [`Error::NoVirtualTerminal`].
+        #[cfg(windows)]
+        pub(crate) fn open_on(
+            console: WinConsole,
+            options: Options,
+            env: &dyn Environment,
+        ) -> Result<Self> {
+            let timeout = options.escape_timeout.unwrap_or(KITTY_ESCAPE_TIMEOUT);
+            let screen = Screen::open(console, decoder, timeout).map_err(|error| {
+                if error.kind() == io::ErrorKind::Unsupported {
+                    Error::NoVirtualTerminal
+                } else {
+                    Error::Io(error)
+                }
+            })?;
+            // (The console answers the probe in its input, where the answers decode as replies
+            // only from bytes.)
+            screen.set_input(InputMode::Vt)?;
+            Self::start(screen, options, env)
+        }
+
+        /// Asks the terminal on `screen` what it supports, turns on what `options` ask for, and
+        /// makes the terminal the program has.
+        fn start(screen: Screen, options: Options, env: &dyn Environment) -> Result<Self> {
             let overrides = env.var("TUIFRAME_CAPS");
             let hints = caps::env::hints(env);
             let probe_timeout = options.probe_timeout.unwrap_or(if hints.ssh {
@@ -374,14 +414,23 @@ mod unix {
             if early.alternate_screen {
                 screen.enable(&early)?;
             }
+            // (Whether the terminal answered every query, which DA1's reply says.)
+            let mut answered = true;
             let mut caps = if let Some(caps) = &options.capabilities {
                 caps.clone()
             } else {
                 let queries = probe::queries(hints.linux_console);
                 let replies = ask(&screen, &queries, 0, probe_timeout)?;
+                answered = replies.iter().any(probe::is_end);
                 let answers = probe::answers(&replies);
                 caps::detect(&answers, &hints, overrides.as_deref())
             };
+            // (Keys come as key records once the probe is done, where the kitty protocol isn't
+            // pushed.)
+            #[cfg(windows)]
+            {
+                caps.keyboard = KeyboardSupport::ConsoleRecords;
+            }
             let mut enabled = enabled(&options, &caps);
             if early.alternate_screen {
                 enabled.alternate_screen = true;
@@ -406,6 +455,7 @@ mod unix {
             if options.width_probes && options.capabilities.is_none() && !hints.linux_console {
                 let samples = probe::WIDTH_SAMPLES.len();
                 let replies = ask(&screen, &probe::width_queries(), samples, probe_timeout)?;
+                answered &= replies.iter().any(probe::is_end);
                 if let Some(profile) = probe::width_profile(&replies) {
                     caps.width_profile = profile;
                     if let Some(overrides) = &overrides {
@@ -413,6 +463,16 @@ mod unix {
                     }
                 }
             }
+            #[cfg(windows)]
+            {
+                if !answered {
+                    // (Replies that come late decode as replies a moment longer, and go.)
+                    std::thread::sleep(LATE_REPLIES);
+                }
+                screen.set_input(InputMode::Records)?;
+            }
+            #[cfg(not(windows))]
+            let _ = answered;
             let fallback = fallback_size(env);
             let size = screen.window_size().unwrap_or(fallback);
             screen.shared().set_size(size);
@@ -538,6 +598,19 @@ mod unix {
         /// handles signals.
         pub fn restore_handle(&self) -> RestoreHandle {
             self.screen.restore_handle()
+        }
+
+        /// Makes a console control event (the console window closing, Ctrl+Break, logoff or
+        /// shutdown) give the console back before Windows ends the process, as a program's own
+        /// signal thread does with [`restore_handle`](Self::restore_handle) on Unix. Windows calls
+        /// it on a thread of its own, and the process ends once it returns.
+        ///
+        /// # Errors
+        ///
+        /// [`Error::Io`] when the handler couldn't be installed.
+        #[cfg(windows)]
+        pub fn restore_on_console_events(&self) -> Result<()> {
+            Ok(self.screen.restore_on_console_events()?)
         }
 
         /// Sets the window's title with OSC 0, where the terminal is known to take it, and does
@@ -726,9 +799,30 @@ mod unix {
     /// [`Error::NoTerminal`] when there's no terminal, and [`Error::Io`] when it doesn't report a
     /// size.
     pub fn terminal_size() -> Result<Size> {
-        let tty = Tty::open().map_err(Error::NoTerminal)?;
-        Ok(window_size(tty.output.as_fd())?.cells)
+        #[cfg(unix)]
+        {
+            let tty = Tty::open().map_err(Error::NoTerminal)?;
+            Ok(window_size(tty.output.as_fd())?.cells)
+        }
+        #[cfg(windows)]
+        {
+            let console = WinConsole::open().map_err(Error::NoTerminal)?;
+            Ok(console.window()?.size())
+        }
     }
+
+    /// The library's decoder, for a terminal whose Backspace sends `erase`.
+    fn decoder(erase: u8) -> Decoder {
+        Decoder::new(DecoderOptions {
+            erase,
+            ..DecoderOptions::default()
+        })
+    }
+
+    /// How long late replies to the probe still decode as replies on Windows, after a probe the
+    /// console didn't answer in time.
+    #[cfg(windows)]
+    const LATE_REPLIES: Duration = Duration::from_millis(200);
 
     /// The size to take when the terminal gives none, from `COLUMNS` and `LINES`, or 80x24.
     fn fallback_size(env: &dyn Environment) -> Size {
@@ -781,7 +875,7 @@ mod unix {
 }
 
 /// `text` with each line feed that has no carriage return before it given one.
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 fn crlf(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut previous = None;
@@ -796,7 +890,7 @@ fn crlf(text: &[u8]) -> Vec<u8> {
 }
 
 /// `bytes` in base64, with padding, for OSC 52.
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);

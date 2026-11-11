@@ -18,19 +18,13 @@ use crate::flags::flags;
 use crate::layout::Size;
 
 #[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the reader thread, which owns the decoder, isn't built yet"
-    )
+    not(any(test, windows)),
+    expect(dead_code, reason = "only the Windows reader decodes records")
 )]
 pub(crate) mod decode;
 #[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the Windows reader, which fills these, isn't built yet"
-    )
+    not(any(test, windows)),
+    expect(dead_code, reason = "only the Windows reader fills these")
 )]
 pub(crate) mod records;
 

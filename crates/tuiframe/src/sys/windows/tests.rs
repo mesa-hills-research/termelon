@@ -551,15 +551,50 @@ fn an_expected_cursor_report_is_no_key() {
     std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     nothing_more(&shared);
+    // A probe that stopped waiting cancels it, and the next report is the key again.
+    reader.expect(crate::event::decode::Query::CursorPosition);
+    reader.cancel_expected();
+    std::thread::sleep(Duration::from_millis(50));
+    fake.type_in(&vt_records("\x1b[1;5R"));
+    assert_eq!(next(&shared), key(KeyCode::F(3), KeyModifiers::CONTROL));
 }
 
+/// Replies go to the reply slot while the probe waits, and nowhere otherwise.
+#[test]
+fn replies_go_to_the_reply_slot_while_it_is_open() {
+    use crate::event::decode::Reply;
+    let fake = Fake::new();
+    let settings = Arc::new(Settings::default());
+    settings.set_mode(InputMode::Vt);
+    let (_reader, shared) = reading(&fake, &settings, Duration::ZERO);
+    shared.replies.open();
+    fake.type_in(&vt_records("\x1b[?1u\x1b[?62;22c"));
+    assert!(shared.replies.wait(LONG, |replies| replies.len() == 2));
+    assert_eq!(
+        shared.replies.close(),
+        [
+            Reply::KittyKeyboard(1),
+            Reply::Da1 {
+                attributes: vec![62, 22]
+            }
+        ]
+    );
+    fake.type_in(&vt_records("\x1b[?62;22c"));
+    nothing_more(&shared);
+    assert!(shared.replies.close().is_empty());
+}
+
+/// A console whose input fails ends the events with the failure.
 #[test]
 fn a_console_that_fails_ends_the_events() {
     let fake = Fake::new();
     let settings = Arc::new(Settings::default());
     let (reader, shared) = reading(&fake, &settings, Duration::ZERO);
     fake.with(|state| state.broken = true);
-    assert_eq!(shared.events.next_timeout(LONG), Next::Closed);
+    assert_eq!(
+        shared.events.next_timeout(LONG),
+        Next::Failed(io::ErrorKind::BrokenPipe)
+    );
     reader.stop();
 }
 
@@ -632,6 +667,7 @@ fn a_screen_takes_the_console_and_gives_it_back_exactly() {
     )
     .unwrap();
     assert_eq!(screen.shared().size(), Size::new(80, 24));
+    assert_eq!(screen.window_size(), Some(Size::new(80, 24)));
     assert_eq!(fake.saved().output, OUTPUT_MODE);
     assert!(fake.with(|state| state.written.is_empty()));
     screen.enable(&enabled()).unwrap();
@@ -657,10 +693,28 @@ fn a_screen_takes_the_console_and_gives_it_back_exactly() {
         next(screen.shared()),
         key(KeyCode::Enter, KeyModifiers::SHIFT)
     );
+    // A lone ESC waits the escape timeout the program sets.
+    screen.set_escape_timeout(Duration::from_millis(300));
+    std::thread::sleep(Duration::from_millis(50));
+    fake.type_in(&vt_records("\x1b"));
+    std::thread::sleep(Duration::from_millis(50));
+    fake.type_in(&vt_records("x"));
+    assert_eq!(
+        next(screen.shared()),
+        key(KeyCode::Char('x'), KeyModifiers::ALT)
+    );
     screen.expect(crate::event::decode::Query::CursorPosition);
     std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     nothing_more(screen.shared());
+    screen.expect(crate::event::decode::Query::CursorPosition);
+    screen.cancel_expected();
+    std::thread::sleep(Duration::from_millis(50));
+    fake.type_in(&vt_records("\x1b[1;5R"));
+    assert_eq!(
+        next(screen.shared()),
+        key(KeyCode::F(3), KeyModifiers::CONTROL)
+    );
     screen.set_input(InputMode::Records).unwrap();
     assert_eq!(fake.saved().input & ENABLE_VIRTUAL_TERMINAL_INPUT, 0);
     assert_eq!(
@@ -992,6 +1046,40 @@ mod real {
         );
         assert_eq!(next(screen.shared()), Event::FocusGained);
         assert!(screen.close(b"", LONG));
+        assert_eq!(found(&probe), before);
+    }
+
+    /// `Terminal` on a real console. It probes in virtual terminal input mode, reads keys as
+    /// records afterwards, draws, and gives the console back as it was found.
+    #[test]
+    #[ignore = "needs a real console"]
+    fn a_terminal_opens_draws_and_closes_on_a_real_console() {
+        use crate::caps::KeyboardSupport;
+        use crate::terminal::{Options, Terminal};
+        let probe = WinConsole::open().unwrap();
+        let before = found(&probe);
+        let mut terminal = Terminal::open(Options::default()).unwrap();
+        assert_eq!(
+            terminal.capabilities().keyboard,
+            KeyboardSupport::ConsoleRecords
+        );
+        assert_eq!(terminal.size(), probe.window().unwrap().size());
+        let drawn = terminal
+            .draw(|frame| {
+                frame
+                    .buffer_mut()
+                    .set_string(0, 0, "tuiframe", crate::Style::new());
+            })
+            .unwrap();
+        assert!(matches!(drawn, crate::Drawn::Written(_)));
+        terminal.restore_on_console_events().unwrap();
+        write_input(&conin(), &[key_record(true, 0x0d, 0x0d, 0x10)]).unwrap();
+        let mut events = terminal.events();
+        assert_eq!(
+            events.next_timeout(LONG).unwrap(),
+            Some(key(KeyCode::Enter, KeyModifiers::SHIFT))
+        );
+        terminal.close().unwrap();
         assert_eq!(found(&probe), before);
     }
 

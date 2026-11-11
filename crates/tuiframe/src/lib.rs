@@ -18,15 +18,6 @@
 //!
 //! The types used most are also at the crate's root.
 
-// (On Windows, `Terminal` waits for the console's `Screen`, so what it uses isn't used yet.)
-#![cfg_attr(
-    windows,
-    expect(
-        dead_code,
-        reason = "used by `Terminal`, which comes to Windows with its console"
-    )
-)]
-
 pub mod buffer;
 pub mod caps;
 pub mod event;
@@ -50,7 +41,7 @@ pub use output::{CompletedFrame, Cursor, CursorShape, FrameStats};
 pub use restore::{RestoreHandle, install_panic_hook};
 pub use style::{Color, Modifier, Style, UnderlineStyle};
 pub use terminal::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Result};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub use terminal::{Terminal, terminal_size};
 pub use text::{Line, Span, Text};
 pub use widgets::{Block, BorderSet, Borders, Clear, Padding, Paragraph, Widget, Wrap};

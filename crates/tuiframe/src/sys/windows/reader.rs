@@ -70,10 +70,19 @@ struct Control {
     changed: Condvar,
 }
 
+/// What the program asks of the decoder, done at the reader's next turn.
+#[derive(Debug)]
+enum Ask {
+    Expect(Query),
+    Cancel,
+}
+
 #[derive(Debug, Default)]
 struct Requests {
-    /// Queries whose answers the decoder is to expect, from the next turn.
-    expected: Vec<Query>,
+    /// What the decoder is to do at the next turn, in order.
+    asks: Vec<Ask>,
+    /// A new escape timeout, from the next turn.
+    escape_timeout: Option<Duration>,
     stop: bool,
     /// The reader's thread ended.
     ended: bool,
@@ -121,7 +130,19 @@ impl Reader {
     /// Makes the decoder expect the answer to `query`, from the reader's next turn, so calling it
     /// before the query is written is enough.
     pub(crate) fn expect(&self, query: Query) {
-        lock(&self.control.state).expected.push(query);
+        lock(&self.control.state).asks.push(Ask::Expect(query));
+        self.wake.wake();
+    }
+
+    /// Makes a pending ESC wait `timeout` for what follows it, from the next turn.
+    pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
+        lock(&self.control.state).escape_timeout = Some(timeout);
+        self.wake.wake();
+    }
+
+    /// Makes the decoder forget the queries whose answers are outstanding, from the next turn.
+    pub(crate) fn cancel_expected(&self) {
+        lock(&self.control.state).asks.push(Ask::Cancel);
         self.wake.wake();
     }
 
@@ -202,13 +223,23 @@ impl<I: Input, D: Decode> Loop<I, D> {
                 if requests.stop {
                     break;
                 }
-                for query in requests.expected.drain(..) {
-                    self.decoder.expect(query);
+                if let Some(timeout) = requests.escape_timeout.take() {
+                    self.escape_timeout = timeout;
+                }
+                for ask in requests.asks.drain(..) {
+                    match ask {
+                        Ask::Expect(query) => self.decoder.expect(query),
+                        Ask::Cancel => self.decoder.cancel_expected(),
+                    }
                 }
             }
             let timeout = waiting.map(|(since, wait)| wait.saturating_sub(since.elapsed()));
-            let Ok(ready) = self.input.wait(timeout) else {
-                break;
+            let ready = match self.input.wait(timeout) {
+                Ok(ready) => ready,
+                Err(error) => {
+                    self.ended.shared.events.fail(error.kind());
+                    break;
+                }
             };
             match ready {
                 Ready::Woken => continue,
@@ -225,7 +256,8 @@ impl<I: Input, D: Decode> Loop<I, D> {
                 }
                 Ready::Input => {
                     records.clear();
-                    if self.input.read(&mut records).is_err() {
+                    if let Err(error) = self.input.read(&mut records) {
+                        self.ended.shared.events.fail(error.kind());
                         break;
                     }
                     self.decode(&records, &mut bytes, &mut decoded);
@@ -316,17 +348,18 @@ impl<I: Input, D: Decode> Loop<I, D> {
         }
     }
 
-    /// Queues the events. Replies have nowhere to go until the probe's reply slot is in, so
-    /// they're dropped, which keeps them from ever reaching the program as keys.
+    /// Queues the events, and offers the replies to the reply slot, which keeps them while the
+    /// probe waits and drops them otherwise, so none reaches the program as keys.
     fn deliver(&self, decoded: &mut Vec<Decoded>) {
-        let mut events: Vec<Event> = decoded
-            .drain(..)
-            .filter_map(|decoded| match decoded {
-                Decoded::Event(event) => Some(event),
-                Decoded::Reply(_) => None,
-            })
-            .collect();
-        self.ended.shared.events.push(&mut events);
+        let shared = &self.ended.shared;
+        let mut events = Vec::new();
+        for decoded in decoded.drain(..) {
+            match decoded {
+                Decoded::Event(event) => events.push(event),
+                Decoded::Reply(reply) => shared.replies.offer(reply),
+            }
+        }
+        shared.events.push(&mut events);
     }
 }
 

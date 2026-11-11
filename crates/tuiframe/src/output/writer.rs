@@ -394,6 +394,13 @@ impl Writer {
     }
 
     /// What gives the terminal back.
+    #[cfg_attr(
+        all(windows, not(test)),
+        expect(
+            dead_code,
+            reason = "only suspending sends the reset alone, and Windows can't suspend"
+        )
+    )]
     pub(crate) fn reset(&self) -> Arc<[u8]> {
         self.shared.record.reset()
     }
