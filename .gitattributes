@@ -1,0 +1,2 @@
+# Text files keep LF on every system, since tests read fixtures and goldens byte for byte.
+* text=auto eol=lf

@@ -7,7 +7,7 @@
 //! hand in the formats their docs describe, for the small screen in `small.bytes`, until a run on
 //! CI records real ones.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use harness::drivers::{
     alacritty, foot, ghostty, kitty, konsole, screen, tmux, vte, wezterm, xterm, xtermjs,
@@ -179,11 +179,7 @@ fn kitty_starts_at_the_size_with_remote_control() {
 
 #[test]
 fn xterm_starts_at_the_size_with_a_bitmap_font_and_records_its_tty() {
-    let command = xterm::start_command(
-        &launch(),
-        std::path::Path::new("/tmp/x"),
-        std::path::Path::new("/tmp/x/tty"),
-    );
+    let command = xterm::start_command(&launch(), Path::new("/tmp/x"), Path::new("/tmp/x/tty"));
     let args = args(&command);
     assert_eq!(args[..4], ["-geometry", "100x30", "-fn", "9x15"]);
     let e = args.iter().position(|arg| arg == "-e").unwrap();
@@ -196,7 +192,7 @@ fn xterm_starts_at_the_size_with_a_bitmap_font_and_records_its_tty() {
 
 #[test]
 fn wezterm_starts_at_the_size_in_a_new_process() {
-    let command = wezterm::start_command(&launch(), std::path::Path::new("/tmp/w"));
+    let command = wezterm::start_command(&launch(), Path::new("/tmp/w"));
     let args = args(&command);
     for wanted in [
         "initial_cols=100",
@@ -303,7 +299,7 @@ fn foot_keys_and_binding() {
         ]
     );
     assert_eq!(foot::wtype_args(Key::Up, Mods::NONE).unwrap(), ["-k", "Up"]);
-    let config = foot::config(std::path::Path::new("/tmp/f/screen.txt"));
+    let config = foot::config(Path::new("/tmp/f/screen.txt"));
     assert!(
         config.contains("pipe-visible=[sh -c \"cat > '/tmp/f/screen.txt'\"] Control+Shift+F12")
     );
@@ -335,16 +331,13 @@ fn alacritty_starts_with_its_ref_test() {
         alacritty::config(100, 30),
         "[window]\ndimensions = { columns = 100, lines = 30 }\n\n[scrolling]\nhistory = 0\n"
     );
-    let command = alacritty::start_command(
-        &launch(),
-        std::path::Path::new("/tmp/a"),
-        std::path::Path::new("/tmp/a/pid"),
-    );
+    let command = alacritty::start_command(&launch(), Path::new("/tmp/a"), Path::new("/tmp/a/pid"));
     let args = args(&command);
-    assert_eq!(
-        args[..3],
-        ["--ref-test", "--config-file", "/tmp/a/alacritty.toml"]
-    );
+    let config = Path::new("/tmp/a")
+        .join("alacritty.toml")
+        .display()
+        .to_string();
+    assert_eq!(args[..3], ["--ref-test", "--config-file", config.as_str()]);
     assert_eq!(
         args[args.len() - 5..],
         ["/tmp/a/pid", "/home/ada/proj", "probe", "--scene", "text"]
@@ -353,7 +346,7 @@ fn alacritty_starts_with_its_ref_test() {
 
 #[test]
 fn konsole_starts_at_the_size() {
-    let command = konsole::start_command(&launch(), std::path::Path::new("/tmp/k"));
+    let command = konsole::start_command(&launch(), Path::new("/tmp/k"));
     let args = args(&command);
     for wanted in [
         "--separate",
@@ -368,7 +361,7 @@ fn konsole_starts_at_the_size() {
 
 #[test]
 fn ghostty_starts_at_the_size_with_its_binding() {
-    let command = ghostty::start_command(std::path::Path::new(ghostty::APP_BINARY), &launch());
+    let command = ghostty::start_command(Path::new(ghostty::APP_BINARY), &launch());
     let args = args(&command);
     for wanted in [
         "--window-width=100",
