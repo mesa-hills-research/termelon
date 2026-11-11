@@ -15,6 +15,9 @@ unicode-segmentation.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# An independent emulator, so a test can replay the same bytes through both and compare the screens.
+# Without its default features it builds no serialization support.
+alacritty_terminal = { version = "0.26", default-features = false }
 
 [lints]
 workspace = true

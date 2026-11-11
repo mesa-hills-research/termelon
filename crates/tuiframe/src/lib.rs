@@ -29,7 +29,23 @@ pub mod layout;
     )
 )]
 mod output;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "used by `Terminal`, which comes with the terminal API"
+    )
+)]
+mod restore;
 pub mod style;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "used by `Terminal`, which comes with the terminal API"
+    )
+)]
+mod sys;
 pub mod text;
 
 pub use buffer::Buffer;
@@ -37,5 +53,6 @@ pub use caps::{Capabilities, WidthProfile};
 pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 pub use layout::{Alignment, Constraint, Layout, Position, Rect, Size};
 pub use output::{CompletedFrame, Cursor, CursorShape, FrameStats};
+pub use restore::{RestoreHandle, install_panic_hook};
 pub use style::{Color, Modifier, Style, UnderlineStyle};
 pub use text::{Line, Span, Text};

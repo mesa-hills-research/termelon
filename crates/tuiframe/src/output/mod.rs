@@ -1,11 +1,12 @@
-//! What reaches the terminal. The diff finds the cells a frame changes, and the encoder turns them
-//! into one packet of bytes.
+//! What reaches the terminal. The diff finds the cells a frame changes, the encoder turns them into
+//! one packet of bytes, and the writer's thread writes the packets.
 
 pub(crate) mod color;
 pub(crate) mod diff;
 pub(crate) mod encode;
 #[cfg(test)]
 mod tests;
+pub(crate) mod writer;
 
 use crate::buffer::Buffer;
 use crate::layout::Position;

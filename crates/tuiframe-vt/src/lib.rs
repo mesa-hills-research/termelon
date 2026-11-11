@@ -48,6 +48,34 @@
 //! which is measured again, so a cluster written one scalar at a time ends up as if written whole.
 //! While a program has mode 2027 set, clusters are measured as if `joins_emoji` were on.
 //!
+//! # Where terminals differ
+//!
+//! The emulator follows xterm where terminals disagree. Its tests replay random streams through
+//! `alacritty_terminal` as well and compare the screens, and these are the places the two differ,
+//! each pinned by a test.
+//!
+//! - SGR 21 is a double underline, as in xterm and kitty. Alacritty takes it as bold off.
+//! - LF, IND, NEL and RI end a pending wrap. Alacritty keeps it, so its next character wraps again.
+//! - EL 0 and ED 0 at a pending wrap erase the last column and end the pending wrap. There
+//!   Alacritty's EL 0 erases nothing, and its ED 0 keeps the pending wrap.
+//! - HT at a pending wrap stays in the last column. Alacritty wraps.
+//! - CUU, CUD, CNL and CPL stop at the scroll region's margins. Alacritty's go to the screen's edge.
+//! - Resetting origin mode moves the cursor home. In origin mode, Alacritty adds the region's top
+//!   again to CHA and relative moves.
+//! - ED 1 from the second row erases the first row too. Alacritty's leaves it.
+//! - Erasing part of a wide character blanks all of it. Alacritty leaves the other half.
+//! - An emoji ZWJ sequence or a flag is one cell as wide as the cluster. Alacritty gives each emoji
+//!   a cell of its own, with the same text and cursor.
+//! - U+FF9E and U+FF9F, the halfwidth katakana sound marks, take a cell, as they do in terminals.
+//!   The unicode-width that Alacritty measures with gives them none.
+//! - A combining mark at the left edge, with nothing before it, is dropped. Alacritty joins it to
+//!   the cell under the cursor.
+//! - A wide character that doesn't fit with autowrap off moves left until it fits, as in kitty.
+//!   Alacritty drops it.
+//! - A scroll region that starts past the screen is ignored. Alacritty sets an empty region.
+//! - Resetting any of modes 9, 1000, 1002 and 1003 turns mouse reports off, as in xterm. Alacritty
+//!   resets only the mode named.
+//!
 //! # The styled-text format, version 1
 //!
 //! [`Emulator::styled`] writes the screen in a line format that reads well in a diff, and other
@@ -81,9 +109,11 @@
 //!   ids are one run.
 //! - Every line ends with `\n`, the last one too.
 
+mod ambiguous;
 mod emulator;
 mod event;
 mod grid;
+mod input;
 mod parser;
 mod profile;
 mod style;
@@ -92,6 +122,7 @@ mod width;
 pub use emulator::{Cursor, CursorShape, Emulator};
 pub use event::{ClipboardWrite, Event, FeedError, Pos, UnknownSequence};
 pub use grid::Cell;
+pub use input::{Key, KeyKind, Mods, Mouse, MouseButton, MouseKind};
 pub use profile::{KeyEncoding, Profile};
 pub use style::{Color, Hyperlink, Style, Underline};
 pub use width::WidthRules;
