@@ -86,6 +86,7 @@ fn support_field<'a>(caps: &'a mut Capabilities, name: &str) -> Option<&'a mut S
         "cursor_shape" => &mut caps.cursor_shape,
         "title" => &mut caps.title,
         "title_stack" => &mut caps.title_stack,
+        "bce" => &mut caps.bce,
         _ => return None,
     })
 }

@@ -223,6 +223,9 @@ pub struct Capabilities {
     pub title: Support,
     /// Saving and restoring the title with xterm's title stack.
     pub title_stack: Support,
+    /// Background colour erase (BCE). Erasing fills cells with the pen's background colour, so
+    /// the encoder may erase runs of spaces in a colour rather than write them.
+    pub bce: Support,
     /// The background colour, for choosing a dark or light theme.
     pub background: Option<Rgb>,
     /// Whether its font has box drawing and braille.
@@ -345,6 +348,7 @@ fn apply_row(caps: &mut Capabilities, row: &table::Row) {
     caps.cursor_shape = row.cursor_shape;
     caps.title = row.title;
     caps.title_stack = row.title_stack;
+    caps.bce = row.bce;
     caps.width_profile = row.width_profile;
     caps.glyphs = row.glyphs;
 }
@@ -383,6 +387,7 @@ mod tests {
             caps.cursor_shape,
             caps.title,
             caps.title_stack,
+            caps.bce,
         ];
         assert!(supports.iter().all(|&s| s == Support::Unknown));
     }

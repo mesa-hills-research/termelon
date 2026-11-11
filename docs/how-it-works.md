@@ -70,7 +70,9 @@ is written), encodes the changes into one packet, swaps the buffers and returns
 
 A resize, a resume and `Terminal::clear()` make the next frame a full redraw. The flag survives
 `Held` and clears only when a full frame reaches the writer. A full redraw clears with `CSI 2 J` and
-writes the cells that aren't blank. Nothing ever asks the terminal where its cursor is.
+writes the cells that aren't blank. Where the capabilities say the terminal erases with the pen's
+background (`bce`), it clears in the background most spaces have, and writes only what differs
+from that. Nothing ever asks the terminal where its cursor is.
 
 `Terminal::draw_regions(&[Rect], ...)` is the partial frame. The closure draws into the front buffer
 with every write clipped to the regions, and only those regions are diffed and written, so an
@@ -107,7 +109,10 @@ several times longer to write.
 The diff compares rows as slices, finds the changed runs, treats a wide character as one unit, and
 merges two runs when resending the cells between them is cheaper than moving the cursor. The encoder
 writes the runs with the shortest cursor moves, the fewest SGR parameters from the terminal's current
-pen, and colours lowered to the terminal's depth. It never writes an empty SGR, which would reset
+pen, and colours lowered to the terminal's depth. A row that ends in spaces of the default
+background ends with `CSI K`, and so does one that ends in spaces of another background where the
+terminal erases with the pen's background (`bce`). Elsewhere those are written as spaces, so
+terminals with and without that erase agree. It never writes an empty SGR, which would reset
 everything. Autowrap is off while the program has the screen, so the last column never scrolls.
 
 A frame's packet is one write.

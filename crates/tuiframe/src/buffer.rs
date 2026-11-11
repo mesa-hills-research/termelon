@@ -1145,6 +1145,11 @@ impl Buffer {
         .union(Modifier::CROSSED_OUT)
         .union(Modifier::OVERLINED);
 
+    /// The cells, a row at a time from the top-left.
+    pub(crate) fn cells(&self) -> &[Cell] {
+        &self.cells
+    }
+
     /// The cells of row `y` of the area, counted from its top.
     pub(crate) fn row(&self, y: usize) -> &[Cell] {
         let width = usize::from(self.area.width);
@@ -1178,10 +1183,16 @@ impl Buffer {
     /// Whether `cell`, a cell of this buffer, shows as a blank cell does, as a space on the default
     /// background with no modifier that shows on a space and no link.
     pub(crate) fn looks_blank(&self, cell: &Cell) -> bool {
-        cell.symbol == Cell::SPACE_SYMBOL
-            && cell.bg == PackedColor::RESET
+        self.bare_background(cell) == Some(Color::Reset)
+    }
+
+    /// The background of `cell`, a cell of this buffer, when it's a space with no modifier that
+    /// shows on a space and no link, which shows its background and nothing else.
+    pub(crate) fn bare_background(&self, cell: &Cell) -> Option<Color> {
+        let bare = cell.symbol == Cell::SPACE_SYMBOL
             && !cell.modifier().intersects(Self::VISIBLE_ON_BLANK)
-            && (cell.extras == 0 || self.link_index(cell) == 0)
+            && (cell.extras == 0 || self.link_index(cell) == 0);
+        bare.then(|| cell.bg.unpack())
     }
 
     /// Whether two cells of this buffer have the same colours, attributes and extras.

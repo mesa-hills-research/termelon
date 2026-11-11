@@ -65,6 +65,8 @@ struct Allowed {
     hyperlinks: bool,
     sync: bool,
     cursor_shape: bool,
+    /// Erasing fills with the pen's background.
+    bce: bool,
 }
 
 impl Allowed {
@@ -77,6 +79,7 @@ impl Allowed {
             hyperlinks: caps.hyperlinks == Support::Yes,
             sync: caps.synchronized_output != Support::No,
             cursor_shape: caps.cursor_shape != Support::No,
+            bce: caps.bce == Support::Yes,
         }
     }
 }
@@ -204,9 +207,14 @@ impl Encoder {
             runs.reserve(height * 4);
         }
         let mut scroll = None;
+        let fill = if full && allowed.bce {
+            common_background(next)
+        } else {
+            Color::Reset
+        };
         if full {
             for y in 0..height {
-                diff::diff_row(Before::Blank, next, y, &[(0, width)], &mut runs);
+                diff::diff_row(Before::Fill(fill), next, y, &[(0, width)], &mut runs);
             }
         } else if let Some(regions) = regions {
             for y in 0..height {
@@ -234,7 +242,13 @@ impl Encoder {
                 self.visible = Some(false);
             }
             if full {
-                self.set_pen(Pen::DEFAULT, allowed, out);
+                // Where erasing fills with the background, the screen is cleared to the one most
+                // spaces have, which they then needn't be written in.
+                let pen = Pen {
+                    bg: self.lowering.lower(fill, allowed.depth),
+                    ..Pen::DEFAULT
+                };
+                self.set_pen(pen, allowed, out);
                 out.extend_from_slice(AUTOWRAP_OFF);
                 out.extend_from_slice(CLEAR);
             }
@@ -242,14 +256,14 @@ impl Encoder {
                 self.write_scroll(scroll, area, allowed, out);
             }
             let mut erased = None;
-            let mut blank_from = (usize::MAX, 0);
+            let mut tail = (usize::MAX, Tail::NONE);
             let mut written_to = (usize::MAX, 0);
             for &run in &runs {
                 if erased == Some(run.row) {
                     continue;
                 }
-                if blank_from.0 != run.row {
-                    blank_from = (run.row, blank_tail(next, next.row(run.row)));
+                if tail.0 != run.row {
+                    tail = (run.row, Tail::of(next, next.row(run.row), allowed.bce));
                 }
                 let mut run = run;
                 if written_to.0 == run.row {
@@ -259,7 +273,7 @@ impl Encoder {
                     }
                 }
                 let (written, erased_row, reached) =
-                    self.write_run(next, run, blank_from.1, allowed, out);
+                    self.write_run(next, run, tail.1, allowed, out);
                 cells += written;
                 written_to = (run.row, reached);
                 if erased_row {
@@ -354,15 +368,14 @@ impl Encoder {
         self.col = Some(0);
     }
 
-    /// Writes one run, or erases its blank tail with `CSI K` from `blank_from`, the column from
-    /// which the row looks blank to its end. Returns the cells written, whether it erased the
-    /// rest of the row, and the column it wrote up to, which an uncertain width can take past
-    /// the run's end.
+    /// Writes one run, or erases with `CSI K` its part in the row's `tail` of spaces that can be
+    /// erased. Returns the cells written, whether it erased the rest of the row, and the column it
+    /// wrote up to, which an uncertain width can take past the run's end.
     fn write_run(
         &mut self,
         next: &Buffer,
         run: Run,
-        blank_from: usize,
+        tail: Tail,
         allowed: Allowed,
         out: &mut Vec<u8>,
     ) -> (usize, bool, usize) {
@@ -385,14 +398,21 @@ impl Encoder {
             let Some(cell) = row.get(x) else {
                 break;
             };
-            if x >= blank_from && self.erase_is_shorter(run.end - x) {
+            let tail_bg = self.lowering.lower(tail.background, allowed.depth);
+            if x >= tail.from && Self::erase_is_shorter(run.end - x) {
                 unit.close_link(out);
                 self.move_to(column(area, x), y, false, out);
-                let neutral = self.pen.map_or(Pen::DEFAULT, |p| Pen {
-                    bg: Color::Reset,
-                    modifier: p.modifier - Modifier::REVERSED,
-                    ..p
-                });
+                let neutral = self.pen.map_or(
+                    Pen {
+                        bg: tail_bg,
+                        ..Pen::DEFAULT
+                    },
+                    |p| Pen {
+                        bg: tail_bg,
+                        modifier: p.modifier - Modifier::REVERSED,
+                        ..p
+                    },
+                );
                 self.set_pen(neutral, allowed, out);
                 out.extend_from_slice(ERASE_LINE);
                 cells += run.end - x;
@@ -551,14 +571,10 @@ impl Encoder {
         width
     }
 
-    /// Whether erasing `cells` blank cells with `CSI K` is shorter than writing them as spaces,
-    /// counting the SGR that makes the pen's background the default.
-    fn erase_is_shorter(&self, cells: usize) -> bool {
-        let neutral = self
-            .pen
-            .is_some_and(|p| p.bg == Color::Reset && !p.modifier.contains(Modifier::REVERSED));
-        let cost = ERASE_LINE.len() + if neutral { 0 } else { 6 };
-        cost < cells
+    /// Whether erasing `cells` spaces with `CSI K` is shorter than writing them. Either needs
+    /// the pen in their background, so only the spaces count.
+    fn erase_is_shorter(cells: usize) -> bool {
+        ERASE_LINE.len() < cells
     }
 
     /// Whether writing cluster `b` right after cluster `a` would make the terminal join them into
@@ -754,11 +770,58 @@ fn pen_of(next: &Buffer, cell: &Cell, allowed: Allowed, lowering: &mut Lowering)
     }
 }
 
-/// The column from which every cell of `row` to its end looks blank, or the row's length.
-fn blank_tail(next: &Buffer, row: &[Cell]) -> usize {
-    row.iter()
-        .rposition(|cell| !next.looks_blank(cell))
-        .map_or(0, |i| i + 1)
+/// The spaces that end a row and can be erased rather than written.
+#[derive(Debug, Clone, Copy)]
+struct Tail {
+    /// The column from which every cell of the row to its end is one of them.
+    from: usize,
+    /// Their background.
+    background: Color,
+}
+
+impl Tail {
+    const NONE: Self = Self {
+        from: usize::MAX,
+        background: Color::Reset,
+    };
+
+    /// The spaces of one background that end `row`, a row of `next`, which show only their
+    /// background. Only the default background counts unless erasing fills with the pen's,
+    /// `bce`.
+    fn of(next: &Buffer, row: &[Cell], bce: bool) -> Self {
+        let Some(background) = row.last().and_then(|c| next.bare_background(c)) else {
+            return Self::NONE;
+        };
+        if background != Color::Reset && !bce {
+            return Self::NONE;
+        }
+        let from = row
+            .iter()
+            .rposition(|cell| next.bare_background(cell) != Some(background))
+            .map_or(0, |i| i + 1);
+        Self { from, background }
+    }
+}
+
+/// The background most of `buffer`'s spaces have, of those that show only their background.
+fn common_background(buffer: &Buffer) -> Color {
+    let mut counts: [(Color, usize); 4] = [(Color::Reset, 0); 4];
+    for cell in buffer.cells() {
+        let Some(bg) = buffer.bare_background(cell) else {
+            continue;
+        };
+        if let Some(entry) = counts.iter_mut().find(|(c, n)| *c == bg || *n == 0) {
+            entry.0 = bg;
+            entry.1 += 1;
+        } else if let Some(least) = counts.iter_mut().min_by_key(|(_, n)| *n) {
+            // A colour among many keeps the slot of the rarest, a rough count for a rare screen.
+            *least = (bg, least.1);
+        }
+    }
+    counts
+        .iter()
+        .max_by_key(|(_, n)| *n)
+        .map_or(Color::Reset, |&(c, _)| c)
 }
 
 /// Opens a hyperlink to `url` with an id from its address, so it's the same link in every frame
