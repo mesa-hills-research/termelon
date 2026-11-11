@@ -306,36 +306,43 @@ program in `CompletedFrame`.
 
 In `output::writer`. One thread owns the output handle (`/dev/tty` or standard output on Unix, the
 console's output on Windows), and packets queue behind one mutex that is never held across a write.
+Clones of a `Writer` share the queue and the thread, which ends when the last clone is dropped.
 
 ```rust
 pub(crate) struct Writer { /* the queue, shared with the thread */ }
 
 impl Writer {
-    pub(crate) fn spawn(output: File, reset: Vec<u8>) -> io::Result<Self>;
+    pub(crate) fn spawn(out: impl Write + Send + 'static, reset: Vec<u8>) -> io::Result<Self>;
     pub(crate) fn is_idle(&self) -> bool;
-    pub(crate) fn send(&self, packet: Vec<u8>) -> Result<(), WriterFailed>;
+    pub(crate) fn send(&self, packet: Vec<u8>) -> Result<(), Failure>;
     pub(crate) fn spare_buffer(&self) -> Vec<u8>;
-    pub(crate) fn written(&self) -> impl Future<Output = ()> + '_;
+    pub(crate) fn written(&self) -> Written<'_>; // a Future<Output = ()>
     pub(crate) fn busy_since(&self) -> Option<Instant>;
-    pub(crate) fn close(&self, tail: Vec<u8>) -> Ticket;
-    pub(crate) fn wait(&self, ticket: Ticket, timeout: Duration) -> bool;
-    pub(crate) fn restore_handle(&self) -> RestoreHandle;
-    pub(crate) fn failure(&self) -> Option<io::ErrorKind>;
+    pub(crate) fn set_reset(&self, reset: Vec<u8>);
+    pub(crate) fn ticket(&self) -> Ticket;
+    pub(crate) fn close(&self, tail: &[u8]) -> (Ticket, bool);
+    pub(crate) fn wait(&self, ticket: Ticket, timeout: Duration) -> Finish; // Written, Failed, TimedOut
+    pub(crate) fn takeover(&self) -> Takeover;
+    pub(crate) fn failure(&self) -> Option<Failure>; // Gone(io::ErrorKind) or Died
 }
 ```
 
-- `spawn` takes the output handle and the reset packet built at open.
-- `is_idle` is the check behind `Drawn::Held`, and `written` completes when it turns true.
+- `spawn` takes the output handle and the reset packet, and `set_reset` replaces the reset once the
+  probe has decided what to turn on.
+- `is_idle` is the check behind `Drawn::Held`, and `written` completes when it turns true. It wakes
+  every task waiting on it, on any executor.
 - `send` queues a packet. Frames, out-of-band commands and probe queries all go through it, in order.
+  It fails once the writer failed, and drops the packet after `close`.
 - `spare_buffer` returns a written packet's buffer, emptied, so a frame reuses it rather than
   allocating.
 - `busy_since` is when the write in progress began, for a program's watchdog.
-- `close` drops the packets not yet started, then queues the reset and the program's `tail`. `wait`
-  says whether the reset was written within the timeout.
-- `restore_handle` gives the `RestoreHandle` (`Clone + Send + Sync`) whose `restore_now(timeout)`
-  writes CAN and the reset from its own thread when the writer is stuck, and never writes the reset
-  twice.
-- `failure` is set once a write fails, which also ends the event stream.
+- `ticket` stands for everything sent so far, and `wait` says what became of it within the timeout.
+- `close` drops the packets not yet started, then queues the reset and the program's `tail`, and says
+  whether this call ended the output. Its ticket counts as written only once the reset is.
+- `takeover` gives what writes CAN and the reset from a thread of its own when the writer is stuck
+  or died, with a record outside the writer's lock, so the reset is never written twice.
+  `RestoreHandle` (`Clone + Send + Sync`) keeps one, and its `restore_now(timeout)` uses it.
+- `failure` is set once a write fails or the thread ends. The terminal ends the event stream then.
 
 ### The reader
 
@@ -346,24 +353,31 @@ the program's thread through `Shared`.
 pub(crate) struct Shared {
     pub(crate) events: EventQueue, // Mutex<VecDeque<Event>>, a Condvar, the pending Wakers, closed
     pub(crate) replies: ReplySlot, // Mutex and Condvar, open only while the probe waits
-    pub(crate) size: AtomicU32,    // width << 16 | height
+    size: AtomicU32,               // width << 16 | height, through size() and set_size()
+    redraw: AtomicBool,            // through request_redraw() and take_redraw()
 }
 
 pub(crate) struct Reader { /* the thread's handle and its wake pipe or event */ }
 
 impl Reader {
     pub(crate) fn spawn(
-        input: Input,
-        decoder: Decoder,
+        input: OwnedFd,
+        decoder: impl Decode, // feed, has_pending and flush_pending
         shared: Arc<Shared>,
         escape_timeout: Duration,
+        signals: Signals,     // a pipe each for SIGWINCH and SIGCONT
+        resume: Resume,       // takes the terminal back on SIGCONT
     ) -> io::Result<Self>;
     pub(crate) fn expect(&self, query: Query);
-    pub(crate) fn park(&self);
-    pub(crate) fn unpark(&self);
+    pub(crate) fn park(&self) -> bool;
+    pub(crate) fn unpark(&self, resumed: bool);
     pub(crate) fn stop(self);
 }
 ```
+
+The reply slot and `expect` come with the decoder's replies. On Unix, `restore::screen::Screen` puts
+these together. It takes the terminal (raw mode, the writer, the setup packet, the reader) and
+closes it.
 
 Each turn of the reader's loop does these steps.
 
@@ -374,10 +388,12 @@ Each turn of the reader's loop does these steps.
 3. Queue the events, notifying the condvar and waking every stored waker. Put replies in the reply
    slot when it's open, and drop them otherwise.
 4. When no more input is ready, call `flush_pending` if the escape timeout is zero or has passed.
-5. On SIGWINCH or a window size record, store the new size and queue `Event::Resize`. On SIGCONT,
-   apply raw mode and the screen's modes again and queue `Event::Resumed`.
-6. When the input closes or fails, mark the queue closed, so `Events` ends.
+5. On SIGWINCH or a window size record, store the new size, ask for a full redraw and queue
+   `Event::Resize`. On SIGCONT, call `resume`, which applies raw mode and the screen's modes again,
+   ask for a full redraw and queue `Event::Resumed`.
+6. When the input closes or fails, or the thread ends, mark the queue closed, so `Events` ends.
 
 `expect` queues the query for the reader's next turn, so calling it before the query is written is
-enough. `park` and `unpark` hold the reader still while the program is suspended, and `stop` ends the
-thread at close.
+enough. `park` and `unpark` hold the reader still while the program is suspended. After a suspend,
+`unpark(true)` takes the SIGCONT that ended it as the resume the program already did, and queues
+`Event::Resumed`. `stop` ends the thread at close.

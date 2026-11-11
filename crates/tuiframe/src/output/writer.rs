@@ -172,6 +172,15 @@ pub(crate) enum Failure {
     Died,
 }
 
+impl From<Failure> for io::Error {
+    fn from(failure: Failure) -> Self {
+        match failure {
+            Failure::Gone(kind) => io::Error::new(kind, "the terminal stopped taking output"),
+            Failure::Died => io::Error::other("the terminal's writer stopped"),
+        }
+    }
+}
+
 /// What [`Writer::close`] or [`Writer::ticket`] gave, for [`Writer::wait`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Ticket {
@@ -323,6 +332,11 @@ impl Writer {
         std::mem::take(&mut lock(&self.shared.state).spare)
     }
 
+    /// What gives the terminal back.
+    pub(crate) fn reset(&self) -> Arc<[u8]> {
+        self.shared.record.reset()
+    }
+
     /// Replaces the reset, which [`close`](Self::close) and a reset written without the writer
     /// send. Once the program closed, the reset already queued stays.
     pub(crate) fn set_reset(&self, reset: Vec<u8>) {
@@ -471,6 +485,11 @@ impl std::fmt::Debug for Takeover {
 }
 
 impl Takeover {
+    /// The writer, while a handle on it is left.
+    pub(crate) fn writer(&self) -> Option<Writer> {
+        self.writer.upgrade().map(|shared| Writer { shared })
+    }
+
     /// For an end that can't count on the writer (a stuck program, a failed writer), writes the
     /// reset without it, unless the writer wrote it, and waits at most `wait` for what became of
     /// it. Its record is outside the writer's lock, which this takes for no wait. The first call
@@ -749,7 +768,7 @@ pub(crate) mod tests {
     }
 
     /// A terminal whose writer breaks on the first write.
-    struct Breaks;
+    pub(crate) struct Breaks;
 
     impl Write for Breaks {
         fn write(&mut self, _: &[u8]) -> io::Result<usize> {
@@ -784,7 +803,7 @@ pub(crate) mod tests {
     }
 
     /// Waits until the writer's thread took what was sent and waits for the terminal.
-    fn until_writing(writer: &Writer) {
+    pub(crate) fn until_writing(writer: &Writer) {
         let started = Instant::now();
         while writer.busy_since().is_none() {
             assert!(started.elapsed() < LONG, "the writer never started writing");
@@ -1220,6 +1239,7 @@ pub(crate) mod tests {
         assert!(spare.capacity() >= 4096);
         // A new reset replaces the one given at the start.
         writer.set_reset(b"[new reset]".to_vec());
+        assert_eq!(&*writer.reset(), b"[new reset]");
         let (ticket, _) = writer.close(b"");
         assert_eq!(writer.wait(ticket, LONG), Finish::Written);
         assert_eq!(gate.taken(), b"[frame][new reset]");

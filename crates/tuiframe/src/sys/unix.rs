@@ -558,6 +558,14 @@ pub(crate) mod tests {
             termios::tcsetwinsize(&self.master, winsize).unwrap();
         }
 
+        /// The terminal, as the library finds it.
+        pub(crate) fn tty(&self) -> Tty {
+            Tty {
+                input: self.slave.try_clone().unwrap(),
+                output: self.slave.try_clone().unwrap(),
+            }
+        }
+
         /// The slave's modes, all of them, as text.
         pub(crate) fn modes(&self) -> String {
             format!("{:?}", termios::tcgetattr(&self.slave).unwrap())
