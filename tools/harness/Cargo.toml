@@ -11,6 +11,9 @@ publish = false
 # Rebuilds each terminal's readback as a screen, and computes what the terminal should show for the
 # bytes the probe wrote, so the two compare cell by cell.
 termelon-vt.workspace = true
+# Compares a cell's text in Unicode's composed form, since xterm and foot store a letter and its
+# combining mark as the precomposed character where one exists.
+unicode-normalization = "0.1.25"
 
 [lints]
 workspace = true

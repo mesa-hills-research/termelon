@@ -3,6 +3,7 @@
 use std::fmt;
 
 use termelon_vt::{Cell, Color, Emulator, Style};
+use unicode_normalization::UnicodeNormalization as _;
 
 use crate::driver::{Colors, Readback};
 
@@ -34,8 +35,9 @@ impl fmt::Display for Mismatch {
     }
 }
 
-/// The ways a readback differs from the expected screen, at most [`MAX_MISMATCHES`]. Text and
-/// colours always count. Attributes and the cursor count only where the readback reports them.
+/// The ways a readback differs from the expected screen, at most [`MAX_MISMATCHES`]. Text, in
+/// Unicode's composed form, and colours always count. Attributes and the cursor count only where
+/// the readback reports them.
 pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
     let mut out = Vec::new();
     let got = &readback.screen;
@@ -82,7 +84,11 @@ pub fn compare(expected: &Emulator, readback: &Readback) -> Vec<Mismatch> {
                     });
                 }
             };
-            if reports.wide_text || narrow_text(expected, x, y) {
+            // A letter and its combining mark show the same as the precomposed character, which
+            // some terminals store instead.
+            if (reports.wide_text || narrow_text(expected, x, y))
+                && e.text().nfc().ne(g.text().nfc())
+            {
                 push("text", format!("{:?}", e.text()), format!("{:?}", g.text()));
             }
             if reports.trims_rows && x >= text_end {
@@ -224,5 +230,32 @@ fn compare_attributes(
                 .map_or_else(String::new, |link| link.url.clone())
         };
         push("link", url(e), url(g));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::driver::{Readback, Reports};
+    use termelon_vt::Profile;
+
+    fn screen(bytes: &str) -> Emulator {
+        let mut screen = Emulator::with_profile(Profile::xterm(), 4, 1);
+        screen.feed(bytes.as_bytes()).unwrap();
+        screen
+    }
+
+    /// A letter with its combining mark matches the precomposed letter, and nothing else.
+    #[test]
+    fn text_compares_composed() {
+        let reports = Reports {
+            wide_text: true,
+            ..Reports::default()
+        };
+        let expected = screen("e\u{301}x");
+        let precomposed = Readback::new(screen("\u{e9}x"), reports);
+        assert_eq!(compare(&expected, &precomposed), []);
+        let bare = Readback::new(screen("ex"), reports);
+        assert_eq!(compare(&expected, &bare).len(), 1);
     }
 }

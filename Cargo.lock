@@ -568,6 +568,7 @@ name = "harness"
 version = "0.1.0"
 dependencies = [
  "termelon-vt",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -1647,6 +1648,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "termelon"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "portable-pty",
+ "proptest",
+ "rustix",
+ "signal-hook 0.3.18",
+ "termelon-vt",
+ "tokio",
+ "unicode-segmentation",
+ "unicode-width",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "termelon-vt"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "proptest",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "termina"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1794,6 +1821,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
 name = "tokio"
 version = "1.53.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1812,32 +1845,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.8",
-]
-
-[[package]]
-name = "termelon"
-version = "0.1.0"
-dependencies = [
- "futures-core",
- "portable-pty",
- "proptest",
- "rustix",
- "signal-hook 0.3.18",
- "tokio",
- "termelon-vt",
- "unicode-segmentation",
- "unicode-width",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "termelon-vt"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "proptest",
- "unicode-segmentation",
- "unicode-width",
 ]
 
 [[package]]
@@ -1863,6 +1870,15 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-segmentation"
