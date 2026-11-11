@@ -1246,13 +1246,12 @@ mod real {
         )
         .unwrap();
         // (A console window sends focus records of its own as it gains and loses focus, so the
-        // test looks past them to the last one, which is the test's.)
+        // test takes every event until a second passes with none, and looks past those.)
         let mut events = Vec::new();
-        while events.last() != Some(&Event::FocusGained)
-            || !events.iter().any(|event| matches!(event, Event::Mouse(_)))
-        {
-            events.push(next(screen.shared()));
+        while let Next::Event(event) = screen.shared().events.next_timeout(Duration::from_secs(1)) {
+            events.push(event);
         }
+        assert!(events.contains(&Event::FocusGained), "{events:?}");
         let typed: Vec<&Event> = events
             .iter()
             .filter(|event| !matches!(event, Event::FocusGained | Event::FocusLost))
