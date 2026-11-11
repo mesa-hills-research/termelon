@@ -9,7 +9,7 @@ reading and writing.
 | Crate | Holds |
 |---|---|
 | `crates/termelon` | The library |
-| `crates/termelon-vt` | A terminal emulator in a library, which tests use to see what a terminal would show. It doesn't depend on `termelon`, so it checks the library's output independently |
+| `crates/termelon-vt` | A terminal emulator library, which tests use to see what a terminal would show. It doesn't depend on `termelon`, so it checks the library's output independently |
 | `tools/probe` | A program run inside real terminals, which measures them and draws test scenes |
 | `tools/harness` | Starts real terminals with the probe, drives them and reads back what they show |
 | `tools/bench` | Workloads that compare the output layer with ratatui and crossterm |
@@ -49,10 +49,11 @@ program a `Terminal` to draw with and an `Events` to read from.
   Linux and the BSDs, `select` on macOS (whose `poll` doesn't work on `/dev/tty`) and
   `WaitForMultipleObjects` on Windows. It decodes what it reads and queues the events.
 - `Events` is the program's end of the queue. `next_timeout` blocks, `try_next` doesn't, `batch`
-  returns everything already queued, and `next` is an `async fn` that works on any executor. It
+  returns everything already queued, and `next` returns a future that works on any executor. It
   keeps the waker of every pending poll, so no event waits for something else to wake the task.
-- The reader keeps the terminal's size in an atomic, so `draw` notices a resize without a system
-  call per frame.
+- The reader keeps the terminal's size in an atomic, which `Terminal::size` reads without a system
+  call. `draw` asks the system for the size once a frame as well, since SIGWINCH reaches only the
+  terminal's foreground process group.
 - `draw` renders, diffs and encodes on the program's thread, which is CPU work only, then hands the
   bytes to the writer. Nothing on the program's thread can block on the terminal.
 - The writer thread writes packets in order. A terminal that stops reading holds up that thread
@@ -91,15 +92,15 @@ which is that a wide character always has all its continuation cells and none is
 leader.
 
 A cluster's width is decided once, when it's written, by the buffer's `WidthProfile`. Programs
-measure with the same one, since `Terminal::open` makes the terminal's the process's profile
-(`text::set_width_profile`), which `text::width`, the text types' `width` and `Buffer::empty`
-read. Tests set one for their own thread with `text::with_width_profile`. Cells whose
-width terminals disagree on (emoji sequences, and emoji newer than many terminals' width tables) are
-marked. The encoder writes spaces over such a cell's cells first, then the cluster, then again the
-cells that the widest measure of it would cover, placing each absolutely, so a terminal that
-measures differently shows blanks in that cluster's cells and nothing wrong around it. One that
-the widest measure wouldn't fit before the right edge stays blank, since a terminal pushes a
-cluster too wide for the room left over the cells before it. East Asian ambiguous characters follow the profile
+measure with the same one, since `Terminal::open` makes the terminal's the process's profile, which
+`text::width_profile` returns and `text::width`, the text types' `width` and `Buffer::empty` use.
+Tests set one for their own thread with `text::with_width_profile`. Cells whose width terminals
+disagree on (emoji sequences, and emoji newer than many terminals' width tables) are marked. The
+encoder writes spaces over such a cell's cells first, then the cluster, then again the cells that
+the widest measure of it would cover, placing each absolutely, so a terminal that measures
+differently shows blanks in that cluster's cells and nothing wrong around it. One that the widest
+measure wouldn't fit before the right edge stays blank, since a terminal pushes a cluster too wide
+for the room left over the cells before it. East Asian ambiguous characters follow the profile
 without a mark. They include box drawing and the Greek and Cyrillic alphabets, which every measured
 terminal draws narrow unless it's set for East Asian text, and a resync after each would make them
 several times longer to write.
@@ -118,7 +119,7 @@ everything. Autowrap is off while the program has the screen, so the last column
 A frame's packet is one write.
 
 ```
-CSI ? 2026 h                      begin the synchronized update
+CSI ? 2026 h                      begin the synchronized update, unless the terminal lacks it
 CSI ? 25 l                        hide the cursor, if it was visible
 <runs: moves, SGR changes, OSC 8, text>
 SGR 0, and OSC 8 ; ; ST if a link is open
@@ -130,21 +131,24 @@ CSI ? 2026 l                      end the synchronized update
 
 A frame that changes no cell writes only a cursor move when the cursor moved, and nothing otherwise.
 
-Closing gives the terminal back in every way a program can end. The reset packet is built at open
-from what was enabled. It ends any synchronized update, pops the kitty keyboard flags, turns off the
-reports that were on, resets the pen, turns autowrap back on, resets the scroll region, leaves the
-alternate screen, shows the cursor and restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now`
-writes CAN, ST and the reset from a thread of its own, once, and the writer stops within the 4 KiB
-chunk it was writing.
+Closing gives the terminal back, and so does dropping the `Terminal`, a panic (through the panic
+hook `Options::panic_hook` installs) and, where `Options::restore_on_signals` is on, a signal that
+ends the program. The reset packet is built at open from what was enabled. It ends any synchronized
+update, pops the kitty keyboard flags, turns off the reports that were on, resets the pen, turns
+autowrap back on, resets the scroll region, leaves the alternate screen, shows the cursor and
+restores the title. When the writer is stuck mid-write, `RestoreHandle::restore_now` writes CAN, ST
+and the reset from a thread of its own, once, and the writer stops within the 4 KiB chunk it was
+writing.
 
 ## Input
 
 A tokenizer in the shape of the VT500 parser turns bytes into tokens (text, controls, escape
-sequences, strings, pastes) within fixed bounds, and the decoders turn tokens into events. A lone ESC
-at the end of what's available is the Esc key at once, unless `Options::escape_timeout` says to wait
-for a following byte. On Windows the reader reads console input records, which the decoder turns
-into the same events. Replies to the library's queries go to the probe's reply slot, never to the
-event queue, and replies nobody waits for are dropped.
+sequences, strings, pastes) within fixed bounds, and the decoders turn tokens into events. A lone
+ESC at the end of what's available is the Esc key once `Options::escape_timeout` has passed without
+a following byte, 20 ms by default and 100 ms under the kitty keyboard protocol. On Windows the
+reader reads console input records, which the decoder turns into the same events. Replies to the
+library's queries go to the probe's reply slot, never to the event queue, and replies nobody waits
+for are dropped.
 
 ## Capabilities
 

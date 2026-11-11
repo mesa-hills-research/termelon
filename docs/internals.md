@@ -188,8 +188,8 @@ pub struct FrameStats {
 - `set_scroll_detection` turns on looking for rows that moved when more than half of a frame's
   rows changed. When scrolling a region of rows saves bytes, the terminal scrolls them itself
   (`DECSTBM`, then delete or insert lines with `CSI n M` or `CSI n L` at the region's top, which
-  every VT102 descendant has, the Linux console too) and only the rest is written. It's off until the terminal
-  matrix passes it.
+  every VT102 descendant has, the Linux console too) and only the rest is written. `Terminal` doesn't
+  turn it on. The bench reaches it through the `unstable-encoder` feature.
 
 `Cursor` is the frame's cursor request (`position`, `shape`, `blinking`), and `FrameStats` reaches the
 program in `CompletedFrame`.
