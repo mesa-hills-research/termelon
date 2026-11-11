@@ -17,7 +17,7 @@
 //!
 //! [`graphemes`] and [`width`] measure text as the buffer does, cluster by cluster under the
 //! terminal's [`WidthProfile`], so a program's wrapping, cursor columns and alignment agree with
-//! the cells it draws.
+//! the cells it draws. [`wrap()`] breaks a line into rows by words with the same measure.
 
 use std::borrow::Cow;
 use std::cell::Cell as StdCell;
@@ -32,6 +32,9 @@ use crate::layout::Alignment;
 use crate::style::Style;
 
 mod tables;
+pub(crate) mod wrap;
+
+pub use wrap::{wrap, wrap_with};
 
 /// A piece of text in one style.
 ///

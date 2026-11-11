@@ -5,7 +5,8 @@
 //! The cases leave out the places where tuiframe draws differently on purpose. Its buffer skips
 //! zero-width clusters where ratatui appends them to the cell before, and a write over half of a
 //! wide character blanks the rest of it. A control character takes no cells in a line's width,
-//! where ratatui's `Line::width` counts one for it and then draws nothing.
+//! where ratatui's `Line::width` counts one for it and then draws nothing. A paragraph never lets
+//! a wide character overflow the right edge of a row.
 
 use ratatui::buffer::Buffer as RBuffer;
 use ratatui::layout::{Alignment as RAlignment, Rect as RRect};
@@ -14,7 +15,7 @@ use ratatui::symbols::border::Set as RSet;
 use ratatui::text::{Line as RLine, Span as RSpan, Text as RText};
 use ratatui::widgets::{
     Block as RBlock, Borders as RBorders, Clear as RClear, Padding as RPadding,
-    TitlePosition as RTitlePosition, Widget as RWidget,
+    Paragraph as RParagraph, TitlePosition as RTitlePosition, Widget as RWidget, Wrap as RWrap,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -22,7 +23,9 @@ use tuiframe::buffer::Buffer;
 use tuiframe::layout::{Alignment, Rect};
 use tuiframe::style::{Color, Modifier, Style};
 use tuiframe::text::{Line, Span, Text};
-use tuiframe::widgets::{Block, BorderSet, Borders, Clear, Padding, TitlePosition, Widget};
+use tuiframe::widgets::{
+    Block, BorderSet, Borders, Clear, Padding, Paragraph, TitlePosition, Widget, Wrap,
+};
 
 fn r_color(color: Color) -> RColor {
     match color {
@@ -583,5 +586,250 @@ fn padding_draws_as_ratatuis() {
                 ..BlockCase::default()
             });
         }
+    }
+}
+
+/// A small generator, so the cases are the same on every run.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        usize::try_from(self.next() % u64::try_from(n).unwrap_or(1)).unwrap_or(0)
+    }
+
+    fn below16(&mut self, n: u16) -> u16 {
+        u16::try_from(self.below(usize::from(n))).unwrap_or(0)
+    }
+
+    fn pick<T: Clone>(&mut self, items: &[T]) -> T {
+        items[self.below(items.len())].clone()
+    }
+}
+
+const NARROW: &[&str] = &[
+    "a", "b", "cd", "efg", "hijkl", "mnopqrst", " ", " ", " ", "  ", "   ", "\u{a0}", "\u{200b}",
+    "é", "e\u{301}", "\t", "-", ".",
+];
+
+const WIDE: &[&str] = &["界", "ｗｉ", "界a", "a界", " 界 "];
+
+fn random_text(rng: &mut Rng, tokens: &[&str]) -> Text<'static> {
+    let styles = styles();
+    let lines = (0..=rng.below(4))
+        .map(|_| {
+            let spans: Vec<Span<'static>> = (0..rng.below(5))
+                .map(|_| {
+                    let content: String = (0..rng.below(7)).map(|_| rng.pick(tokens)).collect();
+                    Span::styled(content, rng.pick(&styles))
+                })
+                .collect();
+            let mut line = Line::from(spans).style(rng.pick(&styles));
+            line.alignment = rng.pick(&ALIGNMENTS);
+            line
+        })
+        .collect::<Vec<_>>();
+    let mut text = Text::from(lines).style(rng.pick(&styles));
+    text.alignment = rng.pick(&ALIGNMENTS);
+    text
+}
+
+#[derive(Debug)]
+struct ParagraphCase {
+    text: Text<'static>,
+    wrap: Option<bool>,
+    alignment: Option<Alignment>,
+    scroll: (u16, u16),
+    style: Style,
+    block: bool,
+    area: Rect,
+}
+
+impl ParagraphCase {
+    fn random(rng: &mut Rng, tokens: &[&str]) -> Self {
+        Self {
+            text: random_text(rng, tokens),
+            wrap: rng.pick(&[None, Some(false), Some(true)]),
+            alignment: rng.pick(&ALIGNMENTS),
+            scroll: (rng.below16(4), rng.below16(5)),
+            style: rng.pick(&styles()),
+            block: rng.below(4) == 0,
+            area: Rect::new(
+                rng.below16(2),
+                rng.below16(2),
+                rng.below16(15) + 1,
+                rng.below16(7) + 1,
+            ),
+        }
+    }
+
+    fn ours(&self) -> Paragraph<'static> {
+        let mut p = Paragraph::new(self.text.clone())
+            .style(self.style)
+            .scroll(self.scroll);
+        if let Some(trim) = self.wrap {
+            p = p.wrap(Wrap { trim });
+        }
+        if let Some(alignment) = self.alignment {
+            p = p.alignment(alignment);
+        }
+        if self.block {
+            p = p.block(Block::bordered().title("T").border_style(RED));
+        }
+        p
+    }
+
+    fn theirs(&self) -> RParagraph<'static> {
+        let mut p = RParagraph::new(r_text(&self.text))
+            .style(r_style(self.style))
+            .scroll(self.scroll);
+        if let Some(trim) = self.wrap {
+            p = p.wrap(RWrap { trim });
+        }
+        if let Some(alignment) = self.alignment {
+            p = p.alignment(r_alignment(alignment));
+        }
+        if self.block {
+            p = p.block(RBlock::bordered().title("T").border_style(r_style(RED)));
+        }
+        p
+    }
+
+    /// Whether tuiframe's paragraph leaves every cell outside its area as it was.
+    fn stays_inside(&self) -> bool {
+        let (before, _) = buffers(18, 9);
+        let (mut drawn, _) = buffers(18, 9);
+        self.ours().render(self.area, &mut drawn);
+        drawn
+            .area()
+            .positions()
+            .filter(|&p| !self.area.contains(p))
+            .all(|p| {
+                drawn.symbol(p) == before.symbol(p)
+                    && drawn.cell(p).map(|c| c.style()) == before.cell(p).map(|c| c.style())
+            })
+    }
+
+    /// Whether ratatui lets a wide character overflow a wrapped row of this paragraph, which
+    /// tuiframe moves to the next row instead. The text is drawn whole with spare columns marked
+    /// on the right, and a row overflows when it writes over a mark or ends with a wide character
+    /// in the last column.
+    fn overflows_in_ratatui(&self) -> bool {
+        let Some(trim) = self.wrap else {
+            return false;
+        };
+        let width = if self.block {
+            self.area.width.saturating_sub(2)
+        } else {
+            self.area.width
+        };
+        if width == 0 {
+            return false;
+        }
+        let clusters: usize = self
+            .text
+            .lines
+            .iter()
+            .map(|l| l.to_string().chars().count() + 2)
+            .sum();
+        let height = u16::try_from(clusters)
+            .unwrap_or(u16::MAX)
+            .saturating_add(2);
+        let mut p = RParagraph::new(r_text(&self.text)).wrap(RWrap { trim });
+        if let Some(alignment) = self.alignment {
+            p = p.alignment(r_alignment(alignment));
+        }
+        let spare = 20;
+        let mut buf = RBuffer::empty(RRect::new(0, 0, width + spare, height));
+        for y in 0..height {
+            buf.set_string(width, y, "~".repeat(usize::from(spare)), RStyle::new());
+        }
+        p.render(RRect::new(0, 0, width, height), &mut buf);
+        (0..height).any(|y| {
+            buf[(width - 1, y)].symbol().width() > 1
+                || (width..width + spare).any(|x| buf[(x, y)].symbol() != "~")
+        })
+    }
+}
+
+fn check_paragraphs(seed: u64, cases: usize, tokens: &[&str]) -> (usize, usize) {
+    let mut rng = Rng(seed);
+    let mut compared = 0;
+    let mut skipped = 0;
+    for _ in 0..cases {
+        let case = ParagraphCase::random(&mut rng, tokens);
+        assert!(case.stays_inside(), "{case:#?}");
+        if case.overflows_in_ratatui() {
+            skipped += 1;
+            continue;
+        }
+        let (mut a, mut b) = buffers(18, 9);
+        case.ours().render(case.area, &mut a);
+        case.theirs().render(r_rect(case.area), &mut b);
+        same(&a, &b, &case);
+        compared += 1;
+    }
+    (compared, skipped)
+}
+
+#[test]
+fn paragraphs_draw_as_ratatuis() {
+    let (compared, skipped) = check_paragraphs(0x9e37_79b9_7f4a_7c15, 6000, NARROW);
+    assert_eq!((compared, skipped), (6000, 0));
+}
+
+#[test]
+fn paragraphs_with_wide_characters_draw_as_ratatuis_where_no_row_overflows() {
+    let tokens: Vec<&str> = NARROW.iter().chain(WIDE).copied().collect();
+    let (compared, skipped) = check_paragraphs(0x2545_f491_4f6c_dd1d, 6000, &tokens);
+    assert!(
+        compared > 5000 && skipped > 0,
+        "{compared} compared, {skipped} skipped"
+    );
+}
+
+#[test]
+fn a_wide_character_ratatui_lets_overflow_goes_to_the_next_row() {
+    let case = ParagraphCase {
+        text: Text::from("abcd界 x"),
+        wrap: Some(true),
+        alignment: None,
+        scroll: (0, 0),
+        style: Style::new(),
+        block: false,
+        area: Rect::new(0, 0, 5, 2),
+    };
+    assert!(case.overflows_in_ratatui());
+    let (mut a, mut b) = buffers(6, 2);
+    case.ours().render(case.area, &mut a);
+    case.theirs().render(r_rect(case.area), &mut b);
+    assert_eq!(&ours(&a)[..1], ["0: abcd45"]);
+    assert_eq!(&theirs(&b)[..1], ["0: abcd界"]);
+}
+
+/// `text::wrap` gives the rows a wrapping paragraph draws, spans and styles included.
+#[test]
+fn wrapped_lines_are_the_rows_of_ratatuis_wrapped_paragraphs() {
+    let mut rng = Rng(0x0bad_cafe_f00d_d00d);
+    for _ in 0..2000 {
+        let text = random_text(&mut rng, NARROW);
+        let line = &text.lines[0];
+        let width = rng.below16(12) + 1;
+        let trim = rng.below(2) == 0;
+        let rows = tuiframe::text::wrap_with(line, width, trim, tuiframe::WidthProfile::default());
+        let height = u16::try_from(rows.len() + 1).unwrap_or(u16::MAX);
+        let area = Rect::new(0, 0, width, height);
+        let (mut a, mut b) = buffers(width, height);
+        Paragraph::new(rows).render(area, &mut a);
+        RParagraph::new(r_line(line))
+            .wrap(RWrap { trim })
+            .render(r_rect(area), &mut b);
+        same(&a, &b, &(line, width, trim));
     }
 }

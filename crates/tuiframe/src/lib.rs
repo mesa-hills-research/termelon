@@ -8,7 +8,7 @@
 //! | [`text`] | [`Span`], [`Line`] and [`Text`], and the measure of text in cells |
 //! | [`style`] | [`Color`], [`Modifier`], [`UnderlineStyle`] and [`Style`] |
 //! | [`layout`] | [`Position`], [`Size`], [`Rect`], and [`Layout`] by [`Constraint`]s |
-//! | [`widgets`] | [`Widget`], and the [`Clear`] and [`Block`] widgets |
+//! | [`widgets`] | [`Widget`], and the [`Clear`], [`Block`] and [`Paragraph`] widgets |
 //! | [`event`] | [`Event`] and the key and mouse types in it |
 //! | [`caps`] | [`Capabilities`], what the terminal supports |
 //! | [`terminal`] | `Terminal`, opened with [`Options`], and its [`Events`] |
@@ -53,4 +53,4 @@ pub use terminal::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Re
 #[cfg(unix)]
 pub use terminal::{Terminal, terminal_size};
 pub use text::{Line, Span, Text};
-pub use widgets::{Block, BorderSet, Borders, Clear, Padding, Widget};
+pub use widgets::{Block, BorderSet, Borders, Clear, Padding, Paragraph, Widget, Wrap};

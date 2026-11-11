@@ -1,6 +1,7 @@
 //! Goldens for each widget, as the rows a terminal would show and the runs of styled cells.
 
 use super::*;
+use crate::caps::WidthProfile;
 use crate::style::{Color, Modifier};
 
 /// Each row's text, continuation cells left out.
@@ -421,4 +422,148 @@ fn borders_combine_as_flags() {
         format!("{:?}", Borders::TOP | Borders::LEFT),
         "Borders(TOP | LEFT)"
     );
+}
+
+#[test]
+fn paragraphs_cut_long_lines_without_wrapping() {
+    let text = Text::from("first line\nsecond line\nthird");
+    let buf = draw(6, 2, Paragraph::new(text.clone()));
+    assert_eq!(rows(&buf), ["first ", "second"]);
+    let buf = draw(6, 2, Paragraph::new(text.clone()).scroll((1, 3)));
+    assert_eq!(rows(&buf), ["ond li", "rd    "]);
+    let buf = draw(6, 2, Paragraph::new(text).scroll((1, 3)).right_aligned());
+    assert_eq!(rows(&buf), ["second", " third"]);
+}
+
+#[test]
+fn scrolling_across_a_wide_character_shows_it_whole() {
+    let buf = draw(4, 1, Paragraph::new("a界bc").scroll((0, 2)));
+    assert_eq!(rows(&buf), ["界bc"]);
+    let buf = draw(4, 1, Paragraph::new("a界bc").scroll((0, 3)));
+    assert_eq!(rows(&buf), ["bc  "]);
+}
+
+#[test]
+fn paragraphs_wrap_by_words() {
+    let text = "Lorem ipsum dolor sit amet, consectetur";
+    let buf = draw(12, 4, Paragraph::new(text).wrap(Wrap { trim: true }));
+    assert_eq!(
+        rows(&buf),
+        [
+            "Lorem ipsum ",
+            "dolor sit   ",
+            "amet,       ",
+            "consectetur "
+        ]
+    );
+    let buf = draw(
+        12,
+        2,
+        Paragraph::new(text)
+            .wrap(Wrap { trim: true })
+            .scroll((2, 5)),
+    );
+    assert_eq!(rows(&buf), ["amet,       ", "consectetur "]);
+}
+
+#[test]
+fn wrapped_rows_sit_as_aligned() {
+    let text = Text::from(vec![
+        Line::from("aa bb cc"),
+        Line::from("dd ee").right_aligned(),
+    ]);
+    let buf = draw(
+        6,
+        3,
+        Paragraph::new(text).wrap(Wrap { trim: true }).centered(),
+    );
+    assert_eq!(rows(&buf), [" aa bb", "  cc  ", " dd ee"]);
+}
+
+#[test]
+fn wrapped_spans_keep_their_styles_across_breaks() {
+    let line = Line::from(vec![
+        Span::raw("one "),
+        Span::styled("two three", RED),
+        Span::raw(" four"),
+    ]);
+    let buf = draw(8, 3, Paragraph::new(line).wrap(Wrap { trim: true }));
+    assert_eq!(rows(&buf), ["one two ", "three   ", "four    "]);
+    assert_eq!(styles(&buf), ["0 4..7 fg=Red", "1 0..5 fg=Red"]);
+}
+
+#[test]
+fn paragraph_styles_go_under_text_line_and_span_styles() {
+    let line = Line::from(vec![Span::raw("ab"), Span::styled("c", RED)]).style(BOLD);
+    let text = Text::from(line).style(Style::new().fg(Color::Green));
+    let paragraph = Paragraph::new(text).style(ON_BLUE);
+    let buf = draw(4, 2, paragraph);
+    assert_eq!(
+        styles(&buf),
+        [
+            "0 0..2 fg=Green bg=Blue Modifier(BOLD)",
+            "0 2..3 fg=Red bg=Blue Modifier(BOLD)",
+            "0 3..4 bg=Blue",
+            "1 0..4 bg=Blue",
+        ]
+    );
+}
+
+#[test]
+fn a_paragraph_in_a_block_draws_inside_it() {
+    let paragraph = Paragraph::new("Hello, worlds!")
+        .block(Block::bordered().title("Title"))
+        .wrap(Wrap { trim: false });
+    let buf = draw(13, 4, paragraph);
+    assert_eq!(
+        rows(&buf),
+        [
+            "┌Title──────┐",
+            "│Hello,     │",
+            "│worlds!    │",
+            "└───────────┘"
+        ]
+    );
+}
+
+#[test]
+fn a_wide_character_at_the_edge_goes_to_the_next_row() {
+    let paragraph = Paragraph::new("abcd界 x").wrap(Wrap { trim: true });
+    let mut buf = Buffer::empty(Rect::new(0, 0, 6, 3));
+    paragraph.render(Rect::new(0, 0, 5, 3), &mut buf);
+    assert_eq!(rows(&buf), ["abcd  ", "界 x  ", "      "]);
+}
+
+#[test]
+fn paragraphs_measure_with_the_buffer_profile() {
+    let joining = WidthProfile {
+        joins_emoji: true,
+        ..WidthProfile::default()
+    };
+    let family = "👨\u{200d}👩\u{200d}👧";
+    let mut buf = Buffer::with_width_profile(Rect::new(0, 0, 4, 2), joining);
+    Paragraph::new(format!("{family} {family}"))
+        .wrap(Wrap { trim: true })
+        .render(buf.area(), &mut buf);
+    assert_eq!(rows(&buf), [format!("{family}  "), format!("{family}  ")]);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 4, 2));
+    Paragraph::new(format!("{family} {family}"))
+        .wrap(Wrap { trim: true })
+        .render(buf.area(), &mut buf);
+    assert_eq!(rows(&buf), ["    ", "    "]);
+}
+
+#[test]
+fn empty_paragraphs_and_areas_draw_nothing_but_the_style() {
+    let buf = draw(
+        3,
+        2,
+        Paragraph::new("").style(ON_BLUE).wrap(Wrap { trim: true }),
+    );
+    assert_eq!(rows(&buf), ["   ", "   "]);
+    assert_eq!(styles(&buf), ["0 0..3 bg=Blue", "1 0..3 bg=Blue"]);
+    let mut buf = filled(3, 1);
+    Paragraph::new("abc").render(Rect::new(0, 0, 0, 1), &mut buf);
+    Paragraph::new("abc").render(Rect::new(7, 0, 2, 1), &mut buf);
+    assert_eq!(rows(&buf), ["xxx"]);
 }

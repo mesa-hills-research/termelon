@@ -2,8 +2,8 @@
 //!
 //! [`Widget`] has ratatui's shape, so a widget written for one ports to the other by changing its
 //! imports. Text is a widget (`&str`, `String`, [`Span`], [`Line`] and [`Text`]), and so are
-//! [`Clear`] and [`Block`]. Each draws only inside its area and the buffer, and measures text
-//! with the buffer's [`WidthProfile`].
+//! [`Clear`], [`Block`] and [`Paragraph`]. Each draws only inside its area and the buffer, and
+//! measures text with the buffer's [`WidthProfile`].
 //!
 //! ```
 //! use tuiframe::buffer::Buffer;
@@ -26,11 +26,13 @@
 
 mod block;
 mod clear;
+mod paragraph;
 #[cfg(test)]
 mod tests;
 
 pub use block::{Block, BorderSet, Borders, Padding, TitlePosition};
 pub use clear::Clear;
+pub use paragraph::{Paragraph, Wrap};
 
 use crate::buffer::Buffer;
 use crate::caps::WidthProfile;
@@ -41,7 +43,7 @@ use crate::text::{self, Line, Span, Text};
 /// Something that draws itself into an area of a buffer.
 ///
 /// A widget is usually built for one frame and consumed by drawing it. Widgets that are worth
-/// keeping implement it for a reference too, as [`Block`] does.
+/// keeping implement it for a reference too, as [`Block`] and [`Paragraph`] do.
 ///
 /// ```
 /// use tuiframe::buffer::Buffer;
