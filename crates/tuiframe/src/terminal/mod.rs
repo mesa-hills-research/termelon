@@ -261,6 +261,8 @@ mod unix {
         back: Buffer,
         /// Where the last frame put the cursor.
         cursor: Option<Cursor>,
+        /// The size to take when the terminal says 0x0 or nothing.
+        fallback: Size,
     }
 
     impl std::fmt::Debug for Terminal {
@@ -368,8 +370,12 @@ mod unix {
                     }
                 }
             }
-            let area = Rect::from(screen.shared().size());
+            let fallback = fallback_size(env);
+            let size = screen.window_size().unwrap_or(fallback);
+            screen.shared().set_size(size);
+            let area = Rect::from(size);
             Ok(Self {
+                fallback,
                 front: Buffer::with_width_profile(area, caps.width_profile),
                 back: Buffer::with_width_profile(area, caps.width_profile),
                 encoder: Encoder::new(),
@@ -401,7 +407,7 @@ mod unix {
                 return Ok(Drawn::Held);
             }
             self.screen.draw_here();
-            let area = Rect::from(self.screen.shared().size());
+            let area = Rect::from(self.size_now());
             if area != self.front.area() {
                 self.front.resize(area);
                 self.back.resize(area);
@@ -465,8 +471,9 @@ mod unix {
             if !writer.is_idle() {
                 return Ok(Drawn::Held);
             }
-            let shared = self.screen.shared();
-            if shared.redraw_pending() || Rect::from(shared.size()) != self.front.area() {
+            if Rect::from(self.size_now()) != self.front.area()
+                || self.screen.shared().redraw_pending()
+            {
                 return Ok(Drawn::FullFrameDue);
             }
             self.screen.draw_here();
@@ -590,6 +597,18 @@ mod unix {
             self.send(switch)
         }
 
+        /// The terminal's size as it says now. SIGWINCH reaches only the terminal's foreground
+        /// process group, so a frame asks rather than counting on it.
+        fn size_now(&self) -> Size {
+            let size = self.screen.window_size().unwrap_or(self.fallback);
+            let shared = self.screen.shared();
+            if size != shared.size() {
+                shared.set_size(size);
+                shared.request_redraw();
+            }
+            size
+        }
+
         /// Makes the next frame redraw everything, for a screen something else wrote over. Nothing
         /// asks the terminal where its cursor is.
         pub fn clear(&mut self) {
@@ -674,6 +693,19 @@ mod unix {
     pub fn terminal_size() -> Result<Size> {
         let tty = Tty::open().map_err(Error::NoTerminal)?;
         Ok(window_size(tty.output.as_fd())?.cells)
+    }
+
+    /// The size to take when the terminal gives none, from `COLUMNS` and `LINES`, or 80x24.
+    fn fallback_size(env: &dyn Environment) -> Size {
+        let number = |name| {
+            env.var(name)
+                .and_then(|value| value.trim().parse::<u16>().ok())
+                .filter(|&n| n > 0)
+        };
+        match (number("COLUMNS"), number("LINES")) {
+            (Some(width), Some(height)) => Size::new(width, height),
+            _ => Size::new(80, 24),
+        }
     }
 
     /// Makes the reset put the cursor's default shape back once a frame asks for another, and not

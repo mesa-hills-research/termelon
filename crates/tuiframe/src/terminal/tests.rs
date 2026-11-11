@@ -836,3 +836,34 @@ fn a_lone_escape_waits_longer_under_the_kitty_protocol() {
         terminal.close().unwrap();
     }
 }
+
+/// A frame reads the size from the terminal, since SIGWINCH reaches the foreground process group
+/// alone, and a terminal that says 0x0 gets `COLUMNS` and `LINES`, or 80x24.
+#[test]
+fn frames_read_the_size_from_the_terminal() {
+    let (played, signals) = Played::new(Profile::kitty());
+    let mut terminal = open(&played, signals, &[], &Options::default());
+    played.pty.resize(Size::new(90, 20));
+    wait_until_written(&terminal);
+    let drawn = terminal.draw(|frame| {
+        assert_eq!(frame.area(), crate::layout::Rect::new(0, 0, 90, 20));
+    });
+    assert!(matches!(drawn, Ok(Drawn::Written(_))));
+    assert_eq!(terminal.size(), Size::new(90, 20));
+    terminal.close().unwrap();
+
+    for (vars, size) in [
+        (
+            &[("COLUMNS", "100"), ("LINES", "40")][..],
+            Size::new(100, 40),
+        ),
+        (&[("COLUMNS", "0")][..], Size::new(80, 24)),
+    ] {
+        let (played, signals) = Played::new(Profile::kitty());
+        played.pty.resize(Size::ZERO);
+        let options = Options::default().capabilities(Capabilities::default());
+        let terminal = Terminal::open_on(played.tty(), options, &Vars(vars), signals).unwrap();
+        assert_eq!(terminal.size(), size);
+        terminal.close().unwrap();
+    }
+}

@@ -384,7 +384,7 @@ pub(crate) mod screen {
 
     use super::{CLOSE_WAIT, Enabled, RestoreHandle, register, unregister};
     use crate::output::writer::{Writer, lock};
-    use std::os::fd::AsFd;
+    use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 
     use crate::event::decode::Query;
     use crate::layout::Size;
@@ -403,7 +403,17 @@ pub(crate) mod screen {
         modes: Arc<Modes>,
         /// What takes the terminal, sent again when the program runs again after a stop.
         setup: Arc<Mutex<Vec<u8>>>,
+        /// The terminal, for its size.
+        size_fd: OwnedFd,
         closed: bool,
+    }
+
+    /// The size of the terminal `fd` is on, unless it says 0x0.
+    fn cells(fd: BorrowedFd<'_>) -> Option<Size> {
+        window_size(fd)
+            .ok()
+            .map(|size| size.cells)
+            .filter(|size| size.width > 0 && size.height > 0)
     }
 
     /// The terminal's output for a reset written without the writer, a descriptor kept from open,
@@ -435,9 +445,20 @@ pub(crate) mod screen {
         ) -> io::Result<Self> {
             let Tty { input, output } = tty;
             let modes = Arc::new(Modes::enter(input.as_fd())?);
-            let size = window_size(output.as_fd())
-                .or_else(|_| window_size(input.as_fd()))
-                .map_or(Size::ZERO, |size| size.cells);
+            // (The output is the screen, unless it isn't a terminal.)
+            let size_fd = if rustix::termios::isatty(&output) {
+                output.try_clone()
+            } else {
+                input.try_clone()
+            };
+            let size_fd = match size_fd {
+                Ok(fd) => fd,
+                Err(error) => {
+                    let _ = modes.restore();
+                    return Err(error);
+                }
+            };
+            let size = cells(size_fd.as_fd()).unwrap_or(Size::ZERO);
             let shared = Arc::new(Shared::new(size));
             let started = output.try_clone().and_then(|direct| {
                 let writer = Writer::spawn(File::from(output), Enabled::default().reset())?;
@@ -497,6 +518,7 @@ pub(crate) mod screen {
                     restore,
                     modes,
                     setup,
+                    size_fd,
                     closed: false,
                 }),
                 Err(error) => {
@@ -505,6 +527,11 @@ pub(crate) mod screen {
                     Err(error)
                 }
             }
+        }
+
+        /// The terminal's size as it says now, or `None` when it doesn't say or says 0x0.
+        pub(crate) fn window_size(&self) -> Option<Size> {
+            cells(self.size_fd.as_fd())
         }
 
         pub(crate) fn writer(&self) -> &Writer {
