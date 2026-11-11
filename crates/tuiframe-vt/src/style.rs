@@ -134,8 +134,8 @@ impl Color {
         }
     }
 
-    /// The colour as RGB in xterm's default palette, or `None` for the default.
-    pub(crate) fn rgb(self) -> Option<(u8, u8, u8)> {
+    /// The colour as RGB in xterm's default palette, or `None` for the terminal's default colour.
+    pub fn rgb(self) -> Option<(u8, u8, u8)> {
         match self {
             Color::Default => None,
             Color::Rgb(r, g, b) => Some((r, g, b)),
@@ -295,6 +295,10 @@ mod tests {
         assert_eq!(palette256(231), (255, 255, 255));
         assert_eq!(palette256(232), (8, 8, 8));
         assert_eq!(palette256(255), (238, 238, 238));
+        assert_eq!(Color::Red.rgb(), Some((0xcd, 0, 0)));
+        assert_eq!(Color::Indexed(9).rgb(), Some((0xff, 0, 0)));
+        assert_eq!(Color::Rgb(1, 2, 3).rgb(), Some((1, 2, 3)));
+        assert_eq!(Color::Default.rgb(), None);
     }
 
     #[test]

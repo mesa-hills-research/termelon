@@ -620,13 +620,6 @@ pub fn with_width_profile<R>(profile: WidthProfile, f: impl FnOnce() -> R) -> R 
 
 /// Makes `profile` the one every thread measures with, unless it set its own. The terminal sets
 /// the one it found when it opens.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::open` sets it, and comes with the terminal API"
-    )
-)]
 pub(crate) fn set_width_profile(profile: WidthProfile) {
     PROFILE.store(profile_bits(profile), Ordering::Relaxed);
 }

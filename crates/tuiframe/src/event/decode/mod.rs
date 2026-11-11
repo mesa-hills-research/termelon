@@ -17,17 +17,26 @@ use super::records::InputRecord;
 use super::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crate::caps::Rgb;
 
-/// How the terminal sends some keys, read from its settings at open.
+/// How the terminal sends some keys, read from its settings at open, and the decoder's bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DecoderOptions {
     /// The byte Backspace sends, termios `VERASE`, `0x7f` or `0x08`. Any other value counts as
     /// `0x7f`.
     pub(crate) erase: u8,
+    /// The most bytes of a paste held at once, 64 MiB by default. A longer paste arrives as
+    /// several [`Event::Paste`]s of about this size, in order.
+    pub(crate) max_paste: usize,
 }
+
+/// The default bound of a paste.
+pub(crate) const MAX_PASTE: usize = 64 << 20;
 
 impl Default for DecoderOptions {
     fn default() -> Self {
-        Self { erase: 0x7f }
+        Self {
+            erase: 0x7f,
+            max_paste: MAX_PASTE,
+        }
     }
 }
 
@@ -111,7 +120,7 @@ struct Context {
 impl Decoder {
     pub(crate) fn new(options: DecoderOptions) -> Self {
         Self {
-            tokenizer: Tokenizer::new(),
+            tokenizer: Tokenizer::new(options.max_paste),
             context: Context {
                 erase: if options.erase == 0x08 { 0x08 } else { 0x7f },
                 cursor_reports: 0,
@@ -144,6 +153,27 @@ impl Decoder {
         let context = &mut self.context;
         let mut emit = |token: Token<'_>| context.token(&token, out);
         self.tokenizer.flush(&mut emit);
+    }
+
+    /// Whether it holds anything at all: what [`Decoder::has_pending`] counts, a sequence with more
+    /// of it, a string, a paste or part of a character. The reader calls
+    /// [`Decoder::flush_held`] once the input has been silent for a while with something held.
+    pub(crate) fn has_held(&self) -> bool {
+        self.tokenizer.has_held()
+    }
+
+    /// Gives up on what it holds, as the input has been silent too long for it to be finished.
+    /// What [`Decoder::flush_pending`] takes becomes keys, a paste is delivered as it stands, and
+    /// a sequence, a string or part of a character is dropped. Afterwards nothing is held.
+    pub(crate) fn flush_held(&mut self, out: &mut Vec<Decoded>) {
+        let context = &mut self.context;
+        let mut emit = |token: Token<'_>| context.token(&token, out);
+        self.tokenizer.flush_held(&mut emit);
+    }
+
+    /// Forgets the queries whose answers are outstanding, for a probe that stopped waiting.
+    pub(crate) fn cancel_expected(&mut self) {
+        self.context.cursor_reports = 0;
     }
 
     /// Records one query whose answer is outstanding. Each matching reply uses one up, and a DA1

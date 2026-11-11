@@ -5,7 +5,7 @@ use super::*;
 
 /// The control sequences `bytes` give, as owned copies.
 fn sequences(bytes: &[u8]) -> Vec<Csi> {
-    let mut tokenizer = Tokenizer::new();
+    let mut tokenizer = Tokenizer::new(MAX_PASTE);
     let mut found = Vec::new();
     let mut emit = |token: Token<'_>| {
         if let Token::Csi { csi, .. } = token {
@@ -164,5 +164,36 @@ fn has_pending_is_an_esc_or_an_introducer_at_the_end() {
         );
         decoder.flush_pending(&mut out);
         assert!(!decoder.has_pending());
+    }
+}
+
+/// Input held while the terminal is silent is given up on. A pending ESC or introducer becomes
+/// keys, and a sequence, a string or part of a character is dropped, so what's typed next decodes
+/// as itself.
+#[test]
+fn held_input_is_given_up_on() {
+    let cases: &[(&[u8], Vec<Decoded>)] = &[
+        (b"\x1b[1;5", vec![]),
+        (b"\x1b[?2026;", vec![]),
+        (b"\x1b]11;rgb:1e1e/", vec![]),
+        (b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b", vec![]),
+        (b"\x1bP>|kitty", vec![]),
+        (b"\x1bO5", vec![]),
+        (&[0xe2, 0x82], vec![]),
+        (b"\x1b", vec![key(KeyCode::Esc, KeyModifiers::NONE)]),
+        (b"\x1b[", vec![key(KeyCode::Char('['), KeyModifiers::ALT)]),
+        (b"", vec![]),
+    ];
+    for (bytes, expected) in cases {
+        let mut decoder = Decoder::new(DecoderOptions::default());
+        let mut out = Vec::new();
+        decoder.feed(bytes, &mut out);
+        assert_eq!(decoder.has_held(), !bytes.is_empty());
+        decoder.flush_held(&mut out);
+        assert_eq!(&out, expected, "{:?}", String::from_utf8_lossy(bytes));
+        assert!(!decoder.has_held() && !decoder.has_pending());
+        out.clear();
+        decoder.feed(b"z", &mut out);
+        assert_eq!(out, [ch('z')], "{:?}", String::from_utf8_lossy(bytes));
     }
 }

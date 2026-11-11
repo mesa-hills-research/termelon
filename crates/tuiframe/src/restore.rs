@@ -15,6 +15,7 @@ use std::time::Duration;
 use crate::output::writer::{
     self, Direct, Finish, LOCK_WAIT, Takeover, Writer, lock, try_lock_for,
 };
+use crate::terminal::MouseMode;
 
 /// How long giving the terminal back waits for the terminal to take the reset, before what comes
 /// next (a panic's message, the end of the process).
@@ -25,7 +26,10 @@ pub(crate) const CLOSE_WAIT: Duration = Duration::from_secs(1);
 pub(crate) struct Enabled {
     /// The alternate screen, mode 1049.
     pub(crate) alternate_screen: bool,
-    pub(crate) mouse: Mouse,
+    /// The screen is cleared when the program takes it and when it gives it back, where there's no
+    /// alternate screen to leave it untouched.
+    pub(crate) clear: bool,
+    pub(crate) mouse: MouseMode,
     /// Focus reports, mode 1004.
     pub(crate) focus: bool,
     /// Bracketed paste, mode 2004.
@@ -44,33 +48,33 @@ pub(crate) struct Enabled {
     pub(crate) cursor_shape: bool,
 }
 
-/// Which mouse reports are on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum Mouse {
-    /// None.
-    #[default]
-    Off,
-    /// Buttons, the wheel and drags, in SGR coordinates (modes 1000, 1002 and 1006).
-    ButtonsAndDrags,
-    /// Every motion too (mode 1003).
-    AnyMotion,
+/// The private modes `mouse` turns on, in order.
+fn mouse_modes(mouse: MouseMode) -> &'static [u16] {
+    match mouse {
+        MouseMode::Off => &[],
+        MouseMode::ButtonsAndDrags => &[1000, 1002, 1006],
+        MouseMode::AnyMotion => &[1000, 1002, 1003, 1006],
+    }
 }
 
-impl Mouse {
-    /// The private modes it turns on, in order.
-    fn modes(self) -> &'static [u16] {
-        match self {
-            Mouse::Off => &[],
-            Mouse::ButtonsAndDrags => &[1000, 1002, 1006],
-            Mouse::AnyMotion => &[1000, 1002, 1003, 1006],
+/// What turns the mouse reports from `from` to `to`.
+pub(crate) fn mouse_switch(from: MouseMode, to: MouseMode) -> Vec<u8> {
+    let mut out = Vec::new();
+    if from != to {
+        for &mode in mouse_modes(from).iter().rev() {
+            private_mode(&mut out, mode, false);
+        }
+        for &mode in mouse_modes(to) {
+            private_mode(&mut out, mode, true);
         }
     }
+    out
 }
 
 impl Enabled {
     /// The private modes it turns on after the alternate screen, in order.
     fn modes(&self) -> Vec<u16> {
-        let mut modes = self.mouse.modes().to_vec();
+        let mut modes = mouse_modes(self.mouse).to_vec();
         let switches = [
             (self.focus, 1004),
             (self.bracketed_paste, 2004),
@@ -99,7 +103,21 @@ impl Enabled {
         if let Some(flags) = self.keyboard {
             out.extend_from_slice(format!("\x1b[>{flags}u").as_bytes());
         }
+        if self.clear {
+            out.extend_from_slice(b"\x1b[H\x1b[2J");
+        }
         out
+    }
+
+    /// What takes the terminal after `done` took it, which is [`setup`](Self::setup) without
+    /// entering the alternate screen again, since entering it twice loses the main screen's
+    /// cursor.
+    pub(crate) fn setup_after(&self, done: &Enabled) -> Vec<u8> {
+        let mut rest = self.clone();
+        if done.alternate_screen {
+            rest.alternate_screen = false;
+        }
+        rest.setup()
     }
 
     /// What gives the terminal back. It ends a synchronized update a frame left open, pops the
@@ -124,6 +142,9 @@ impl Enabled {
         }
         if self.cursor_shape {
             out.extend_from_slice(b"\x1b[0 q");
+        }
+        if self.clear {
+            out.extend_from_slice(b"\x1b[H\x1b[2J");
         }
         out.extend_from_slice(b"\x1b[?25h");
         if self.save_title {
@@ -357,6 +378,7 @@ pub(crate) mod screen {
     use crate::output::writer::{Writer, lock};
     use std::os::fd::AsFd;
 
+    use crate::event::decode::Query;
     use crate::layout::Size;
     use crate::sys::Shared;
     use crate::sys::unix::{
@@ -391,32 +413,26 @@ pub(crate) mod screen {
     }
 
     impl Screen {
-        /// Takes the terminal `tty`. It puts it in raw mode, starts the writer and sends what
-        /// `enabled` turns on, then starts the reader, whose decoder `decoder` makes from the byte
-        /// Backspace sends. A panic gives the terminal back from now on, where
-        /// [`install_panic_hook`] was called. When it fails, the terminal is as it was.
-        pub(crate) fn open<D: Decode>(
-            tty: Tty,
-            decoder: impl FnOnce(u8) -> D,
-            escape_timeout: Duration,
-            enabled: &Enabled,
-        ) -> io::Result<Self> {
-            Self::open_with(tty, decoder, escape_timeout, enabled, Signals::register()?)
-        }
-
-        /// [`open`](Self::open), with the reader learning of signals through `signals`.
+        /// Takes the terminal `tty`. It puts it in raw mode, starts the writer, then starts the
+        /// reader, whose decoder `decoder` makes from the byte Backspace sends, and which learns of
+        /// signals through `signals`. A panic gives the
+        /// terminal back from now on, where [`install_panic_hook`] was called, and a writer that
+        /// fails ends the events. [`enable`](Self::enable) then turns on what the program uses.
+        /// When it fails, the terminal is as it was.
         pub(crate) fn open_with<D: Decode>(
             tty: Tty,
             decoder: impl FnOnce(u8) -> D,
             escape_timeout: Duration,
-            enabled: &Enabled,
             signals: Signals,
         ) -> io::Result<Self> {
             let Tty { input, output } = tty;
             let modes = Arc::new(Modes::enter(input.as_fd())?);
-            let size = window_size(output.as_fd()).map_or(Size::ZERO, |size| size.cells);
+            let size = window_size(output.as_fd())
+                .or_else(|_| window_size(input.as_fd()))
+                .map_or(Size::ZERO, |size| size.cells);
+            let shared = Arc::new(Shared::new(size));
             let started = output.try_clone().and_then(|direct| {
-                let writer = Writer::spawn(File::from(output), enabled.reset())?;
+                let writer = Writer::spawn(File::from(output), Enabled::default().reset())?;
                 Ok((writer, Arc::new(File::from(direct))))
             });
             let (writer, direct) = match started {
@@ -437,10 +453,11 @@ pub(crate) mod screen {
                 }),
             );
             register(&restore);
-            let setup = enabled.setup();
-            let _ = writer.send(setup.clone());
-            let setup = Arc::new(Mutex::new(setup));
-            let shared = Arc::new(Shared::new(size));
+            writer.on_failure({
+                let shared = shared.clone();
+                move || shared.events.close()
+            });
+            let setup = Arc::new(Mutex::new(Vec::new()));
             let resume: Resume = Box::new({
                 let (modes, writer, setup, restore) = (
                     modes.clone(),
@@ -497,6 +514,28 @@ pub(crate) mod screen {
         /// Makes this thread the one that draws, whose panic gives the terminal back.
         pub(crate) fn draw_here(&self) {
             self.restore.draw_here();
+        }
+
+        /// Tells the decoder of a query whose answer is outstanding, before the query is written.
+        pub(crate) fn expect(&self, query: Query) {
+            if let Some(reader) = &self.reader {
+                reader.expect(query);
+            }
+        }
+
+        /// Tells the decoder to forget the queries whose answers are outstanding.
+        pub(crate) fn cancel_expected(&self) {
+            if let Some(reader) = &self.reader {
+                reader.cancel_expected();
+            }
+        }
+
+        /// Turns on what `enabled` says, which the reset then undoes and a resume turns on again.
+        /// Fails once the writer failed.
+        pub(crate) fn enable(&self, enabled: &Enabled) -> io::Result<()> {
+            self.set_enabled(enabled);
+            self.writer.send(enabled.setup())?;
+            Ok(())
         }
 
         /// Makes `enabled` what the reset undoes and what a resume turns on again. The program
@@ -579,7 +618,8 @@ mod tests {
     fn everything() -> Enabled {
         Enabled {
             alternate_screen: true,
-            mouse: Mouse::ButtonsAndDrags,
+            clear: false,
+            mouse: MouseMode::ButtonsAndDrags,
             focus: true,
             bracketed_paste: true,
             grapheme_clusters: true,
@@ -610,7 +650,7 @@ mod tests {
         assert_eq!(nothing.setup(), b"\x1b[?25l\x1b[?7l");
         assert_eq!(nothing.reset(), b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[?25h");
         let motion = Enabled {
-            mouse: Mouse::AnyMotion,
+            mouse: MouseMode::AnyMotion,
             ..Enabled::default()
         };
         assert!(
@@ -618,6 +658,21 @@ mod tests {
                 .unwrap()
                 .ends_with("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h")
         );
+        // Without an alternate screen, the screen is cleared on the way in and out.
+        let console = Enabled {
+            clear: true,
+            ..Enabled::default()
+        };
+        assert_eq!(console.setup(), b"\x1b[?25l\x1b[?7l\x1b[H\x1b[2J");
+        assert_eq!(
+            console.reset(),
+            b"\x1b[?2026l\x1b[0m\x1b[?7h\x1b[H\x1b[2J\x1b[?25h"
+        );
+        assert_eq!(
+            mouse_switch(MouseMode::ButtonsAndDrags, MouseMode::AnyMotion),
+            b"\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h"
+        );
+        assert!(mouse_switch(MouseMode::Off, MouseMode::Off).is_empty());
     }
 
     /// A handle on a writer to `terminal`, whose resets written without the writer go to
@@ -759,19 +814,20 @@ mod tests {
     #[cfg(unix)]
     mod unix {
         use super::super::screen::Screen;
-        use super::super::{Enabled, Mouse, install_panic_hook};
+        use super::super::{Enabled, install_panic_hook};
         use crate::event::{Event, KeyModifiers};
         use crate::layout::Size;
         use crate::sys::Next;
         use crate::sys::unix::Signals;
         use crate::sys::unix::tests::{Bytes, LONG, Pty, find, is_child, key, next, spawn_child};
+        use crate::terminal::MouseMode;
         use std::io::{self, Write};
         use std::time::Duration;
 
         fn enabled() -> Enabled {
             Enabled {
                 alternate_screen: true,
-                mouse: Mouse::ButtonsAndDrags,
+                mouse: MouseMode::ButtonsAndDrags,
                 focus: true,
                 bracketed_paste: true,
                 save_title: true,
@@ -782,14 +838,10 @@ mod tests {
         /// A screen on `pty`, with pipes that stand in for SIGWINCH and SIGCONT.
         fn screen(pty: &Pty) -> (Screen, io::PipeWriter, io::PipeWriter) {
             let (signals, resize, resume) = Signals::unregistered().unwrap();
-            let screen = Screen::open_with(
-                pty.tty(),
-                |_| Bytes::default(),
-                Duration::ZERO,
-                &enabled(),
-                signals,
-            )
-            .unwrap();
+            let screen =
+                Screen::open_with(pty.tty(), |_| Bytes::default(), Duration::ZERO, signals)
+                    .unwrap();
+            screen.enable(&enabled()).unwrap();
             (screen, resize, resume)
         }
 
@@ -845,7 +897,7 @@ mod tests {
             }
             // (The program turned the mouse off since it opened.)
             let changed = Enabled {
-                mouse: Mouse::Off,
+                mouse: MouseMode::Off,
                 ..enabled()
             };
             screen.set_enabled(&changed);
@@ -876,13 +928,14 @@ mod tests {
             for (case, message, _) in PANICS {
                 if is_child(case) {
                     install_panic_hook();
-                    let screen = Screen::open(
+                    let screen = Screen::open_with(
                         crate::sys::unix::Tty::open().unwrap(),
                         |_| Bytes::default(),
                         Duration::ZERO,
-                        &enabled(),
+                        Signals::register().unwrap(),
                     )
                     .unwrap();
+                    screen.enable(&enabled()).unwrap();
                     screen.writer().send(b"<ready>".to_vec()).unwrap();
                     assert!(screen.writer().wait_idle(LONG));
                     assert!(case != "panic-opening", "{message}");
@@ -935,13 +988,14 @@ mod tests {
             use rustix::process::{Pid, Signal, WaitOptions, kill_process, waitpid};
             const TEST: &str = "suspend_gives_the_terminal_back_until_the_process_runs_again";
             if is_child("suspend") {
-                let screen = Screen::open(
+                let screen = Screen::open_with(
                     crate::sys::unix::Tty::open().unwrap(),
                     |_| Bytes::default(),
                     Duration::ZERO,
-                    &enabled(),
+                    Signals::register().unwrap(),
                 )
                 .unwrap();
+                screen.enable(&enabled()).unwrap();
                 assert!(screen.shared().take_redraw());
                 screen.writer().send(b"<ready>".to_vec()).unwrap();
                 screen.suspend().unwrap();

@@ -23,8 +23,8 @@
 //! fixed bounds, whatever the input. The screen is a grid of cells, each a grapheme cluster with its
 //! width and the full style (colours by name, index or RGB, every SGR attribute, underline styles
 //! and colour, and OSC 8 hyperlinks). It has the cursor with its visibility and shape, the main and
-//! alternate screens, autowrap with xterm's pending-wrap state, origin mode, scroll regions, the
-//! title and its stack, OSC 52 writes, and the modes a terminal UI uses: mouse reports (9, 1000,
+//! alternate screens, autowrap with xterm's pending-wrap state, origin mode, scroll regions, line
+//! insertion and deletion, the title and its stack, OSC 52 writes, and the modes a terminal UI uses: mouse reports (9, 1000,
 //! 1002, 1003, 1006), focus (1004), bracketed paste (2004), synchronized update (2026), grapheme
 //! clusters (2027), and the kitty keyboard flags.
 //!
@@ -48,6 +48,13 @@
 //! which is measured again, so a cluster written one scalar at a time ends up as if written whole.
 //! While a program has mode 2027 set, clusters are measured as if `joins_emoji` were on.
 //!
+//! # Quirks
+//!
+//! [`Profile::with_quirk`] turns on a behaviour some terminals have and a program shouldn't rely on
+//! either way, such as ignoring `CSI ? 7 l` or leaving half of an overwritten wide character on the
+//! screen. A test that draws under each of [`Quirk::ALL`] checks that its output shows right
+//! whatever the terminal does there.
+//!
 //! # Where terminals differ
 //!
 //! The emulator follows xterm where terminals disagree. Its tests replay random streams through
@@ -63,6 +70,7 @@
 //! - Resetting origin mode moves the cursor home. In origin mode, Alacritty adds the region's top
 //!   again to CHA and relative moves.
 //! - ED 1 from the second row erases the first row too. Alacritty's leaves it.
+//! - IL and DL move the cursor to the first column, as DEC terminals do. Alacritty leaves it.
 //! - Erasing part of a wide character blanks all of it. Alacritty leaves the other half.
 //! - An emoji ZWJ sequence or a flag is one cell as wide as the cluster. Alacritty gives each emoji
 //!   a cell of its own, with the same text and cursor.
@@ -123,6 +131,6 @@ pub use emulator::{Cursor, CursorShape, Emulator};
 pub use event::{ClipboardWrite, Event, FeedError, Pos, UnknownSequence};
 pub use grid::Cell;
 pub use input::{Key, KeyKind, Mods, Mouse, MouseButton, MouseKind};
-pub use profile::{KeyEncoding, Profile};
+pub use profile::{KeyEncoding, Profile, Quirk, Quirks};
 pub use style::{Color, Hyperlink, Style, Underline};
 pub use width::WidthRules;

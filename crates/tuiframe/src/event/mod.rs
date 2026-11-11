@@ -36,6 +36,7 @@ pub(crate) mod records;
 
 /// Something the terminal reported.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Event {
     /// A key was pressed, repeated or released.
     Key(KeyEvent),
@@ -68,8 +69,10 @@ pub enum Scheme {
 /// A key and the modifiers held with it.
 ///
 /// Where the terminal can tell them apart, a typed capital is `Char('A')` with `SHIFT`, Shift+Tab
-/// is [`KeyCode::BackTab`], and Ctrl+J (a line feed) differs from Enter.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// is [`KeyCode::BackTab`], and Ctrl+J (a line feed) differs from Enter. Two key events are equal
+/// when their key, modifiers and kind are, whatever the terminal sent them as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct KeyEvent {
     /// The key.
     pub code: KeyCode,
@@ -78,9 +81,6 @@ pub struct KeyEvent {
     /// Whether it was pressed, repeated or released. Only some terminals report repeats and
     /// releases.
     pub kind: KeyEventKind,
-    /// The text the key types, where the terminal reports it (the kitty keyboard protocol's
-    /// associated text).
-    pub text: Option<Box<str>>,
 }
 
 impl KeyEvent {
@@ -97,13 +97,13 @@ impl KeyEvent {
             code,
             modifiers,
             kind,
-            text: None,
         }
     }
 }
 
 /// A key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum KeyCode {
     /// A key that types a character, as it types it with the modifiers held (`'A'` with Shift).
     Char(char),
@@ -162,6 +162,7 @@ pub enum KeyCode {
 
 /// A media key, as the kitty keyboard protocol lists them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum MediaKey {
     /// Play.
     Play,
@@ -193,6 +194,7 @@ pub enum MediaKey {
 
 /// A modifier key, as the kitty keyboard protocol lists them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ModifierKey {
     /// The left Shift.
     LeftShift,
@@ -269,6 +271,7 @@ pub enum KeyEventKind {
 
 /// A mouse button press, release, drag or scroll, at a cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct MouseEvent {
     /// What the mouse did.
     pub kind: MouseEventKind,
@@ -280,8 +283,22 @@ pub struct MouseEvent {
     pub modifiers: KeyModifiers,
 }
 
+impl MouseEvent {
+    /// The mouse doing `kind` at `column` and `row`, with `modifiers` held.
+    #[must_use]
+    pub const fn new(kind: MouseEventKind, column: u16, row: u16, modifiers: KeyModifiers) -> Self {
+        Self {
+            kind,
+            column,
+            row,
+            modifiers,
+        }
+    }
+}
+
 /// What the mouse did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum MouseEventKind {
     /// A button went down.
     Down(MouseButton),
@@ -303,6 +320,7 @@ pub enum MouseEventKind {
 
 /// A mouse button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum MouseButton {
     /// The left button.
     Left,
@@ -317,10 +335,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_gives_a_press_with_no_text() {
+    fn new_gives_a_press() {
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
         assert_eq!(key.kind, KeyEventKind::Press);
-        assert_eq!(key.text, None);
+        let copy = key;
+        assert_eq!(copy, key);
         assert_eq!(
             KeyEvent::new_with_kind(KeyCode::Enter, KeyModifiers::SHIFT, KeyEventKind::Release),
             KeyEvent {
@@ -328,6 +347,14 @@ mod tests {
                 ..key
             }
         );
+        let click = MouseEvent::new(
+            MouseEventKind::Down(MouseButton::Left),
+            3,
+            4,
+            KeyModifiers::CONTROL,
+        );
+        assert_eq!((click.column, click.row), (3, 4));
+        assert_eq!(click.modifiers, KeyModifiers::CONTROL);
     }
 
     #[test]

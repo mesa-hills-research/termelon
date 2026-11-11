@@ -508,6 +508,7 @@ fn a_full_redraw_clears_and_writes_what_isnt_blank() {
         "",
         "the redraw happens once"
     );
+    // The shape is the user's until a frame asks for another, so a redraw leaves it alone.
     encoder.redraw();
     let cursor = Some(Cursor::at(Position::new(1, 0)));
     let got = packet(&mut encoder, &frame, &frame, cursor, &caps);
@@ -523,6 +524,14 @@ fn a_full_redraw_clears_and_writes_what_isnt_blank() {
     assert!(
         got.ends_with("␛[1;2H␛[6 q␛[?25h␛[?2026l"),
         "a shape asked for is sent again: {got}"
+    );
+    // A redraw sends a shape asked for before again, the default too.
+    let cursor = Some(Cursor::at(Position::new(1, 0)));
+    encoder.redraw();
+    let got = packet(&mut encoder, &frame, &frame, cursor, &caps);
+    assert!(
+        got.ends_with("␛[1;2H␛[0 q␛[?25h␛[?2026l"),
+        "the shape is sent again: {got}"
     );
 }
 

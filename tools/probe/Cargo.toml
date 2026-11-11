@@ -9,5 +9,9 @@ publish = false
 
 [dependencies]
 
+[dev-dependencies]
+# Checks that every scene is made of sequences the emulator knows.
+tuiframe-vt.workspace = true
+
 [lints]
 workspace = true

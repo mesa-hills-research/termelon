@@ -35,18 +35,27 @@ fn c0_controls() {
 
 #[test]
 fn bs_is_backspace_only_where_verase_says_so() {
-    let bs = DecoderOptions { erase: 0x08 };
+    let bs = DecoderOptions {
+        erase: 0x08,
+        ..DecoderOptions::default()
+    };
     assert_eq!(
         decode_with(bs, b"\x08\x7f"),
         [key(KeyCode::Backspace, NONE), key(KeyCode::Backspace, NONE)]
     );
-    let del = DecoderOptions { erase: 0x7f };
+    let del = DecoderOptions {
+        erase: 0x7f,
+        ..DecoderOptions::default()
+    };
     assert_eq!(
         decode_with(del, b"\x7f\x08"),
         [key(KeyCode::Backspace, NONE), key(KeyCode::Char('h'), CTRL)]
     );
     // An erase byte that is neither counts as DEL.
-    let other = DecoderOptions { erase: 0xff };
+    let other = DecoderOptions {
+        erase: 0xff,
+        ..DecoderOptions::default()
+    };
     assert_eq!(
         decode_with(other, b"\x7f\x08"),
         [key(KeyCode::Backspace, NONE), key(KeyCode::Char('h'), CTRL)]

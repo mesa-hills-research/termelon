@@ -987,13 +987,6 @@ impl Buffer {
 }
 
 /// The clip that partial frames draw under.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "`Terminal::draw_regions` sets the clip, and comes with the terminal API"
-    )
-)]
 impl Buffer {
     /// Drops every write from now on to a cell outside `regions`, whatever the call, until
     /// [`clear_clip`](Self::clear_clip). Text goes on past the cells it couldn't write, so a
@@ -1033,16 +1026,61 @@ impl Buffer {
     pub(crate) fn clip_spill(&self, y: usize) -> Option<(usize, usize)> {
         self.spill.get(y).copied().flatten()
     }
+
+    /// Makes the rows `regions` cover hold what they hold in `other`, for the record a partial
+    /// frame keeps of the cells it may change, at a cost of those rows rather than the screen.
+    /// The tables come along whole, so the copied cells resolve, and the other rows hold what
+    /// they held, which may no longer resolve until a reset. A buffer over another area becomes a
+    /// copy of `other`.
+    pub(crate) fn copy_rows_from(&mut self, other: &Buffer, regions: &[Rect]) {
+        if self.area != other.area {
+            self.clone_from(other);
+            return;
+        }
+        self.clusters.clone_from(&other.clusters);
+        self.extras.clone_from(&other.extras);
+        self.width_profile = other.width_profile;
+        let width = usize::from(self.area.width);
+        for region in regions {
+            let r = region.intersection(self.area);
+            for row in usize::from(r.y - self.area.y)..usize::from(r.bottom() - self.area.y) {
+                let cells = row * width..(row + 1) * width;
+                self.cells[cells.clone()].copy_from_slice(&other.cells[cells]);
+                self.rich_rows[row] = other.rich_rows[row];
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod copy_rows_tests {
+    use super::*;
+
+    /// The rows copied read as they do in the buffer they came from, clusters and links included.
+    #[test]
+    fn copied_rows_read_as_in_their_source() {
+        let area = Rect::new(0, 0, 6, 3);
+        let mut source = Buffer::empty(area);
+        source.set_string(0, 1, "e\u{301}x", Style::new());
+        source.set_link(Rect::new(0, 1, 2, 1), Some("https://example.com"));
+        source.set_string(0, 2, "below", Style::new());
+        let mut copy = Buffer::empty(area);
+        copy.set_string(0, 1, "older", Style::new());
+        copy.copy_rows_from(&source, &[Rect::new(1, 1, 1, 1)]);
+        for x in 0..6 {
+            let (copied, original) = (copy.cell((x, 1)).unwrap(), source.cell((x, 1)).unwrap());
+            assert_eq!(copied.symbol(), original.symbol(), "column {x}");
+            assert_eq!(copied.link(), original.link(), "column {x}");
+            assert_eq!(copied.style(), original.style(), "column {x}");
+        }
+        assert_eq!(copy.symbol((0, 2)), " ");
+        let mut other = Buffer::empty(Rect::new(0, 0, 2, 2));
+        other.copy_rows_from(&source, &[]);
+        assert_eq!(other, source);
+    }
 }
 
 /// Reading for the diff and the encoder.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the encoder reads cells through these, and `Terminal` runs the encoder"
-    )
-)]
 impl Buffer {
     /// Modifiers that show on a space.
     const VISIBLE_ON_BLANK: Modifier = Modifier::REVERSED

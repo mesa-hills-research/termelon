@@ -8,12 +8,6 @@ const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
 const ALT: KeyModifiers = KeyModifiers::ALT;
 
-fn with_text(code: KeyCode, modifiers: KeyModifiers, text: &str) -> Decoded {
-    let mut key = KeyEvent::new(code, modifiers);
-    key.text = Some(text.into());
-    Decoded::Event(Event::Key(key))
-}
-
 #[test]
 fn disambiguate_escape_codes() {
     check_table(&[
@@ -122,17 +116,67 @@ fn report_alternate_keys() {
             b"\x1b[59:58;6u",
             vec![key(KeyCode::Char(':'), SHIFT | CTRL)],
         ),
-        // The base layout key is reported, and the key stays the layout's own.
-        (
-            "\x1b[1092::97;5u".as_bytes(),
-            vec![key(KeyCode::Char('ф'), CTRL)],
-        ),
+        // Typed with Shift alone, a key of another layout stays its own character.
         (
             "\x1b[1092:1060:97;2u".as_bytes(),
             vec![key(KeyCode::Char('Ф'), SHIFT)],
         ),
         // The shifted key counts only with Shift held.
         (b"\x1b[97:65;5u", vec![key(KeyCode::Char('a'), CTRL)]),
+    ]);
+}
+
+/// A shortcut on a layout outside ASCII is named by the key in the same place on a US layout,
+/// which the protocol reports as the base layout key, so Ctrl+C is Ctrl+C on a Cyrillic layout.
+/// The Cyrillic `ф` and `с` sit where `a` and `c` do, and the French `é` on the `2` key. A layout
+/// of ASCII letters keeps its own, so the German Ctrl+Z is Ctrl+Z.
+#[test]
+fn shortcuts_on_other_layouts_are_their_us_keys() {
+    check_table(&[
+        (
+            "\x1b[1092::97;5u".as_bytes(),
+            vec![key(KeyCode::Char('a'), CTRL)],
+        ),
+        (
+            "\x1b[1089::99;5u".as_bytes(),
+            vec![key(KeyCode::Char('c'), CTRL)],
+        ),
+        (
+            "\x1b[1089::99;3u".as_bytes(),
+            vec![key(KeyCode::Char('c'), ALT)],
+        ),
+        (
+            "\x1b[1092::97;9u".as_bytes(),
+            vec![key(KeyCode::Char('a'), KeyModifiers::SUPER)],
+        ),
+        (
+            "\x1b[1092:1060:97;6u".as_bytes(),
+            vec![key(KeyCode::Char('A'), CTRL | SHIFT)],
+        ),
+        (
+            "\x1b[233::50;5u".as_bytes(),
+            vec![key(KeyCode::Char('2'), CTRL)],
+        ),
+        (
+            "\x1b[1092::97;5:3u".as_bytes(),
+            vec![key_kind(KeyCode::Char('a'), CTRL, KeyEventKind::Release)],
+        ),
+        // Without the base key, or with an ASCII key, the key is its own.
+        (
+            "\x1b[1092;5u".as_bytes(),
+            vec![key(KeyCode::Char('ф'), CTRL)],
+        ),
+        (b"\x1b[97::97;5u", vec![key(KeyCode::Char('a'), CTRL)]),
+        (b"\x1b[122::121;5u", vec![key(KeyCode::Char('z'), CTRL)]),
+        // A base key that is no printable ASCII is ignored.
+        (
+            "\x1b[1092::9;5u".as_bytes(),
+            vec![key(KeyCode::Char('ф'), CTRL)],
+        ),
+        (
+            "\x1b[1092::1093;5u".as_bytes(),
+            vec![key(KeyCode::Char('ф'), CTRL)],
+        ),
     ]);
 }
 
@@ -170,25 +214,14 @@ fn report_all_keys_as_escape_codes() {
     ]);
 }
 
+/// The associated text isn't kept, so a key is the same whether the terminal sent it or not.
 #[test]
 fn report_associated_text() {
     check_table(&[
-        (
-            b"\x1b[97;;97u",
-            vec![with_text(KeyCode::Char('a'), NONE, "a")],
-        ),
-        (
-            b"\x1b[97;2;65u",
-            vec![with_text(KeyCode::Char('A'), SHIFT, "A")],
-        ),
-        (
-            b"\x1b[97:65;2;65u",
-            vec![with_text(KeyCode::Char('A'), SHIFT, "A")],
-        ),
-        (
-            b"\x1b[101;;101:769u",
-            vec![with_text(KeyCode::Char('e'), NONE, "e\u{301}")],
-        ),
+        (b"\x1b[97;;97u", vec![ch('a')]),
+        (b"\x1b[97;2;65u", vec![key(KeyCode::Char('A'), SHIFT)]),
+        (b"\x1b[97:65;2;65u", vec![key(KeyCode::Char('A'), SHIFT)]),
+        (b"\x1b[101;;101:769u", vec![ch('e')]),
         (b"\x1b[13;1;u", vec![key(KeyCode::Enter, NONE)]),
     ]);
 }

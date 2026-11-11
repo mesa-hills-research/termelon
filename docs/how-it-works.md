@@ -161,7 +161,8 @@ thread owns one.
 
 ```rust
 pub(crate) struct DecoderOptions {
-    pub(crate) erase: u8, // termios VERASE, 0x7f or 0x08
+    pub(crate) erase: u8,        // termios VERASE, 0x7f or 0x08
+    pub(crate) max_paste: usize, // 64 MiB by default
 }
 
 pub(crate) struct Decoder { /* the tokenizer's state and the outstanding queries */ }
@@ -171,7 +172,10 @@ impl Decoder {
     pub(crate) fn feed(&mut self, bytes: &[u8], out: &mut Vec<Decoded>);
     pub(crate) fn has_pending(&self) -> bool;
     pub(crate) fn flush_pending(&mut self, out: &mut Vec<Decoded>);
+    pub(crate) fn has_held(&self) -> bool;
+    pub(crate) fn flush_held(&mut self, out: &mut Vec<Decoded>);
     pub(crate) fn expect(&mut self, query: Query);
+    pub(crate) fn cancel_expected(&mut self);
     pub(crate) fn decode_records(&mut self, records: &[InputRecord], out: &mut Vec<Decoded>);
 }
 ```
@@ -189,9 +193,17 @@ impl Decoder {
   (`ESC [ 1 ;`), a string, a paste and part of a UTF-8 character stay held, since only a split read
   leaves them unfinished, and they don't count as pending. The reader calls it when no more input is
   ready.
+- `has_held` says whether it holds anything at all, and `flush_held` gives up on it. What
+  `flush_pending` takes becomes keys, a paste is delivered as it stands, and a sequence, a string or
+  part of a character is dropped. The reader calls it once the input has been silent for about a
+  second with something held, so a reply cut short or a stray `ESC ]` never swallows what's typed
+  next.
+- A paste longer than `max_paste` arrives as several `Event::Paste`s of about that size, in order,
+  each of whole characters, so a paste never holds more memory than the bound.
 - `expect` records one query whose answer is outstanding. Each matching reply uses one up, and a DA1
   reply clears them all, since terminals answer in order. Only the cursor report needs this, because
-  `CSI r ; c R` is also a modified F3 in the legacy encoding.
+  `CSI r ; c R` is also a modified F3 in the legacy encoding. `cancel_expected` forgets them all,
+  for a probe that stopped waiting.
 - `decode_records` decodes Windows console records into the same events as `feed` does for bytes.
 
 ```rust
@@ -389,7 +401,7 @@ pub(crate) struct Reader { /* the thread's handle and its wake pipe or event */ 
 impl Reader {
     pub(crate) fn spawn(
         input: OwnedFd,
-        decoder: impl Decode, // feed, has_pending and flush_pending
+        decoder: impl Decode, // feed, has_pending, flush_pending and expect, as Decoder has
         shared: Arc<Shared>,
         escape_timeout: Duration,
         signals: Signals,     // a pipe each for SIGWINCH and SIGCONT
@@ -402,9 +414,9 @@ impl Reader {
 }
 ```
 
-The reply slot and `expect` come with the decoder's replies. On Unix, `restore::screen::Screen` puts
-these together. It takes the terminal (raw mode, the writer, the setup packet, the reader), closes
-it, and suspends it.
+On Unix, `restore::screen::Screen` puts these together. `Screen::open_with` takes the terminal
+(raw mode, the writer, the reader) and `enable` sends the setup the probe's answers decided on. It
+also closes the terminal and suspends it. A writer that fails ends the events.
 
 Each turn of the reader's loop does these steps.
 
