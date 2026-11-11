@@ -1,12 +1,12 @@
 //! kitty, under X with software rendering, driven and read back through its remote control.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command};
 
 use tuiframe_vt::{Key, Mods, Profile, WidthRules};
 
 use crate::driver::{
-    Attributes, Colors, Driver, Error, Launch, Readback, Reports, clean_command, run,
+    Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
     run_with_input, work_dir, x_screenshot,
 };
 use crate::drivers::x11;
@@ -16,7 +16,7 @@ use crate::readback::ansi_screen;
 /// kitty, listening for remote control on a socket in its work directory.
 #[derive(Debug)]
 pub struct Kitty {
-    dir: PathBuf,
+    dir: WorkDir,
     child: Option<Child>,
     size: Option<(u16, u16)>,
     width: WidthRules,
@@ -163,6 +163,5 @@ impl Driver for Kitty {
 impl Drop for Kitty {
     fn drop(&mut self) {
         let _ = self.stop();
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }

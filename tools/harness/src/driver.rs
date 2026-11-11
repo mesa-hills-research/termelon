@@ -372,12 +372,42 @@ pub fn installed(program: &str) -> bool {
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
-/// A directory of the harness's own for a driver's sockets and files, made fresh.
+/// A directory of the harness's own for a driver's sockets and files. It's removed when dropped.
+#[derive(Debug)]
+pub struct WorkDir(PathBuf);
+
+impl std::ops::Deref for WorkDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for WorkDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<OsStr> for WorkDir {
+    fn as_ref(&self) -> &OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for WorkDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Makes a fresh [`WorkDir`] in the system's temporary directory.
 ///
 /// # Errors
 ///
 /// When it can't be made.
-pub fn work_dir(name: &str) -> Result<PathBuf, Error> {
+pub fn work_dir(name: &str) -> Result<WorkDir, Error> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -389,7 +419,7 @@ pub fn work_dir(name: &str) -> Result<PathBuf, Error> {
         use std::os::unix::fs::PermissionsExt as _;
         let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
     }
-    Ok(dir)
+    Ok(WorkDir(dir))
 }
 
 /// Takes a screenshot of the X display with ImageMagick's `import`, where there is a display.

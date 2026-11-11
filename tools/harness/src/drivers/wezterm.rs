@@ -9,7 +9,7 @@ use std::process::{Child, Command};
 use tuiframe_vt::{Key, Mods, WidthRules};
 
 use crate::driver::{
-    Attributes, Colors, Driver, Error, Launch, Readback, Reports, clean_command, run,
+    Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
     run_with_input, work_dir, x_screenshot,
 };
 use crate::drivers::x11;
@@ -18,7 +18,7 @@ use crate::readback::{ansi_screen, json_field, set_cursor};
 /// WezTerm in a process of its own.
 #[derive(Debug)]
 pub struct Wezterm {
-    dir: PathBuf,
+    dir: WorkDir,
     child: Option<Child>,
     socket: Option<PathBuf>,
     window: Option<String>,
@@ -195,6 +195,5 @@ impl Driver for Wezterm {
 impl Drop for Wezterm {
     fn drop(&mut self) {
         let _ = self.stop();
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }

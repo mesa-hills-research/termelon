@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use tuiframe_vt::{Key, Mods, WidthRules};
 
 use crate::driver::{
-    Attributes, Colors, Driver, Error, Launch, Readback, Reports, clean_command, run, work_dir,
-    x_screenshot,
+    Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
+    work_dir, x_screenshot,
 };
 use crate::drivers::x11;
 use crate::readback::{ansi_screen, xterm_html};
@@ -27,7 +27,7 @@ const BACKGROUND: (u8, u8, u8) = (0xff, 0xff, 0xff);
 /// xterm with a bitmap font, so its cells don't depend on FreeType.
 #[derive(Debug)]
 pub struct Xterm {
-    dir: PathBuf,
+    dir: WorkDir,
     child: Option<Child>,
     size: Option<(u16, u16)>,
     tty: Option<PathBuf>,
@@ -222,6 +222,5 @@ impl Driver for Xterm {
 impl Drop for Xterm {
     fn drop(&mut self) {
         let _ = self.stop();
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }

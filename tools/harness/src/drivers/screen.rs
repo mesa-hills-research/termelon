@@ -6,12 +6,14 @@
 //! holds text only, one byte per cell in screen's font, so wide and non-Latin-1 characters aren't
 //! read back.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use tuiframe_vt::{Key, Mods};
 
-use crate::driver::{Driver, Error, Launch, Readback, Reports, clean_command, run, work_dir};
+use crate::driver::{
+    Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run, work_dir,
+};
 use crate::drivers::tmux::Tmux;
 use crate::readback::hardcopy_screen;
 
@@ -27,7 +29,7 @@ const HARDCOPY_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct Screen {
     program: String,
     outer: Tmux,
-    dir: PathBuf,
+    dir: WorkDir,
     session: String,
     size: Option<(u16, u16)>,
 }
@@ -203,7 +205,6 @@ impl Driver for Screen {
 impl Drop for Screen {
     fn drop(&mut self) {
         let _ = self.stop();
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

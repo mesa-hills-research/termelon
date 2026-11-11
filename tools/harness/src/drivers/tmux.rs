@@ -1,12 +1,13 @@
 //! tmux, headless, driven with `send-keys` and read back with `capture-pane -p -e -N`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use tuiframe_vt::{Key, Mods, WidthRules};
 
 use crate::driver::{
-    Attributes, Colors, Driver, Error, Launch, Readback, Reports, clean_command, run, work_dir,
+    Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
+    work_dir,
 };
 use crate::keys;
 use crate::readback::{ansi_screen, set_cursor};
@@ -27,7 +28,7 @@ const CONFIG: &str =
 #[derive(Debug)]
 pub struct Tmux {
     program: String,
-    dir: PathBuf,
+    dir: WorkDir,
     size: Option<(u16, u16)>,
     width: WidthRules,
 }
@@ -242,7 +243,6 @@ impl Driver for Tmux {
 impl Drop for Tmux {
     fn drop(&mut self) {
         let _ = self.stop();
-        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 

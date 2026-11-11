@@ -118,7 +118,8 @@ fn waiting_times_out_with_the_screen() {
     clippy::unwrap_used,
     reason = "a helper of tests, which fail on an error"
 )]
-fn recorder(tmux: &mut Tmux) -> std::path::PathBuf {
+/// Returns the file, and its directory, which goes when dropped.
+fn recorder(tmux: &mut Tmux) -> (std::path::PathBuf, harness::driver::WorkDir) {
     let dir = work_dir("tmux-keys").unwrap();
     let file = dir.join("typed");
     let script = format!(
@@ -128,7 +129,7 @@ fn recorder(tmux: &mut Tmux) -> std::path::PathBuf {
     tmux.start(&Launch::new(20, 3, &["sh", "-c", &script]))
         .unwrap();
     tmux.wait_for("ready", Duration::from_secs(10)).unwrap();
-    file
+    (file, dir)
 }
 
 fn read_until(file: &Path, len: usize) -> Vec<u8> {
@@ -145,7 +146,7 @@ fn read_until(file: &Path, len: usize) -> Vec<u8> {
 #[test]
 fn raw_bytes_reach_the_program() {
     let Some(mut tmux) = tmux() else { return };
-    let file = recorder(&mut tmux);
+    let (file, _dir) = recorder(&mut tmux);
     let bytes = b"a\x1b[A\x00\xff;";
     tmux.send_bytes(bytes).unwrap();
     assert_eq!(read_until(&file, bytes.len()), bytes);
@@ -155,7 +156,7 @@ fn raw_bytes_reach_the_program() {
 #[test]
 fn keys_match_the_tmux_profile() {
     let Some(mut tmux) = tmux() else { return };
-    let file = recorder(&mut tmux);
+    let (file, _dir) = recorder(&mut tmux);
     let profile = Emulator::with_profile(Profile::tmux_3_4(), 20, 3);
     let none = Mods::NONE;
     let keys = [
