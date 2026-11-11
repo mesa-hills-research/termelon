@@ -1,10 +1,11 @@
 name: Windows console
 
 # Runs the tests that need a real Windows console, and the pseudoconsole tests, on GitHub's Windows
-# runners, and keeps what they print. The console tests run on Server 2022, whose consoles conhost
-# hosts, and on Server 2025, once in the runner's own console and once in a conhost window started
-# for them. The pseudoconsole tests run with the system's ConPTY and with the one Windows Terminal
-# ships, its conpty.dll and OpenConsole.exe copied beside the test binaries.
+# runners, and keeps what they print. The console tests run on Server 2022 and 2025, in the
+# runner's own console, in a conhost window started for them, and in Windows Terminal (the one
+# Server 2025 has, and the portable build on Server 2022). The pseudoconsole tests run with the
+# system's ConPTY and with the one Windows Terminal ships, its conpty.dll and OpenConsole.exe copied
+# beside the test binaries.
 
 on:
   push:
@@ -27,6 +28,9 @@ env:
   # SHA-256 before it's used.
   CONPTY_NUPKG: https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.Windows.Console.ConPTY.1.25.260930003.nupkg
   CONPTY_SHA256: 6d6f8b008c655d814c498d8205d4012dcd4d0b6dfc1096461d0a185d1e3caf03
+  # The same release's portable zip, for Server 2022, which has no Windows Terminal of its own.
+  WT_ZIP: https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_x64.zip
+  WT_SHA256: bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc043cdf831852e796
 
 # Actions are pinned to commits of releases published at least 30 days before they were chosen.
 
@@ -41,6 +45,10 @@ jobs:
         include:
           - os: windows-2022
             host: runner
+          - os: windows-2022
+            host: conhost
+          - os: windows-2022
+            host: windows-terminal
           - os: windows-2025
             host: runner
           - os: windows-2025
@@ -64,13 +72,30 @@ jobs:
           if (-not $lib) { throw "no test binary for the library" }
           "LIB_TESTS=$lib" >> $env:GITHUB_ENV
       - name: Show the console settings
+        continue-on-error: true
         shell: pwsh
         run: |
           [Environment]::OSVersion.Version
           (Get-Item "$env:windir\System32\conhost.exe").VersionInfo.FileVersionRaw
           Get-ItemProperty -Path 'HKCU:\Console\%%Startup' -ErrorAction SilentlyContinue | Format-List
-          Get-AppxPackage Microsoft.WindowsTerminal -ErrorAction SilentlyContinue | Format-List Name, Version, InstallLocation
+          powershell.exe -NoProfile -Command 'Get-AppxPackage Microsoft.WindowsTerminal | Format-List Name, Version, InstallLocation'
           Get-Command wt.exe -ErrorAction SilentlyContinue | Format-List Source
+      - name: Install Windows Terminal's portable build
+        if: matrix.host == 'windows-terminal' && matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'wt.zip'
+          Invoke-WebRequest -Uri $env:WT_ZIP -OutFile $zip -UserAgent 'termelon-ci'
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:WT_SHA256) { throw "the Windows Terminal zip's SHA-256 is $hash" }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'wt'
+          Expand-Archive -Path $zip -DestinationPath $unpacked
+          $exe = Get-ChildItem $unpacked -Recurse -Filter WindowsTerminal.exe | Select-Object -First 1
+          $dir = Split-Path $exe.FullName
+          New-Item -ItemType File -Path (Join-Path $dir '.portable') | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $dir 'settings') | Out-Null
+          '{"profiles":{"defaults":{"closeOnExit":"always"}}}' | Set-Content (Join-Path $dir 'settings\settings.json')
+          "WT_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
       - name: Run the console tests in the runner's console
         if: matrix.host == 'runner'
         shell: bash
@@ -94,7 +119,8 @@ jobs:
           if ($env:HOST -eq 'conhost') {
             Start-Process -FilePath "$env:windir\System32\conhost.exe" -ArgumentList "cmd.exe /d /c `"$script`""
           } else {
-            Start-Process -FilePath wt.exe -ArgumentList "-w new --size 120,40 cmd.exe /d /c `"$script`""
+            $wt = if ($env:WT_EXE) { $env:WT_EXE } else { 'wt.exe' }
+            Start-Process -FilePath $wt -ArgumentList "-w new --size 120,40 cmd.exe /d /c `"$script`""
           }
           $until = (Get-Date).AddMinutes(15)
           while (-not (Test-Path "$out\exit-code.txt") -and (Get-Date) -lt $until) { Start-Sleep -Seconds 1 }
