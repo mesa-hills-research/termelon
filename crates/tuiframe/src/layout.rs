@@ -418,6 +418,202 @@ impl Iterator for Positions {
 impl ExactSizeIterator for Positions {}
 impl FusedIterator for Positions {}
 
+/// Where text sits across a wider area.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Alignment {
+    /// At the left.
+    #[default]
+    Left,
+    /// In the middle, with the odd cell on the right.
+    Center,
+    /// At the right.
+    Right,
+}
+
+/// The size [`Layout`] gives one of the areas it splits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Constraint {
+    /// Exactly this many cells.
+    Length(u16),
+    /// At least this many cells, and more when no [`Fill`](Self::Fill) takes the space left.
+    Min(u16),
+    /// At most this many cells.
+    Max(u16),
+    /// This percentage of the area, rounded down. Above 100 counts as 100.
+    Percentage(u16),
+    /// This fraction of the area, rounded down. A fraction over 1 counts as 1, and a zero
+    /// denominator as 0.
+    Ratio(u32, u32),
+    /// A share of the space left, in proportion to the weight.
+    Fill(u16),
+}
+
+/// Splits a rectangle into a row or a column of areas by [`Constraint`]s.
+///
+/// The solver takes one pass, so the same constraints always give the same areas.
+///
+/// 1. `Length(n)`, `Min(n)` and `Max(n)` start at n cells, `Percentage` and `Ratio` at their part
+///    of the area, and `Fill` at none.
+/// 2. When those overflow the area, the last constraints shrink first, each to nothing before the
+///    one before it shrinks.
+/// 3. Otherwise the space left goes to the `Fill` constraints by weight. With no `Fill` (or only
+///    zero weights), the `Min` constraints share it equally.
+/// 4. Space nothing takes stays empty after the last area.
+///
+/// Shares are rounded down, and the cells left over go one each to the first constraints that
+/// take a share.
+///
+/// ```
+/// use tuiframe::layout::{Constraint, Layout, Rect};
+///
+/// let [title, body, status] = Layout::vertical([
+///     Constraint::Length(1),
+///     Constraint::Fill(1),
+///     Constraint::Length(1),
+/// ])
+/// .areas(Rect::new(0, 0, 80, 24));
+/// assert_eq!(title, Rect::new(0, 0, 80, 1));
+/// assert_eq!(body, Rect::new(0, 1, 80, 22));
+/// assert_eq!(status, Rect::new(0, 23, 80, 1));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Layout {
+    vertical: bool,
+    constraints: Vec<Constraint>,
+}
+
+impl Layout {
+    /// Areas stacked from the top, each as wide as the rectangle.
+    pub fn vertical<I>(constraints: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<Constraint>,
+    {
+        Self {
+            vertical: true,
+            constraints: constraints.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Areas side by side from the left, each as tall as the rectangle.
+    pub fn horizontal<I>(constraints: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<Constraint>,
+    {
+        Self {
+            vertical: false,
+            constraints: constraints.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// The areas, one for each constraint, in order.
+    pub fn split(&self, area: Rect) -> Vec<Rect> {
+        let (start, total) = if self.vertical {
+            (area.y, area.bottom() - area.y)
+        } else {
+            (area.x, area.right() - area.x)
+        };
+        let sizes = solve(&self.constraints, total);
+        let mut offset = start;
+        sizes
+            .into_iter()
+            .map(|size| {
+                let rect = if self.vertical {
+                    Rect::new(area.x, offset, area.width, size)
+                } else {
+                    Rect::new(offset, area.y, size, area.height)
+                };
+                offset = offset.saturating_add(size);
+                rect
+            })
+            .collect()
+    }
+
+    /// The areas as an array, for destructuring. When `N` differs from the number of
+    /// constraints, the extra constraints are left out, or the extra areas are empty at the end.
+    pub fn areas<const N: usize>(&self, area: Rect) -> [Rect; N] {
+        let split = self.split(area);
+        let end = if self.vertical {
+            Rect::new(area.x, area.bottom(), area.width, 0)
+        } else {
+            Rect::new(area.right(), area.y, 0, area.height)
+        };
+        core::array::from_fn(|i| split.get(i).copied().unwrap_or(end))
+    }
+}
+
+/// The size of each constraint along `total` cells, by the rules on [`Layout`].
+fn solve(constraints: &[Constraint], total: u16) -> Vec<u16> {
+    let whole = u64::from(total);
+    let mut sizes: Vec<u16> = constraints
+        .iter()
+        .map(|&c| match c {
+            Constraint::Length(n) | Constraint::Min(n) | Constraint::Max(n) => n,
+            Constraint::Percentage(p) => part(whole * u64::from(p.min(100)) / 100),
+            Constraint::Ratio(_, 0) | Constraint::Fill(_) => 0,
+            Constraint::Ratio(a, b) => part(whole * u64::from(a.min(b)) / u64::from(b)),
+        })
+        .collect();
+    let used: u64 = sizes.iter().map(|&s| u64::from(s)).sum();
+    if used > whole {
+        let mut excess = used - whole;
+        for size in sizes.iter_mut().rev() {
+            let cut = excess.min(u64::from(*size));
+            *size -= part(cut);
+            excess -= cut;
+            if excess == 0 {
+                break;
+            }
+        }
+        return sizes;
+    }
+    let fills: Vec<u64> = constraints
+        .iter()
+        .map(|&c| match c {
+            Constraint::Fill(w) => u64::from(w),
+            _ => 0,
+        })
+        .collect();
+    let weights = if fills.iter().any(|&w| w > 0) {
+        fills
+    } else {
+        constraints
+            .iter()
+            .map(|&c| u64::from(matches!(c, Constraint::Min(_))))
+            .collect()
+    };
+    share(&mut sizes, &weights, whole - used);
+    sizes
+}
+
+/// Adds `free` cells to `sizes` in proportion to `weights`, rounding down, then one each from the
+/// first with a weight until none are left.
+fn share(sizes: &mut [u16], weights: &[u64], free: u64) {
+    let total_weight: u64 = weights.iter().sum();
+    if total_weight == 0 {
+        return;
+    }
+    let mut left = free;
+    for (size, &w) in sizes.iter_mut().zip(weights) {
+        let add = free * w / total_weight;
+        *size = size.saturating_add(part(add));
+        left -= add;
+    }
+    for (size, _) in sizes.iter_mut().zip(weights).filter(|(_, w)| **w > 0) {
+        if left == 0 {
+            break;
+        }
+        *size = size.saturating_add(1);
+        left -= 1;
+    }
+}
+
+/// A count of cells known to fit in the area, as a `u16`.
+fn part(cells: u64) -> u16 {
+    u16::try_from(cells).unwrap_or(u16::MAX)
+}
+
 const fn min(a: u16, b: u16) -> u16 {
     if a < b { a } else { b }
 }
@@ -614,6 +810,91 @@ mod tests {
         assert_eq!(
             Rect::new(0, 0, MAX, 1).positions().count(),
             usize::from(MAX)
+        );
+    }
+
+    fn sizes(constraints: &[Constraint], total: u16) -> Vec<u16> {
+        let rects =
+            Layout::horizontal(constraints.iter().copied()).split(Rect::new(0, 0, total, 1));
+        let mut x = 0;
+        for r in &rects {
+            assert_eq!(r.x, x, "areas are packed from the left");
+            x += r.width;
+        }
+        rects.iter().map(|r| r.width).collect()
+    }
+
+    use Constraint::{Fill, Length, Max, Min, Percentage, Ratio};
+
+    #[test]
+    fn fixed_sizes_come_first() {
+        assert_eq!(sizes(&[Length(3), Length(5)], 20), [3, 5]);
+        assert_eq!(sizes(&[Percentage(25), Percentage(50)], 20), [5, 10]);
+        assert_eq!(sizes(&[Percentage(33)], 10), [3]);
+        assert_eq!(sizes(&[Percentage(250)], 10), [10]);
+        assert_eq!(sizes(&[Ratio(1, 3), Ratio(2, 3)], 10), [3, 6]);
+        assert_eq!(sizes(&[Ratio(5, 2), Ratio(1, 0)], 10), [10, 0]);
+        assert_eq!(sizes(&[Min(4), Max(6)], 10), [4, 6]);
+    }
+
+    #[test]
+    fn overflow_shrinks_the_last_constraints_first() {
+        assert_eq!(sizes(&[Length(5), Length(5), Length(5)], 12), [5, 5, 2]);
+        assert_eq!(sizes(&[Length(5), Min(5), Length(5)], 7), [5, 2, 0]);
+        assert_eq!(sizes(&[Percentage(100), Min(20)], 50), [50, 0]);
+        assert_eq!(sizes(&[Length(5), Fill(1), Length(5)], 6), [5, 0, 1]);
+        assert_eq!(sizes(&[Length(u16::MAX), Length(u16::MAX)], 3), [3, 0]);
+    }
+
+    #[test]
+    fn the_rest_goes_to_fill_by_weight() {
+        assert_eq!(sizes(&[Length(2), Fill(1), Fill(3)], 10), [2, 2, 6]);
+        assert_eq!(sizes(&[Fill(1), Fill(1), Fill(1)], 10), [4, 3, 3]);
+        assert_eq!(sizes(&[Fill(0), Fill(2)], 10), [0, 10]);
+        assert_eq!(sizes(&[Min(3), Fill(1)], 10), [3, 7]);
+        assert_eq!(sizes(&[Max(3), Fill(1)], 10), [3, 7]);
+    }
+
+    #[test]
+    fn without_fill_min_constraints_share_the_rest_equally() {
+        assert_eq!(sizes(&[Length(1), Min(0), Length(1)], 24), [1, 22, 1]);
+        assert_eq!(sizes(&[Min(2), Min(4)], 11), [5, 6]);
+        assert_eq!(sizes(&[Min(1), Fill(0)], 5), [5, 0]);
+    }
+
+    #[test]
+    fn space_nothing_takes_stays_empty_at_the_end() {
+        assert_eq!(sizes(&[Length(2), Max(3)], 10), [2, 3]);
+        assert_eq!(sizes(&[], 10), Vec::<u16>::new());
+    }
+
+    #[test]
+    fn vertical_layouts_stack_rows_inside_the_area() {
+        let area = Rect::new(3, 4, 10, 6);
+        let rects = Layout::vertical([Length(1), Fill(1), Length(2)]).split(area);
+        assert_eq!(
+            rects,
+            [
+                Rect::new(3, 4, 10, 1),
+                Rect::new(3, 5, 10, 3),
+                Rect::new(3, 8, 10, 2)
+            ]
+        );
+        let rects = Layout::horizontal([Percentage(50), Fill(1)]).split(area);
+        assert_eq!(rects, [Rect::new(3, 4, 5, 6), Rect::new(8, 4, 5, 6)]);
+    }
+
+    #[test]
+    fn areas_pads_or_drops_to_its_length() {
+        let area = Rect::new(0, 0, 10, 4);
+        let [a] = Layout::vertical([Length(1), Length(1)]).areas(area);
+        assert_eq!(a, Rect::new(0, 0, 10, 1));
+        let [a, b, c] = Layout::horizontal([Length(4)]).areas(area);
+        assert_eq!(a, Rect::new(0, 0, 4, 4));
+        assert_eq!((b, c), (Rect::new(10, 0, 0, 4), Rect::new(10, 0, 0, 4)));
+        assert_eq!(
+            Layout::vertical([Fill(1)]).areas::<1>(OVERHANG),
+            [Rect::new(MAX - 2, MAX - 1, 2, 1)]
         );
     }
 

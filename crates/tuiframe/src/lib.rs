@@ -4,20 +4,26 @@
 //!
 //! | Module | Holds |
 //! |---|---|
+//! | [`buffer`] | [`Buffer`], the cells a frame draws into |
+//! | [`text`] | [`Span`], [`Line`] and [`Text`], and the measure of text in cells |
 //! | [`style`] | [`Color`], [`Modifier`], [`UnderlineStyle`] and [`Style`] |
-//! | [`layout`] | [`Position`], [`Size`] and [`Rect`] |
+//! | [`layout`] | [`Position`], [`Size`], [`Rect`], and [`Layout`] by [`Constraint`]s |
 //! | [`event`] | [`Event`] and the key and mouse types in it |
 //! | [`caps`] | [`Capabilities`], what the terminal supports |
 //!
 //! The types used most are also at the crate's root.
 
+pub mod buffer;
 pub mod caps;
 pub mod event;
 mod flags;
 pub mod layout;
 pub mod style;
+pub mod text;
 
+pub use buffer::Buffer;
 pub use caps::{Capabilities, WidthProfile};
 pub use event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
-pub use layout::{Position, Rect, Size};
+pub use layout::{Alignment, Constraint, Layout, Position, Rect, Size};
 pub use style::{Color, Modifier, Style, UnderlineStyle};
+pub use text::{Line, Span, Text};
