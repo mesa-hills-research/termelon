@@ -247,6 +247,17 @@ impl RestoreHandle {
         written
     }
 
+    /// How long the terminal has kept the write going on waiting, as
+    /// [`Terminal::writer_waiting`](crate::Terminal::writer_waiting) gives it, for a watchdog on a
+    /// thread of its own.
+    pub fn writer_waiting(&self) -> Option<Duration> {
+        self.inner
+            .takeover
+            .writer()?
+            .busy_since()
+            .map(|since| since.elapsed())
+    }
+
     /// Whether the terminal was given back, so its modes are the program's own again.
     pub(crate) fn is_given_back(&self) -> bool {
         self.inner.given_back.load(Ordering::SeqCst)
@@ -803,6 +814,9 @@ mod tests {
         until_writing(&writer);
         let direct = Gate::default();
         let (handle, restored) = handle(&writer, &direct);
+        // (A watchdog sees how long the stuck write has waited.)
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(handle.writer_waiting() >= Some(Duration::from_millis(20)));
         let threads: Vec<_> = (0..3)
             .map(|_| {
                 let handle = handle.clone();
