@@ -839,6 +839,10 @@ const PIECES: &[&str] = &[
     "🏽",
     "🇳",
     "🫨",
+    "é",
+    "Ω",
+    "ｶﾞ",
+    "♥\u{fe0f}",
 ];
 
 const STYLES: &[Style] = &[
