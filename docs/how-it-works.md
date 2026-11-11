@@ -170,14 +170,19 @@ impl Decoder {
 }
 ```
 
-- `new` takes the byte the terminal sends for Backspace. The other of `0x7f` and `0x08` decodes as
-  Ctrl+Backspace.
+- `new` takes the byte the terminal sends for Backspace. `0x7f` is always Backspace, and `0x08` is
+  Backspace where `VERASE` says so and Ctrl+H otherwise, as crossterm has it. Ctrl+Backspace is told
+  apart only under the kitty keyboard protocol and on Windows.
 - `feed` decodes what it can and keeps an incomplete sequence for the next call, so a sequence split
   across reads decodes as if it came whole.
-- `has_pending` says whether it holds an incomplete sequence, which tells the reader whether to wait
-  for the escape timeout.
-- `flush_pending` decodes what it holds as if no more input will follow, so a lone ESC becomes Esc.
-  The reader calls it when no more input is ready.
+- `has_pending` says whether what it holds ends in an ESC or a sequence's introducer (`ESC [`,
+  `ESC O`, `ESC ]`, `ESC P`, `ESC _`, `ESC [ M` and its bytes), which could be keys typed with Alt or
+  the start of a sequence. It tells the reader whether to wait for the escape timeout.
+- `flush_pending` decodes those as keys, as if no more input will follow, so a lone ESC becomes Esc
+  and `ESC [` becomes Alt+[, and afterwards nothing is pending. A sequence with more of it
+  (`ESC [ 1 ;`), a string, a paste and part of a UTF-8 character stay held, since only a split read
+  leaves them unfinished, and they don't count as pending. The reader calls it when no more input is
+  ready.
 - `expect` records one query whose answer is outstanding. Each matching reply uses one up, and a DA1
   reply clears them all, since terminals answer in order. Only the cursor report needs this, because
   `CSI r ; c R` is also a modified F3 in the legacy encoding.
@@ -212,7 +217,9 @@ pub(crate) enum ColorSlot { Foreground, Background } // OSC 10, OSC 11
 
 `CursorPosition` is 0-based, as the library's positions are. `XtGetTcap` holds the name and value
 decoded from hex, with no value when the terminal doesn't know the name. `Color` scales each channel
-to 8 bits, whatever number of hex digits the terminal sent.
+to 8 bits, whatever number of hex digits the terminal sent. The theme reports of mode 2031
+(`CSI ? 997 ; 1 n` and `; 2 n`) come whether or not a query was sent, so they decode as
+`Event::ColorScheme`.
 
 ### Windows input records
 
@@ -255,7 +262,9 @@ pub(crate) struct FocusRecord {
 ```
 
 A key record with a repeat count of n gives n events, AltGr arrives as Ctrl+Alt with a printable
-character and decodes as that character, and a `WindowSizeRecord` gives `Event::Resize`.
+character and decodes as that character, and a `WindowSizeRecord` gives `Event::Resize`. A modifier
+key pressed or released alone gives `KeyCode::Modifier`, and an Alt code (Alt held while digits are
+typed on the keypad) gives its character when Alt comes up.
 
 ### The encoder
 
