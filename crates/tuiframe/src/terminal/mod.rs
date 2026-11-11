@@ -8,8 +8,9 @@ use std::fmt;
 use std::io;
 use std::time::Duration;
 
-use crate::caps::Capabilities;
+use crate::caps::{Capabilities, KeyboardSupport, Support};
 use crate::output::CompletedFrame;
+use crate::restore::Enabled;
 
 /// What [`Terminal::draw`] did.
 #[derive(Debug)]
@@ -221,6 +222,37 @@ impl From<io::Error> for Error {
 /// A result with an [`Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// What to turn on for `options` in a terminal with `caps`. Private modes go out where support
+/// is unknown, since terminals ignore modes they don't know.
+pub(crate) fn enabled(options: &Options, caps: &Capabilities) -> Enabled {
+    let has = |support: Support| support != Support::No;
+    let keyboard = match (options.keyboard, caps.keyboard) {
+        (KeyboardRequest::Disambiguate, KeyboardSupport::Kitty { flags }) => Some(flags & 0b101),
+        (KeyboardRequest::Flags(asked), KeyboardSupport::Kitty { flags }) => Some(flags & asked),
+        _ => None,
+    };
+    Enabled {
+        alternate_screen: has(caps.alternate_screen),
+        clear: !has(caps.alternate_screen),
+        mouse: if has(caps.mouse) {
+            options.mouse
+        } else {
+            MouseMode::Off
+        },
+        focus: options.focus_events && has(caps.focus_events),
+        bracketed_paste: options.bracketed_paste && has(caps.bracketed_paste),
+        grapheme_clusters: caps.grapheme_clustering == Support::Yes,
+        theme_reports: false,
+        keyboard: keyboard.filter(|flags| *flags != 0),
+        modify_other_keys: options.keyboard != KeyboardRequest::Legacy
+            && caps.keyboard == KeyboardSupport::ModifyOtherKeys,
+        save_title: options.save_title && has(caps.title_stack),
+        hyperlinks: caps.hyperlinks == Support::Yes,
+        // (Until a frame asks for a shape.)
+        cursor_shape: false,
+    }
+}
+
 #[cfg(unix)]
 pub use unix::{Terminal, terminal_size};
 
@@ -231,17 +263,15 @@ mod unix {
     use std::os::fd::AsFd;
     use std::time::Duration;
 
-    use super::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Result, base64, crlf};
-    use crate::buffer::Buffer;
+    use super::{Drawn, Error, Events, MouseMode, Options, Result, base64, crlf, enabled};
     use crate::caps::env::Environment;
-    use crate::caps::{self, Capabilities, KeyboardSupport, Support, probe};
+    use crate::caps::{self, Capabilities, Support, probe};
     use crate::event::decode::{Decoder, DecoderOptions, Query, Reply};
-    use crate::frame::Frame;
+    use crate::frame::{Frame, Frames};
     use crate::layout::Rect;
     use crate::layout::Size;
-    use crate::output::encode::Encoder;
     use crate::output::writer::Hold;
-    use crate::output::{CompletedFrame, Cursor, CursorShape};
+    use crate::output::{Cursor, CursorShape};
     use crate::restore::screen::Screen;
     use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
     use crate::sys::unix::{Signals, Tty, window_size};
@@ -269,13 +299,7 @@ mod unix {
         caps: Capabilities,
         options: Options,
         enabled: Enabled,
-        encoder: Encoder,
-        /// What the terminal shows once every packet so far is written.
-        front: Buffer,
-        /// What the next frame draws into.
-        back: Buffer,
-        /// Where the last frame put the cursor.
-        cursor: Option<Cursor>,
+        frames: Frames,
         /// The size to take when the terminal says 0x0 or nothing.
         fallback: Size,
     }
@@ -395,10 +419,7 @@ mod unix {
             let area = Rect::from(size);
             Ok(Self {
                 fallback,
-                front: Buffer::with_width_profile(area, caps.width_profile),
-                back: Buffer::with_width_profile(area, caps.width_profile),
-                encoder: Encoder::new(),
-                cursor: None,
+                frames: Frames::new(area, caps.width_profile),
                 screen,
                 caps,
                 options,
@@ -426,29 +447,14 @@ mod unix {
                 return Ok(Drawn::Held);
             }
             self.screen.draw_here();
-            let area = Rect::from(self.size_now());
-            if area != self.front.area() {
-                self.front.resize(area);
-                self.back.resize(area);
+            if self.frames.resize(Rect::from(self.size_now())) {
                 self.screen.shared().request_redraw();
             }
-            self.back.reset();
-            let mut frame = Frame::new(&mut self.back, None);
-            render(&mut frame);
-            let cursor = frame.into_cursor();
+            let cursor = self.frames.render(render);
             note_shape(&mut self.enabled, &self.caps, &self.screen, cursor);
             let full = self.screen.shared().take_redraw();
-            if full {
-                self.encoder.redraw();
-            }
             let mut packet = writer.spare_buffer();
-            let stats = self.encoder.encode(
-                &self.front,
-                &self.back,
-                cursor.as_ref(),
-                &self.caps,
-                &mut packet,
-            );
+            let stats = self.frames.encode(full, cursor, &self.caps, &mut packet);
             if !packet.is_empty()
                 && let Err(failure) = writer.send(packet)
             {
@@ -457,13 +463,7 @@ mod unix {
                 }
                 return Err(Error::Io(failure.into()));
             }
-            std::mem::swap(&mut self.front, &mut self.back);
-            self.cursor = cursor;
-            Ok(Drawn::Written(CompletedFrame::new(
-                &self.front,
-                cursor,
-                stats,
-            )))
+            Ok(Drawn::Written(self.frames.commit(cursor, stats)))
         }
 
         /// Draws a partial frame, which changes `regions` alone, for something that moves while
@@ -490,30 +490,18 @@ mod unix {
             if !writer.is_idle() {
                 return Ok(Drawn::Held);
             }
-            if Rect::from(self.size_now()) != self.front.area()
+            if Rect::from(self.size_now()) != self.frames.area()
                 || self.screen.shared().redraw_pending()
             {
                 return Ok(Drawn::FullFrameDue);
             }
             self.screen.draw_here();
-            // (The back buffer keeps the regions' rows as they were, and the next full frame resets
-            // it.)
-            self.back.copy_rows_from(&self.front, regions);
-            self.front.set_clip(regions);
-            let mut frame = Frame::new(&mut self.front, self.cursor);
-            render(&mut frame);
-            let cursor = frame.into_cursor();
+            let cursor = self.frames.render_regions(regions, render);
             note_shape(&mut self.enabled, &self.caps, &self.screen, cursor);
-            self.front.clear_clip();
             let mut packet = writer.spare_buffer();
-            let stats = self.encoder.encode_regions(
-                &self.back,
-                &self.front,
-                regions,
-                cursor.as_ref(),
-                &self.caps,
-                &mut packet,
-            );
+            let stats = self
+                .frames
+                .encode_regions(regions, cursor, &self.caps, &mut packet);
             if !packet.is_empty()
                 && let Err(failure) = writer.send(packet)
             {
@@ -521,12 +509,7 @@ mod unix {
                 self.screen.shared().request_redraw();
                 return Err(Error::Io(failure.into()));
             }
-            self.cursor = cursor;
-            Ok(Drawn::Written(CompletedFrame::new(
-                &self.front,
-                cursor,
-                stats,
-            )))
+            Ok(Drawn::Written(self.frames.commit_regions(cursor, stats)))
         }
 
         /// Completes once the terminal took every frame and command so far, so a frame
@@ -794,41 +777,6 @@ mod unix {
             screen.cancel_expected();
         }
         Ok(slot.close())
-    }
-
-    /// What to turn on for `options` in a terminal with `caps`. Private modes go out where support
-    /// is unknown, since terminals ignore modes they don't know.
-    fn enabled(options: &Options, caps: &Capabilities) -> Enabled {
-        let has = |support: Support| support != Support::No;
-        let keyboard = match (options.keyboard, caps.keyboard) {
-            (KeyboardRequest::Disambiguate, KeyboardSupport::Kitty { flags }) => {
-                Some(flags & 0b101)
-            }
-            (KeyboardRequest::Flags(asked), KeyboardSupport::Kitty { flags }) => {
-                Some(flags & asked)
-            }
-            _ => None,
-        };
-        Enabled {
-            alternate_screen: has(caps.alternate_screen),
-            clear: !has(caps.alternate_screen),
-            mouse: if has(caps.mouse) {
-                options.mouse
-            } else {
-                MouseMode::Off
-            },
-            focus: options.focus_events && has(caps.focus_events),
-            bracketed_paste: options.bracketed_paste && has(caps.bracketed_paste),
-            grapheme_clusters: caps.grapheme_clustering == Support::Yes,
-            theme_reports: false,
-            keyboard: keyboard.filter(|flags| *flags != 0),
-            modify_other_keys: options.keyboard != KeyboardRequest::Legacy
-                && caps.keyboard == KeyboardSupport::ModifyOtherKeys,
-            save_title: options.save_title && has(caps.title_stack),
-            hyperlinks: caps.hyperlinks == Support::Yes,
-            // (Until a frame asks for a shape.)
-            cursor_shape: false,
-        }
     }
 }
 

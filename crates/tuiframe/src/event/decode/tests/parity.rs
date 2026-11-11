@@ -31,6 +31,14 @@ fn what_arko_depends_on() {
         (b"A", vec![key(KeyCode::Char('A'), SHIFT)]),
         // Shift+Enter, which only the kitty protocol tells from Enter.
         (b"\x1b[13;2u", vec![key(KeyCode::Enter, SHIFT)]),
+        // Ctrl+Shift+C and Alt+Shift+Q keep the lowercase letter under kitty and
+        // modifyOtherKeys, as crossterm gives them, so the Ctrl+C and Alt+Q arms take them.
+        (b"\x1b[99;6u", vec![key(KeyCode::Char('c'), CTRL | SHIFT)]),
+        (b"\x1b[113;4u", vec![key(KeyCode::Char('q'), ALT | SHIFT)]),
+        (
+            b"\x1b[27;6;67~",
+            vec![key(KeyCode::Char('c'), CTRL | SHIFT)],
+        ),
         // Ctrl+letters, and the cursor and word moves. 0x08 is Ctrl+H, which deletes a character,
         // unless VERASE says Backspace sends it.
         (b"\x03", vec![key(KeyCode::Char('c'), CTRL)]),
@@ -89,6 +97,33 @@ fn releases_arrive_for_the_program_to_skip() {
     };
     decoder.decode_records(&[record(true), record(false)], &mut out);
     assert_eq!(out, [key(KeyCode::Enter, NONE), release(KeyCode::Enter)]);
+}
+
+/// Windows reports modifier and lock keys pressed alone, which crossterm drops, and so does the
+/// decoder unless every key is asked for.
+#[test]
+fn windows_keys_alone_are_dropped_as_crossterm_drops_them() {
+    let mut decoder = Decoder::new(DecoderOptions::default());
+    let mut out = Vec::new();
+    let record = |virtual_key, control_state| {
+        InputRecord::Key(KeyRecord {
+            key_down: true,
+            repeat: 1,
+            virtual_key,
+            scan_code: 0,
+            unicode: 0,
+            control_state,
+        })
+    };
+    decoder.decode_records(
+        &[
+            record(0x11, control::LEFT_CTRL_PRESSED),
+            record(0x10, control::SHIFT_PRESSED),
+            record(0x14, 0),
+        ],
+        &mut out,
+    );
+    assert_eq!(out, []);
 }
 
 #[test]

@@ -373,13 +373,14 @@ fn modify_other_keys() {
         (b"\x1b[27;5;97~", vec![key(KeyCode::Char('a'), CTRL)]),
         (
             b"\x1b[27;6;65~",
-            vec![key(KeyCode::Char('A'), CTRL | SHIFT)],
+            vec![key(KeyCode::Char('a'), CTRL | SHIFT)],
         ),
-        // A terminal that sends the unshifted letter still gives its capital.
+        // With Ctrl, a letter stays lowercase whichever the terminal sent, as crossterm has it.
         (
             b"\x1b[27;6;97~",
-            vec![key(KeyCode::Char('A'), CTRL | SHIFT)],
+            vec![key(KeyCode::Char('a'), CTRL | SHIFT)],
         ),
+        (b"\x1b[27;4;65~", vec![key(KeyCode::Char('a'), ALT | SHIFT)]),
         (b"\x1b[27;5;49~", vec![key(KeyCode::Char('1'), CTRL)]),
         (b"\x1b[27;7;59~", vec![key(KeyCode::Char(';'), CTRL | ALT)]),
         // formatOtherKeys 1 sends the same as the kitty protocol's CSI u.
