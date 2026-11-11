@@ -55,7 +55,8 @@ fn xterm_legacy_keys() {
             (Key::Char('a'), SUPER, Press, "a"),
             (Key::Enter, NONE, Press, "\r"),
             (Key::Enter, SHIFT, Press, "\r"),
-            (Key::Enter, ALT, Press, "\x1b\r"),
+            // Alt+Enter turns xterm's full screen on and off.
+            (Key::Enter, ALT, Press, ""),
             (Key::Tab, NONE, Press, "\t"),
             (Key::Tab, SHIFT, Press, "\x1b[Z"),
             (Key::Backspace, NONE, Press, "\x7f"),
@@ -156,8 +157,45 @@ fn modify_other_keys_level_1_only_where_a_modifier_would_be_lost() {
             (Key::Char('1'), CTRL, Press, "\x1b[27;5;49~"),
             (Key::Char('a'), CTRL | SHIFT, Press, "\x1b[27;6;65~"),
             (Key::Enter, SHIFT, Press, "\x1b[27;2;13~"),
-            (Key::Enter, ALT, Press, "\x1b\r"),
+            (Key::Enter, ALT, Press, ""),
+            (Key::Escape, ALT, Press, "\x1b\x1b"),
             (Key::Tab, SHIFT, Press, "\x1b[Z"),
+        ],
+    );
+}
+
+/// Konsole's keys after its `default.keytab`: Shift+Enter, F1 to F4 with modifiers, and Shift
+/// with the keys that scroll its main screen.
+#[test]
+fn konsole_keys() {
+    let main = [
+        (Key::Enter, SHIFT, Press, "\x1bOM"),
+        (Key::Enter, ALT, Press, "\x1b\r"),
+        (Key::Tab, CTRL, Press, ""),
+        (Key::F(1), NONE, Press, "\x1bOP"),
+        (Key::F(1), CTRL, Press, "\x1bO5P"),
+        (Key::F(4), ALT, Press, "\x1bO3S"),
+        (Key::F(5), CTRL, Press, "\x1b[15;5~"),
+        (Key::Home, NONE, Press, "\x1b[H"),
+        (Key::Up, CTRL, Press, "\x1b[1;5A"),
+    ];
+    check(&term(Profile::konsole(), b""), &main);
+    check(&term(Profile::konsole(), b"\x1b[?1049h"), &main);
+    check(
+        &term(Profile::konsole(), b""),
+        &[
+            (Key::Up, SHIFT, Press, ""),
+            (Key::Up, SHIFT | CTRL, Press, "\x1b[1;6A"),
+            (Key::PageDown, SHIFT, Press, ""),
+            (Key::End, SHIFT, Press, ""),
+        ],
+    );
+    check(
+        &term(Profile::konsole(), b"\x1b[?1049h"),
+        &[
+            (Key::Up, SHIFT, Press, "\x1b[1;2A"),
+            (Key::PageDown, SHIFT, Press, "\x1b[6;2~"),
+            (Key::End, SHIFT, Press, "\x1b[1;2F"),
         ],
     );
 }

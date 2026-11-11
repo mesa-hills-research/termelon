@@ -95,6 +95,7 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
                 hyperlinks: false,
                 modify_other_keys: false,
                 keys: KeyEncoding::Tmux,
+                bound_keys: Vec::new(),
                 ..Profile::xterm()
             };
             profile
@@ -111,6 +112,7 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
             ..Profile::kitty()
         }),
         "xterm" => Some(Profile::xterm()),
+        // WezTerm keeps Alt+Enter, which toggles full screen, as xterm does.
         "wezterm" => {
             let mut profile = Profile {
                 name: "wezterm".to_owned(),
@@ -128,6 +130,7 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
         "xtermjs" => Some(Profile {
             name: "xtermjs".to_owned(),
             hyperlinks: true,
+            bound_keys: Vec::new(),
             ..Profile::xterm()
         }),
         // VTE ignores modifyOtherKeys and sends its legacy keys.
@@ -135,12 +138,14 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
             name: "vte".to_owned(),
             hyperlinks: true,
             modify_other_keys: false,
+            bound_keys: Vec::new(),
             ..Profile::xterm()
         }),
         "alacritty" => {
             let mut profile = Profile {
                 name: "alacritty".to_owned(),
                 hyperlinks: true,
+                bound_keys: Vec::new(),
                 ..Profile::xterm()
             };
             profile.modes.push(2026);
@@ -154,6 +159,7 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
                 name: name.to_owned(),
                 hyperlinks: true,
                 kitty_keyboard: true,
+                bound_keys: Vec::new(),
                 ..Profile::xterm()
             };
             if name == "ghostty" {

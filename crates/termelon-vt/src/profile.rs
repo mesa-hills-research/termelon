@@ -3,6 +3,7 @@
 //! The facts come from each terminal's own code and docs where they were checked, and are believed
 //! where not. The constructors' docs say which.
 
+use crate::input::{Key, Mods};
 use crate::width::WidthRules;
 
 /// How a terminal encodes keys without the kitty keyboard protocol.
@@ -18,6 +19,10 @@ pub enum KeyEncoding {
     /// modifyOtherKeys, at either level, those keys come as `CSI code ; mods u`, and Ctrl+Tab as
     /// `CSI 9 ; 5 u`. Its other keys are [`KeyEncoding::Tmux`]'s.
     Tmux34,
+    /// Konsole's, from its `default.keytab`, which are xterm's but for Shift+Enter, `ESC O M`, and
+    /// F1 to F4 with modifiers, `ESC O mods P` and on. Shift with Up, Down, Page Up, Page Down,
+    /// Home and End scrolls the main screen and sends nothing there.
+    Konsole,
     /// The Linux console's. F1 to F5 are `CSI [ A` to `CSI [ E`, Home and End are `CSI 1 ~` and
     /// `CSI 4 ~`, and modifiers on the other special keys are lost.
     LinuxConsole,
@@ -103,6 +108,9 @@ pub struct Profile {
     pub linux_console: bool,
     /// How it encodes keys without the kitty keyboard protocol.
     pub keys: KeyEncoding,
+    /// The keys it keeps for itself and sends nothing for, such as xterm's Alt+Enter, which turns
+    /// full screen on and off.
+    pub bound_keys: Vec<(Key, Mods)>,
     /// Its answer to DA1 (`CSI c`).
     pub da1: Option<String>,
     /// Its answer to DA2 (`CSI > c`).
@@ -135,9 +143,10 @@ fn caps(list: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
 }
 
 impl Profile {
-    /// xterm 390, as Ubuntu 24.04 ships it, with `allowWindowOps` on as a test harness sets it. It
-    /// has no synchronized output, no grapheme mode, no hyperlinks and no kitty keyboard protocol,
-    /// and it answers everything else the startup probe asks.
+    /// xterm 390, as Ubuntu 24.04 ships it, with `allowWindowOps` and `metaSendsEscape` on as a
+    /// test harness sets them. It has no synchronized output, no grapheme mode, no hyperlinks and
+    /// no kitty keyboard protocol, and it answers everything else the startup probe asks. Alt+Enter
+    /// turns full screen on and off (`Alt <Key>Return:fullscreen()` in its default translations).
     pub fn xterm() -> Profile {
         Profile {
             name: "xterm".to_owned(),
@@ -153,6 +162,7 @@ impl Profile {
             modify_other_keys: true,
             linux_console: false,
             keys: KeyEncoding::Xterm,
+            bound_keys: vec![(Key::Enter, Mods::ALT)],
             da1: Some("\x1b[?64;1;2;6;9;15;16;17;18;21;22;28c".to_owned()),
             da2: Some("\x1b[>41;390;0c".to_owned()),
             xtversion: Some("XTerm(390)".to_owned()),
@@ -195,6 +205,7 @@ impl Profile {
             modify_other_keys: false,
             linux_console: false,
             keys: KeyEncoding::Xterm,
+            bound_keys: Vec::new(),
             da1: Some("\x1b[?62;c".to_owned()),
             da2: Some("\x1b[>1;4000;32c".to_owned()),
             xtversion: Some("kitty(0.32.2)".to_owned()),
@@ -214,8 +225,9 @@ impl Profile {
     }
 
     /// Konsole 23.08, as Ubuntu 24.04 ships it. It answers neither DECRQM, XTVERSION nor XTGETTCAP,
-    /// and has no kitty keyboard protocol or synchronized output. Its title stack and `CSI 18 t`
-    /// answers are believed.
+    /// and has no kitty keyboard protocol or synchronized output. Its keys are
+    /// [`KeyEncoding::Konsole`], and Ctrl+Tab, a shortcut, sends nothing, from 25.12.3's keytab and a
+    /// run of it on Ubuntu 26.04. Its title stack and `CSI 18 t` answers are believed.
     pub fn konsole() -> Profile {
         let mut modes = XTERM_MODES.to_vec();
         modes.retain(|&m| m != 9);
@@ -232,7 +244,8 @@ impl Profile {
             kitty_keyboard: false,
             modify_other_keys: false,
             linux_console: false,
-            keys: KeyEncoding::Xterm,
+            keys: KeyEncoding::Konsole,
+            bound_keys: vec![(Key::Tab, Mods::CTRL)],
             da1: Some("\x1b[?62;1;4c".to_owned()),
             da2: Some("\x1b[>1;115;0c".to_owned()),
             xtversion: None,
@@ -265,6 +278,7 @@ impl Profile {
             modify_other_keys: false,
             linux_console: false,
             keys: KeyEncoding::Xterm,
+            bound_keys: Vec::new(),
             da1: Some("\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c".to_owned()),
             da2: Some("\x1b[>0;10;1c".to_owned()),
             xtversion: None,
@@ -300,6 +314,7 @@ impl Profile {
             modify_other_keys: true,
             linux_console: false,
             keys: KeyEncoding::Tmux34,
+            bound_keys: Vec::new(),
             da1: Some("\x1b[?1;2c".to_owned()),
             da2: Some("\x1b[>84;0;0c".to_owned()),
             xtversion: Some("tmux 3.4".to_owned()),
@@ -330,6 +345,7 @@ impl Profile {
             modify_other_keys: false,
             linux_console: true,
             keys: KeyEncoding::LinuxConsole,
+            bound_keys: Vec::new(),
             da1: Some("\x1b[?6c".to_owned()),
             da2: None,
             xtversion: None,

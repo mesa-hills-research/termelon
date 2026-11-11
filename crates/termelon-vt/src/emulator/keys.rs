@@ -28,6 +28,9 @@ impl Emulator {
     /// The bytes the terminal sends for a key press, repeat or release. Without the kitty
     /// protocol's flag 2, a repeat sends what a press does and a release sends nothing.
     pub fn encode_key_event(&self, key: Key, mods: Mods, kind: KeyKind) -> Vec<u8> {
+        if self.profile.bound_keys.contains(&(key, mods)) {
+            return Vec::new();
+        }
         let flags = if self.profile.kitty_keyboard {
             self.keyboard_flags()
         } else {
@@ -153,8 +156,27 @@ impl Emulator {
                 bytes
             }
         };
-        let home_end_tilde = param.is_none() && self.profile.keys != KeyEncoding::Xterm;
+        let home_end_tilde = param.is_none()
+            && matches!(
+                self.profile.keys,
+                KeyEncoding::Tmux | KeyEncoding::Tmux34 | KeyEncoding::LinuxConsole
+            );
+        let konsole = self.profile.keys == KeyEncoding::Konsole;
+        let scrolls = konsole
+            && !self.alternate_screen()
+            && mods.contains(Mods::SHIFT)
+            && match key {
+                Key::Up | Key::Down => !mods.intersects(Mods::ALT | Mods::CTRL),
+                Key::PageUp | Key::PageDown | Key::Home | Key::End => true,
+                _ => false,
+            };
         match key {
+            _ if scrolls => Vec::new(),
+            Key::Enter if konsole && mods.contains(Mods::SHIFT) => alt(b"\x1bOM".to_vec()),
+            Key::F(n @ 1..=4) if konsole && param.is_some() => {
+                let m = param.unwrap_or(1);
+                format!("\x1bO{m}{}", char::from(b'P' + (n - 1))).into_bytes()
+            }
             Key::Up => letter(b'A'),
             Key::Down => letter(b'B'),
             Key::Right => letter(b'C'),

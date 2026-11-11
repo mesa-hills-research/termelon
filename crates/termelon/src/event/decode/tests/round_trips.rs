@@ -207,9 +207,22 @@ fn legacy(keys: KeyEncoding, key: Key, mods: Mods) -> Decoded {
 }
 
 /// Whether the bytes carry the modifiers as a parameter, kitty's `CSI ... u`, a `CSI 1 ; m X`, a
-/// `CSI n ; m ~` or modifyOtherKeys, so nothing is lost.
+/// `CSI n ; m ~`, modifyOtherKeys or Konsole's `SS3 m P`, so nothing is lost.
 fn parameterized(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"\x1b[") && (bytes.contains(&b';') || bytes.ends_with(b"u"))
+    (bytes.starts_with(b"\x1b[") && (bytes.contains(&b';') || bytes.ends_with(b"u")))
+        || (bytes.starts_with(b"\x1bO")
+            && bytes.len() > 3
+            && bytes[2..bytes.len() - 1].iter().all(u8::is_ascii_digit))
+}
+
+/// Whether Konsole scrolls its main screen for the key rather than send it.
+fn konsole_scrolls(key: Key, mods: Mods) -> bool {
+    mods.contains(Mods::SHIFT)
+        && match key {
+            Key::Up | Key::Down => !mods.intersects(Mods::ALT | Mods::CTRL),
+            Key::PageUp | Key::PageDown | Key::Home | Key::End => true,
+            _ => false,
+        }
 }
 
 /// Whether the terminal sends nothing for the key. Without the kitty protocol's flag 2 it sends no
@@ -282,12 +295,17 @@ fn every_key_and_modifier_under_each_profile() {
                         } else {
                             mods
                         };
+                        // A key the terminal keeps for itself sends nothing.
+                        let kept = profile.bound_keys.contains(&(key, mods))
+                            || (profile.keys == KeyEncoding::Konsole
+                                && !emulator.alternate_screen()
+                                && konsole_scrolls(key, mods));
                         let tmux_drops = profile.keys == KeyEncoding::Tmux34
                             && kind != KeyKind::Release
                             && tmux_3_4_drops(emulator.modify_other_keys() != 0, key, mods);
                         assert_eq!(
                             bytes.is_empty(),
-                            sends_nothing(flags, key, mods, kind) || tmux_drops,
+                            sends_nothing(flags, key, mods, kind) || tmux_drops || kept,
                             "{}",
                             context()
                         );
