@@ -8,6 +8,18 @@ license.workspace = true
 publish = false
 
 [dependencies]
+# Widths of the cells in the frame model, the same crate and rules ratatui measures with.
+unicode-width.workspace = true
+# Splits text into grapheme clusters, one cell each, as ratatui does when it writes a string.
+unicode-segmentation.workspace = true
+# The baseline stack. Default features off and the two features Arko asks for, plus the one that
+# opens the backend's writer, so the bytes it wrote can be read back. It changes no behaviour.
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "underline-color", "unstable-backend-writer"] }
+# For the synchronized update commands around a frame. ratatui builds its backend on this crate.
+crossterm = { version = "0.29", default-features = false }
+# Counts allocations. A counting allocator is `unsafe impl GlobalAlloc`, and unsafe code lives only in
+# the files AGENTS.md lists, so the crate that holds it is a dependency.
+stats_alloc = "0.1.10"
 
 [lints]
 workspace = true
