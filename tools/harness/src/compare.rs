@@ -144,9 +144,13 @@ fn compare_colors(
         Colors::Rgb {
             foreground,
             background,
+            blink,
         } => {
             let rgb = |color: Color, default: (u8, u8, u8)| color.rgb().unwrap_or(default);
             let (mut fg, mut bg) = (rgb(e.fg, foreground), rgb(e.bg, background));
+            if let Some(colors) = blink.filter(|_| e.blink || e.rapid_blink) {
+                (fg, bg) = colors;
+            }
             if e.reverse {
                 (fg, bg) = (bg, fg);
             }

@@ -77,17 +77,20 @@ pub fn start_command(launch: &Launch, dir: &Path, tty_file: &Path) -> Command {
     command
 }
 
-/// Rebuilds a screen from xterm's XHTML dump.
+/// Rebuilds a screen from xterm's XHTML dump, which `html.c` in its source writes. Every cell has
+/// its colours as `rgb()`, bold, italic, underline and strike are classes, each space is a U+00A0
+/// (so a U+00A0 on the screen reads back as a space), and a blinking cell is white on red.
 ///
 /// # Errors
 ///
 /// When the dump has no `<pre>`.
 pub fn parse(html: &str, cols: u16, rows: u16) -> Result<Readback, Error> {
-    let dump = html_dump(html)?;
+    let dump = html_dump(&html.replace('\u{a0}', " "))?;
     let screen = ansi_screen(&dump.ansi, cols, rows, WidthRules::default())?;
     let colors = Colors::Rgb {
         foreground: dump.foreground.unwrap_or(FOREGROUND),
         background: dump.background.unwrap_or(BACKGROUND),
+        blink: Some(((0xff, 0xff, 0xff), (0xff, 0, 0))),
     };
     let attributes = Attributes {
         bold: true,

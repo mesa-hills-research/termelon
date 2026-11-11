@@ -148,10 +148,10 @@ pub struct HtmlDump {
     pub ansi: Vec<u8>,
 }
 
-/// Reads an HTML screen dump: the text inside `<pre>`, with colours as `#rrggbb` and attributes as
-/// CSS in `<span style>` (xterm) or as `<b>`, `<i>`, `<u>`, `<strike>`, `<blink>` and
-/// `<font color>` (VTE). The runs become SGR with RGB colours, and a colour equal to the dump's
-/// default becomes the default.
+/// Reads an HTML screen dump: the text inside `<pre>`, with colours as `#rrggbb` or `rgb()` and
+/// attributes as CSS in `<span style>`, as xterm's classes (`bd`, `it`, `ul`, `st` and `lu`) or as
+/// `<b>`, `<i>`, `<u>`, `<strike>`, `<blink>` and `<font color>` (VTE). The runs become SGR with
+/// RGB colours, and a colour equal to the dump's default becomes the default.
 ///
 /// # Errors
 ///
@@ -213,8 +213,8 @@ pub fn html_dump(html: &str) -> Result<HtmlDump, Error> {
     })
 }
 
-/// What an opening tag says about the text inside it: its `style`, and for VTE's tags, `<b>`,
-/// `<i>`, `<u>`, `<strike>`, `<blink>` and `<font color>`.
+/// What an opening tag says about the text inside it: its `style`, xterm's classes, and VTE's
+/// tags, `<b>`, `<i>`, `<u>`, `<strike>`, `<blink>` and `<font color>`.
 fn tag_css(tag: &str) -> Css {
     let name = tag
         .split(|c: char| c.is_whitespace() || c == '/')
@@ -222,6 +222,17 @@ fn tag_css(tag: &str) -> Css {
         .unwrap_or("")
         .to_ascii_lowercase();
     let mut out = attribute(tag, "style").map(css).unwrap_or_default();
+    // xterm's `html.c` writes bold, italic, underline and strike as classes.
+    for class in attribute(tag, "class").unwrap_or("").split_whitespace() {
+        match class {
+            "bd" => out.bold = true,
+            "it" => out.italic = true,
+            "ul" => out.underline = true,
+            "st" => out.strike = true,
+            "lu" => (out.underline, out.strike) = (true, true),
+            _ => {}
+        }
+    }
     match name.as_str() {
         "b" | "strong" => out.bold = true,
         "i" | "em" => out.italic = true,
@@ -326,8 +337,8 @@ fn css(style: &str) -> Css {
         };
         let (property, value) = (property.trim(), value.trim());
         match property {
-            "color" => out.fg = hex_color(value),
-            "background" | "background-color" => out.bg = hex_color(value),
+            "color" => out.fg = css_color(value),
+            "background" | "background-color" => out.bg = css_color(value),
             "font-weight" => {
                 out.bold = value == "bold" || value.parse::<u16>().is_ok_and(|w| w >= 600);
             }
@@ -353,11 +364,43 @@ fn css(style: &str) -> Css {
                     _ => None,
                 };
             }
-            "text-decoration-color" => out.underline_color = hex_color(value),
+            "text-decoration-color" => out.underline_color = css_color(value),
             _ => {}
         }
     }
     out
+}
+
+/// A colour as `#rrggbb`, `#rgb`, or `rgb()` with numbers or percentages, as xterm writes it.
+fn css_color(value: &str) -> Option<(u8, u8, u8)> {
+    let Some(args) = value
+        .strip_prefix("rgb(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return hex_color(value);
+    };
+    let channel = |part: &str| -> Option<u8> {
+        let part = part.trim();
+        let Some(percent) = part.strip_suffix('%') else {
+            return part.parse().ok();
+        };
+        // In hundredths of a percent, so 80.39% is 8039.
+        let (whole, fraction) = percent.split_once('.').unwrap_or((percent, ""));
+        if whole.len() > 3 {
+            return None;
+        }
+        let fraction = format!("{fraction:0<2}");
+        let hundredths =
+            whole.parse::<u32>().ok()? * 100 + fraction.get(..2)?.parse::<u32>().ok()?;
+        u8::try_from((hundredths * 255 + 5000) / 10_000).ok()
+    };
+    let mut parts = args.split(',');
+    let rgb = (
+        channel(parts.next()?)?,
+        channel(parts.next()?)?,
+        channel(parts.next()?)?,
+    );
+    parts.next().is_none().then_some(rgb)
 }
 
 fn hex_color(value: &str) -> Option<(u8, u8, u8)> {
@@ -450,6 +493,22 @@ mod tests {
         assert_eq!(style.bg, Some((0xff, 0xff, 0xff)));
         assert!(style.bold && style.underline && style.strike && !style.italic);
         assert_eq!(unescape("a&lt;b&amp;c&#x41;&#66;&bogus"), "a<b&cAB&bogus");
+    }
+
+    /// xterm writes colours as percentages of 65535 with two decimals.
+    #[test]
+    fn rgb_colours() {
+        assert_eq!(
+            css_color("rgb(80.39%, 0.00%, 100.00%)"),
+            Some((0xcd, 0, 0xff))
+        );
+        assert_eq!(css_color("rgb(1, 2, 3)"), Some((1, 2, 3)));
+        assert_eq!(css_color("rgb(1, 2)"), None);
+        assert_eq!(css_color("#0000ee"), Some((0, 0, 0xee)));
+        let tag = "span class=' od bd lu it ' style='color: rgb(100.00%, 0.00%, 0.00%);'";
+        let style = tag_css(tag);
+        assert!(style.bold && style.italic && style.underline && style.strike);
+        assert_eq!(style.fg, Some((0xff, 0, 0)));
     }
 
     #[test]

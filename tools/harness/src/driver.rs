@@ -41,6 +41,9 @@ impl Launch {
     }
 }
 
+/// A colour's red, green and blue.
+pub type Rgb = (u8, u8, u8);
+
 /// How a readback reports colours.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Colors {
@@ -56,6 +59,9 @@ pub enum Colors {
         foreground: (u8, u8, u8),
         /// The default background.
         background: (u8, u8, u8),
+        /// The foreground and background a blinking cell has instead of its own, before reverse
+        /// video, where the readback gives blink that way, as xterm's dump does.
+        blink: Option<(Rgb, Rgb)>,
     },
 }
 

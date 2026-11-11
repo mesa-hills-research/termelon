@@ -75,6 +75,7 @@ pub fn parse(reply: &Json, cols: u16, rows: u16) -> Result<Readback, Error> {
     let colors = Colors::Rgb {
         foreground: FOREGROUND,
         background: BACKGROUND,
+        blink: None,
     };
     let attributes = Attributes {
         bold: true,
