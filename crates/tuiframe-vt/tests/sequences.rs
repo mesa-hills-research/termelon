@@ -1,6 +1,6 @@
 //! One test for each sequence the emulator knows, with the screen it should leave.
 
-use tuiframe_vt::{Color, CursorShape, Emulator, Event, Pos, Profile, Underline};
+use tuiframe_vt::{Color, CursorShape, Emulator, Event, Pos, Profile, Underline, WidthRules};
 
 #[expect(
     clippy::unwrap_used,
@@ -119,8 +119,13 @@ fn a_cursor_move_cancels_a_pending_wrap() {
 fn without_autowrap_the_last_column_is_overwritten() {
     let term = run(3, 2, b"\x1b[?7labcde");
     assert_eq!(term.rows(), ["abe", ""]);
-    assert!(!term.cursor().pending_wrap);
+    assert!(term.cursor().pending_wrap);
     assert!(!term.mode(7));
+}
+
+#[test]
+fn turning_autowrap_on_after_the_last_column_wraps_the_next_character() {
+    assert_eq!(run(3, 2, b"\x1b[?7labc\x1b[?7hX").rows(), ["abc", "X"]);
 }
 
 #[test]
@@ -148,6 +153,13 @@ fn a_wide_character_takes_two_cells() {
 #[test]
 fn a_wide_character_that_doesnt_fit_wraps() {
     assert_eq!(run(3, 2, "ab字".as_bytes()).rows(), ["ab", "字"]);
+}
+
+#[test]
+fn a_wide_character_that_wraps_leaves_a_blank_in_the_pen() {
+    let term = run(3, 2, "abc\x1b[1;3H\x1b[41m字".as_bytes());
+    assert_eq!(term.rows(), ["ab", "字"]);
+    assert_eq!(term.cell(2, 0).unwrap().style().bg, Color::Red);
 }
 
 #[test]
@@ -211,6 +223,29 @@ fn a_flag_is_two_cells() {
     let term = run(5, 1, "\u{1f1fa}\u{1f1f8}x".as_bytes());
     assert_eq!(term.cell(0, 0).unwrap().text(), "\u{1f1fa}\u{1f1f8}");
     assert_eq!(term.rows(), ["\u{1f1fa}\u{1f1f8}x"]);
+}
+
+#[test]
+fn ambiguous_characters_take_two_cells_where_the_profile_says() {
+    let wide = Profile {
+        width: WidthRules {
+            ambiguous_wide: true,
+            ..WidthRules::default()
+        },
+        ..Profile::xterm()
+    };
+    let term = run_as(wide, 5, 1, "éa".as_bytes());
+    assert_eq!(term.cell(0, 0).unwrap().width(), 2);
+    assert_eq!(term.rows(), ["éa"]);
+    assert_eq!(at(&term), (3, 0));
+    assert_eq!(at(&run(5, 1, "éa".as_bytes())), (2, 0));
+}
+
+#[test]
+fn halfwidth_sound_marks_take_a_cell() {
+    let term = run(5, 1, "\u{ff76}\u{ff9e}a".as_bytes());
+    assert_eq!(term.rows(), ["\u{ff76}\u{ff9e}a"]);
+    assert_eq!(at(&term), (3, 0));
 }
 
 #[test]
