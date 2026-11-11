@@ -550,6 +550,33 @@ fn stats_count_cells_and_bytes() {
 }
 
 #[test]
+fn streaming_one_row_up_writes_one_row_of_text() {
+    let caps = full_caps();
+    let area = Rect::new(0, 0, 30, 12);
+    let rows: Vec<String> = (0..13)
+        .map(|i| format!("line {i:02} of a long reply"))
+        .collect();
+    let mut before = Buffer::empty(area);
+    let mut after = Buffer::empty(area);
+    for y in 0..12u16 {
+        before.set_string(0, y, &rows[usize::from(y)], Style::new());
+        after.set_string(0, y, &rows[usize::from(y) + 1], Style::new());
+    }
+    let mut term = emulator(WidthProfile::default(), area, true);
+    let mut encoder = Encoder::new();
+    encoder.set_scroll_detection(true);
+    let first = packet(&mut encoder, &Buffer::empty(area), &before, None, &caps);
+    feed(&mut term, &first);
+    let got = packet(&mut encoder, &before, &after, None, &caps);
+    assert_eq!(
+        got,
+        "␛[?2026h␛[1;12r␛[S␛[r␛[12Hline 12 of a long reply␛[?2026l"
+    );
+    feed(&mut term, &got);
+    check_screen(&term, &after, None, &caps).unwrap();
+}
+
+#[test]
 fn the_cursor_is_never_visible_on_a_cell_being_drawn() {
     let caps = full_caps();
     let area = Rect::new(0, 0, 20, 3);
@@ -1033,11 +1060,13 @@ proptest! {
         profile in width_profile(),
         caps in caps(),
         bce in any::<bool>(),
+        scroll in any::<bool>(),
         frames in prop::collection::vec(frame(), 1..6),
     ) {
         let area = Rect::new(0, 0, W, H);
         let mut term = emulator(profile, area, bce);
         let mut encoder = Encoder::new();
+        encoder.set_scroll_detection(scroll);
         let mut prev = Buffer::with_width_profile(area, profile);
         for (i, frame) in frames.iter().enumerate() {
             let next = draw(frame, &prev, profile);

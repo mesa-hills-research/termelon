@@ -284,6 +284,7 @@ impl Encoder {
         out: &mut Vec<u8>,
     ) -> FrameStats;
     pub(crate) fn redraw(&mut self);
+    pub(crate) fn set_scroll_detection(&mut self, on: bool);
 }
 
 pub struct FrameStats {
@@ -300,7 +301,11 @@ pub struct FrameStats {
 - `encode_regions` is the partial frame. It compares `before` and `after` inside `regions` only, and
   `before` may hold anything outside them.
 - `redraw` makes the next `encode` a full redraw, which clears the screen, ignores `prev`, writes
-  every cell that isn't blank and sends the cursor's state again.
+  every cell that isn't blank and sends the cursor's state and the pen again.
+- `set_scroll_detection` turns on looking for rows that moved when more than half of a frame's
+  rows changed. When scrolling a region of rows saves bytes, the terminal scrolls them itself
+  (`DECSTBM` and `CSI n S` or `CSI n T`) and only the rest is written. It's off until the terminal
+  matrix passes it.
 
 `Cursor` is the frame's cursor request (`position`, `shape`, `blinking`), and `FrameStats` reaches the
 program in `CompletedFrame`.

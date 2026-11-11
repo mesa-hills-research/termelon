@@ -931,6 +931,27 @@ impl Buffer {
         attrs.1.set_uncertain(false);
         a.fg == b.fg && a.bg == b.bg && attrs.0 == attrs.1 && a.extras == b.extras
     }
+
+    /// A hash of what row `y` shows, the same for equal rows of any two buffers.
+    pub(crate) fn hash_row(&self, y: usize) -> u64 {
+        let mut hasher = Fnv::default();
+        for cell in self.row(y) {
+            match cell.cluster_index() {
+                Some(i) => hasher.write(self.clusters.get(i).as_bytes()),
+                None => hasher.write(&cell.symbol),
+            }
+            hasher.write(&cell.fg.0.to_le_bytes());
+            hasher.write(&cell.bg.0.to_le_bytes());
+            hasher.write(&cell.attrs.0.to_le_bytes());
+            if cell.extras != 0 {
+                let extra = self.extras.get(cell.extras);
+                hasher.write(&extra.underline_color.0.to_le_bytes());
+                hasher.write(self.extras.link(extra).unwrap_or("").as_bytes());
+                hasher.write(&[0xFF]);
+            }
+        }
+        hasher.finish()
+    }
 }
 
 impl PartialEq for Buffer {

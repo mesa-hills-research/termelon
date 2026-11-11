@@ -181,6 +181,157 @@ pub(crate) fn digits(n: usize) -> usize {
     digits
 }
 
+/// A shift of whole rows that the terminal can do itself, with a scroll region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Scroll {
+    /// The region's first row, counted inside the buffer's area.
+    pub(crate) top: usize,
+    /// The row after the region's last.
+    pub(crate) bottom: usize,
+    /// How many rows the content moves.
+    pub(crate) by: usize,
+    /// Whether it moves up (`CSI n S`) rather than down (`CSI n T`).
+    pub(crate) up: bool,
+}
+
+impl Scroll {
+    /// What row `y` of the next frame is compared with once the terminal has scrolled.
+    pub(crate) fn before(self, prev: &Buffer, y: usize) -> Before<'_> {
+        if y < self.top || y >= self.bottom {
+            return Before::Row(prev, y);
+        }
+        let source = if self.up {
+            Some(y + self.by).filter(|&s| s < self.bottom)
+        } else {
+            y.checked_sub(self.by).filter(|&s| s >= self.top)
+        };
+        source.map_or(Before::Blank, |s| Before::Row(prev, s))
+    }
+}
+
+/// The bytes scrolling takes, for the region, the scroll and the region's reset.
+const SCROLL_COST: usize = 16;
+
+/// The rows a scroll region needs, since terminals ignore a region of one row.
+const MIN_REGION: usize = 2;
+
+/// Reused memory for [`detect_scroll`].
+#[derive(Debug, Default)]
+pub(crate) struct ScrollScratch {
+    prev: Vec<u64>,
+    next: Vec<u64>,
+    /// Prefix sums over the rows of the cost of each row that changed, without scrolling.
+    changed: Vec<usize>,
+    /// Prefix sums over the rows of the cost of each row that isn't blank.
+    drawn: Vec<usize>,
+}
+
+/// The scroll that saves the most bytes, if any does, when more than half of the rows changed.
+///
+/// Each row is hashed in both frames. The hashes only choose the scroll, since the rows are then
+/// compared cell by cell, so a collision costs bytes and never misdraws. For each shift, a run of rows that match once shifted makes
+/// a region, and the cost of the frame with that scroll is the scroll's bytes, the rows that
+/// still differ outside the region, and the rows the scroll brings in blank. A row's cost is
+/// estimated as its cells that aren't blank, plus a move.
+pub(crate) fn detect_scroll(
+    prev: &Buffer,
+    next: &Buffer,
+    scratch: &mut ScrollScratch,
+) -> Option<Scroll> {
+    let height = usize::from(next.area().height);
+    if height < MIN_REGION + 1 || prev.area() != next.area() {
+        return None;
+    }
+    scratch.prev.clear();
+    scratch.next.clear();
+    scratch.prev.extend((0..height).map(|y| prev.hash_row(y)));
+    scratch.next.extend((0..height).map(|y| next.hash_row(y)));
+    let changed_rows = (0..height)
+        .filter(|&y| scratch.prev[y] != scratch.next[y])
+        .count();
+    if changed_rows * 2 <= height {
+        return None;
+    }
+    scratch.changed.clear();
+    scratch.drawn.clear();
+    scratch.changed.push(0);
+    scratch.drawn.push(0);
+    for y in 0..height {
+        let cost = row_cost(next, y);
+        let differs = scratch.prev[y] != scratch.next[y];
+        let changed = scratch.changed[y] + if differs { cost } else { 0 };
+        let drawn = scratch.drawn[y] + if cost > 4 { cost } else { 0 };
+        scratch.changed.push(changed);
+        scratch.drawn.push(drawn);
+    }
+    let changed = &scratch.changed;
+    let drawn = &scratch.drawn;
+    let outside = |top: usize, bottom: usize| changed[top] + (changed[height] - changed[bottom]);
+    let mut best: Option<(usize, Scroll)> = None;
+    let mut consider = |cost: usize, scroll: Scroll| {
+        if scroll.bottom - scroll.top >= MIN_REGION && best.is_none_or(|(c, _)| cost < c) {
+            best = Some((cost, scroll));
+        }
+    };
+    for by in 1..height {
+        // Moving up, row y of the next frame is row y + by of the last.
+        for (start, end) in matching_runs(&scratch.next, &scratch.prev[by..]) {
+            let (top, bottom) = (start, end + by);
+            let cost = SCROLL_COST + outside(top, bottom) + drawn[bottom] - drawn[end];
+            consider(
+                cost,
+                Scroll {
+                    top,
+                    bottom,
+                    by,
+                    up: true,
+                },
+            );
+        }
+        // Moving down, row y + by of the next frame is row y of the last.
+        for (start, end) in matching_runs(&scratch.next[by..], &scratch.prev) {
+            let (top, bottom) = (start, end + by);
+            let cost = SCROLL_COST + outside(top, bottom) + drawn[start + by] - drawn[start];
+            consider(
+                cost,
+                Scroll {
+                    top,
+                    bottom,
+                    by,
+                    up: false,
+                },
+            );
+        }
+    }
+    let (cost, scroll) = best?;
+    (cost < changed[height]).then_some(scroll)
+}
+
+/// The runs of indexes where `a` and `b` hold the same hash, as `(start, end)`.
+fn matching_runs<'a>(a: &'a [u64], b: &'a [u64]) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let len = a.len().min(b.len());
+    let mut y = 0;
+    core::iter::from_fn(move || {
+        while y < len && a[y] != b[y] {
+            y += 1;
+        }
+        if y >= len {
+            return None;
+        }
+        let start = y;
+        while y < len && a[y] == b[y] {
+            y += 1;
+        }
+        Some((start, y))
+    })
+}
+
+/// An estimate of the bytes row `y` of `next` takes to write, from its cells that aren't blank and
+/// a move.
+fn row_cost(next: &Buffer, y: usize) -> usize {
+    4 + next.row(y).iter().filter(|c| !next.looks_blank(c)).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,5 +473,77 @@ mod tests {
     #[test]
     fn digits_counts_decimal_digits() {
         assert_eq!([0, 9, 10, 99, 100, 65535].map(digits), [1, 1, 2, 2, 3, 5]);
+    }
+
+    fn refs(v: &[String]) -> Vec<&str> {
+        v.iter().map(String::as_str).collect()
+    }
+
+    fn lines(n: usize, from: usize) -> Vec<String> {
+        (from..from + n)
+            .map(|i| format!("line {i:03} of the transcript"))
+            .collect()
+    }
+
+    #[test]
+    fn streaming_one_row_up_is_found_as_a_scroll() {
+        let before: Vec<String> = lines(10, 0);
+        let mut after: Vec<String> = lines(9, 1);
+        after.push(String::new());
+        let a = buffer(&refs(&before));
+        let mut b = Buffer::empty(a.area());
+        for (y, row) in after.iter().enumerate() {
+            b.set_string(0, u16::try_from(y).unwrap(), row, Style::new());
+        }
+        let mut scratch = ScrollScratch::default();
+        let scroll = detect_scroll(&a, &b, &mut scratch).unwrap();
+        assert_eq!(
+            scroll,
+            Scroll {
+                top: 0,
+                bottom: 10,
+                by: 1,
+                up: true
+            }
+        );
+        assert!(matches!(scroll.before(&a, 9), Before::Blank));
+        assert!(matches!(scroll.before(&a, 0), Before::Row(_, 1)));
+        let down = detect_scroll(&b, &a, &mut scratch);
+        assert_eq!(
+            down,
+            Some(Scroll {
+                top: 0,
+                bottom: 10,
+                by: 1,
+                up: false
+            })
+        );
+    }
+
+    #[test]
+    fn a_fixed_status_row_stays_out_of_the_region() {
+        let mut before = lines(8, 0);
+        before.push("status: ready".to_owned());
+        let mut after = lines(7, 1);
+        after.push("line 008 of the transcript".to_owned());
+        after.push("status: ready".to_owned());
+        let (a, b) = (buffer(&refs(&before)), buffer(&refs(&after)));
+        let scroll = detect_scroll(&a, &b, &mut ScrollScratch::default()).unwrap();
+        assert_eq!(
+            scroll,
+            Scroll {
+                top: 0,
+                bottom: 8,
+                by: 1,
+                up: true
+            }
+        );
+    }
+
+    #[test]
+    fn no_scroll_when_few_rows_changed() {
+        let a = buffer(&["a", "b", "c", "d"]);
+        let b = buffer(&["a", "b", "c", "e"]);
+        assert_eq!(detect_scroll(&a, &b, &mut ScrollScratch::default()), None);
     }
 }

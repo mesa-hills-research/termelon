@@ -14,7 +14,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::color::{Lowering, ansi_index};
-use super::diff::{self, Before, Run};
+use super::diff::{self, Before, Run, Scroll, ScrollScratch};
 use super::{Cursor, CursorShape, FrameStats};
 use crate::buffer::{Buffer, Cell};
 use crate::caps::{Capabilities, ColorDepth, Support};
@@ -90,8 +90,10 @@ pub(crate) struct Encoder {
     /// `None` when unknown, so the next style starts from SGR 0.
     pen: Option<Pen>,
     redraw: bool,
+    scroll_detection: bool,
     runs: Vec<Run>,
     columns: Vec<(usize, usize)>,
+    scroll: ScrollScratch,
     params: Vec<u8>,
     reset_params: Vec<u8>,
     joined: String,
@@ -108,8 +110,10 @@ impl Encoder {
             shape: Some((CursorShape::Default, false)),
             pen: None,
             redraw: false,
+            scroll_detection: false,
             runs: Vec::new(),
             columns: Vec::new(),
+            scroll: ScrollScratch::default(),
             params: Vec::new(),
             reset_params: Vec::new(),
             joined: String::new(),
@@ -127,6 +131,11 @@ impl Encoder {
         self.visible = None;
         self.shape = None;
         self.pen = None;
+    }
+
+    /// Turns on looking for rows that moved, which the terminal then scrolls itself.
+    pub(crate) fn set_scroll_detection(&mut self, on: bool) {
+        self.scroll_detection = on;
     }
 
     /// Appends to `out` the packet that takes the terminal from `prev` to `next` and puts the
@@ -173,6 +182,7 @@ impl Encoder {
         let height = usize::from(area.height);
         let mut runs = core::mem::take(&mut self.runs);
         runs.clear();
+        let mut scroll = None;
         if full {
             for y in 0..height {
                 diff::diff_row(Before::Blank, next, y, &[(0, width)], &mut runs);
@@ -185,12 +195,16 @@ impl Encoder {
                 }
             }
         } else {
+            if self.scroll_detection {
+                scroll = diff::detect_scroll(prev, next, &mut self.scroll);
+            }
             for y in 0..height {
-                diff::diff_row(Before::Row(prev, y), next, y, &[(0, width)], &mut runs);
+                let before = scroll.map_or(Before::Row(prev, y), |s: Scroll| s.before(prev, y));
+                diff::diff_row(before, next, y, &[(0, width)], &mut runs);
             }
         }
         let mut cells = 0;
-        if full || !runs.is_empty() {
+        if full || scroll.is_some() || !runs.is_empty() {
             if allowed.sync {
                 out.extend_from_slice(SYNC_BEGIN);
             }
@@ -202,6 +216,9 @@ impl Encoder {
                 self.set_pen(Pen::DEFAULT, allowed, out);
                 out.extend_from_slice(AUTOWRAP_OFF);
                 out.extend_from_slice(CLEAR);
+            }
+            if let Some(scroll) = scroll {
+                self.write_scroll(scroll, area, allowed, out);
             }
             let mut erased = None;
             let mut blank_from = (usize::MAX, 0);
@@ -268,6 +285,27 @@ impl Encoder {
         }
         self.columns
             .truncate(kept + usize::from(!self.columns.is_empty()));
+    }
+
+    /// Scrolls rows of the terminal as `scroll` says, with the background reset first, so
+    /// terminals that fill new rows with the pen's background and those that don't agree.
+    fn write_scroll(&mut self, scroll: Scroll, area: Rect, allowed: Allowed, out: &mut Vec<u8>) {
+        self.set_pen(Pen::DEFAULT, allowed, out);
+        let top = usize::from(area.y) + scroll.top + 1;
+        let bottom = usize::from(area.y) + scroll.bottom;
+        out.extend_from_slice(b"\x1b[");
+        push_number(out, top);
+        out.push(b';');
+        push_number(out, bottom);
+        out.push(b'r');
+        out.extend_from_slice(b"\x1b[");
+        if scroll.by > 1 {
+            push_number(out, scroll.by);
+        }
+        out.push(if scroll.up { b'S' } else { b'T' });
+        out.extend_from_slice(b"\x1b[r");
+        self.row = Some(0);
+        self.col = Some(0);
     }
 
     /// Writes one run, or erases its blank tail with `CSI K` from `blank_from`, the column from
