@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::{Child, Command};
 
-use termelon_vt::{Key, Mods, Profile, WidthRules};
+use termelon_vt::{Key, Mods, Profile, Underline, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
@@ -78,7 +78,9 @@ pub fn start_command(launch: &Launch, socket: &str) -> Command {
 pub const GET_TEXT: [&str; 5] = ["get-text", "--extent", "screen", "--ansi", "--add-cursor"];
 
 /// Rebuilds kitty's `get-text --ansi --add-cursor` output, whose last line ends with the cursor's
-/// place, visibility and shape as escape sequences.
+/// place, visibility and shape as escape sequences. It writes dotted and dashed underlines as none
+/// (`decoration_as_sgr` in its `line.c` knows only the first three styles in 0.32, and drops the
+/// style's number in 0.45).
 ///
 /// # Errors
 ///
@@ -86,7 +88,10 @@ pub const GET_TEXT: [&str; 5] = ["get-text", "--extent", "screen", "--ansi", "--
 pub fn parse(text: &[u8], cols: u16, rows: u16, width: WidthRules) -> Result<Readback, Error> {
     let reports = Reports {
         colors: Colors::AsWritten,
-        attributes: Attributes::ALL,
+        attributes: Attributes {
+            unreported_underlines: &[Underline::Dotted, Underline::Dashed],
+            ..Attributes::ALL
+        },
         cursor: true,
         wide_text: true,
         trims_rows: false,

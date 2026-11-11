@@ -193,14 +193,18 @@ fn compare_attributes(
         }
     }
     if attributes.underline_style {
+        let underline = if attributes.unreported_underlines.contains(&e.underline) {
+            termelon_vt::Underline::None
+        } else {
+            e.underline
+        };
         push(
             "underline",
-            format!("{:?}", e.underline),
+            format!("{underline:?}"),
             format!("{:?}", g.underline),
         );
         // An underline's colour shows only with the underline.
-        if readback.reports.colors == Colors::AsWritten
-            && e.underline != termelon_vt::Underline::None
+        if readback.reports.colors == Colors::AsWritten && underline != termelon_vt::Underline::None
         {
             push(
                 "ul",

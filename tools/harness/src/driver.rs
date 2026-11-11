@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use termelon_vt::{Emulator, Key, Mods, Mouse};
+use termelon_vt::{Emulator, Key, Mods, Mouse, Underline};
 
 /// How long `wait_for` polls between readbacks.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -78,6 +78,9 @@ pub struct Attributes {
     pub underline: bool,
     /// The underline's style and colour.
     pub underline_style: bool,
+    /// The underline styles the readback writes as no underline, as kitty's writes dotted and
+    /// dashed.
+    pub unreported_underlines: &'static [Underline],
     /// Blinking.
     pub blink: bool,
     /// Reverse video, as an attribute rather than swapped colours.
@@ -100,6 +103,7 @@ impl Attributes {
         italic: true,
         underline: true,
         underline_style: true,
+        unreported_underlines: &[],
         blink: true,
         reverse: true,
         hidden: true,
@@ -115,6 +119,7 @@ impl Attributes {
         italic: false,
         underline: false,
         underline_style: false,
+        unreported_underlines: &[],
         blink: false,
         reverse: false,
         hidden: false,
