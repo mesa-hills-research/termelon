@@ -241,6 +241,14 @@ impl Driver for Konsole {
     }
 
     fn send_keys(&mut self, keys: &[(Key, Mods)]) -> Result<(), Error> {
+        // Under Xvfb, Konsole reads xdotool's function keys as if Alt were held (F1 came as
+        // `ESC O 3 P`, and Ctrl+F5 as the switch to console 5), where xterm, through the same
+        // xdotool, doesn't.
+        if keys.iter().any(|(key, _)| matches!(key, Key::F(_))) {
+            return Err(Error::Unsupported(
+                "take xdotool's function keys, which it reads with Alt held",
+            ));
+        }
         let window = self
             .window
             .as_deref()
