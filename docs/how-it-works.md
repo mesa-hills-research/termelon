@@ -497,7 +497,9 @@ impl<C: Console> ScreenOn<C> {
   decode as on Unix. The Alt key's release carries one too, since a pseudoconsole delivers a
   character its keyboard layout has no key for as an Alt code. `Terminal` probes in `Vt`, where
   the console's answers decode as replies, and then switches to `Records`. A probe left
-  unanswered keeps `Vt` 200 ms longer first.
+  unanswered keeps `Vt` 200 ms longer first. One that DA1 answered waits until no reply has come
+  for 50 ms, 200 ms at most, since the system's pseudoconsole answers DA1 itself and passes some
+  queries on to its terminal, whose answers come after DA1's.
 - In `Records`, records that carry what a terminal sent rather than a key typed go to the byte
   decoder for the whole session. Those are records with no virtual key, an ESC key-down that more
   character records follow in the same read, and what comes while the byte decoder holds a sequence.

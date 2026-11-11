@@ -1066,6 +1066,39 @@ fn an_alt_code_from_a_pseudoconsole_is_its_character_in_either_mode() {
     }
 }
 
+/// The system's pseudoconsole answers DA1 itself and passes the queries it doesn't know on to its
+/// terminal, whose answers come after DA1's. Waiting for the input to settle after DA1 keeps them
+/// as replies, rather than leaving them to records mode, where that pseudoconsole turns the end
+/// of an XTVERSION reply into Alt+\. (The characters are what Windows Server 2025's
+/// pseudoconsole gave for the probe's queries, with `termelon-vt` as its terminal.)
+#[test]
+fn the_terminal_s_answers_after_a_pseudoconsole_s_da1_are_replies() {
+    use crate::caps::probe::is_end;
+    use crate::event::decode::Reply;
+    let fake = Fake::new();
+    let settings = Arc::new(Settings::default());
+    settings.set_mode(InputMode::Vt);
+    let (_reader, shared) = reading(&fake, &settings, Duration::from_millis(100));
+    shared.replies.open();
+    fake.type_in(&vt_records(
+        "\x1b[?2026;0$y\x1b[>0;10;1c\x1b[?61;6;7;21;22;23;24;28;32;42c",
+    ));
+    assert!(
+        shared
+            .replies
+            .wait(LONG, |replies| replies.iter().any(is_end))
+    );
+    fake.type_in(&vt_records("\x1b[?0u\x1bP>|termelon-vt\x1b\\"));
+    shared.replies.settle(Duration::from_millis(500), LONG);
+    let replies = shared.replies.close();
+    assert!(
+        replies.contains(&Reply::XtVersion("termelon-vt".into()))
+            && replies.contains(&Reply::KittyKeyboard(0)),
+        "{replies:?}"
+    );
+    nothing_more(&shared);
+}
+
 /// The kitty keyboard flags go to the console only while keys come as bytes, since under a
 /// pseudoconsole the push reaches the terminal, which would send keys a client reading records
 /// can't take.
