@@ -687,3 +687,18 @@ fn partial_frames_touch_only_their_regions() {
         lock(&played.unknown)
     );
 }
+
+/// The tail after close goes on the main screen, each line from the left.
+#[test]
+fn the_tail_follows_the_reset_on_the_main_screen() {
+    let (played, signals) = Played::new(Profile::kitty());
+    let terminal = open(&played, signals, &[], &Options::default());
+    terminal.close_with_tail(b"one\ntwo\r\nthree").unwrap();
+    played.until("written", |emulator| {
+        emulator.row_text(2).as_deref() == Some("three")
+    });
+    let emulator = lock(&played.emulator);
+    assert!(!emulator.alternate_screen());
+    assert_eq!(emulator.row_text(0).as_deref(), Some("one"));
+    assert_eq!(emulator.row_text(1).as_deref(), Some("two"));
+}

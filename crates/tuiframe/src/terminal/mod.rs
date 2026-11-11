@@ -147,7 +147,7 @@ mod unix {
     use std::os::fd::AsFd;
     use std::time::Duration;
 
-    use super::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Result, base64};
+    use super::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Result, base64, crlf};
     use crate::buffer::Buffer;
     use crate::caps::env::Environment;
     use crate::caps::{self, Capabilities, KeyboardSupport, Support, probe};
@@ -529,7 +529,8 @@ mod unix {
         }
 
         /// Gives the terminal back as [`close`](Self::close) does, then writes `tail` on the main
-        /// screen, such as a program's last words.
+        /// screen, such as a program's last words. Each line break in it starts its line again
+        /// at the left, as it does once the terminal's modes are back.
         ///
         /// # Errors
         ///
@@ -537,7 +538,8 @@ mod unix {
         /// written.
         pub fn close_with_tail(self, tail: &[u8]) -> Result<()> {
             let failure = self.screen.writer().failure();
-            if self.screen.close(tail, CLOSE_WAIT) {
+            // (The tail goes out before raw mode ends, where a line feed moves down alone.)
+            if self.screen.close(&crlf(tail), CLOSE_WAIT) {
                 return Ok(());
             }
             match failure {
@@ -614,6 +616,21 @@ mod unix {
     }
 }
 
+/// `text` with each line feed that has no carriage return before it given one.
+#[cfg(any(unix, test))]
+fn crlf(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut previous = None;
+    for &byte in text {
+        if byte == b'\n' && previous != Some(b'\r') {
+            out.push(b'\r');
+        }
+        out.push(byte);
+        previous = Some(byte);
+    }
+    out
+}
+
 /// `bytes` in base64, with padding, for OSC 52.
 #[cfg(any(unix, test))]
 fn base64(bytes: &[u8]) -> String {
@@ -644,7 +661,16 @@ mod tests;
 
 #[cfg(test)]
 mod base64_tests {
-    use super::base64;
+    use super::{base64, crlf};
+
+    #[test]
+    fn line_feeds_get_carriage_returns() {
+        assert_eq!(
+            crlf(b"one\ntwo\r\nthree\n\n"),
+            b"one\r\ntwo\r\nthree\r\n\r\n"
+        );
+        assert_eq!(crlf(b""), b"");
+    }
 
     #[test]
     fn base64_matches_the_rfc_examples() {
