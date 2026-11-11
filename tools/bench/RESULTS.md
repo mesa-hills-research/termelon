@@ -8,7 +8,7 @@ GNU screen. Rows ending in `-rec` replay frames recorded from Arko.
 
 ## Against the targets
 
-The targets are those of DESIGN.md section 15.3, judged against ratatui's figures in this run, not
+The targets are the project's goals for its output layer, judged against ratatui's figures in this run, not
 the VM's in BASELINE.md. Figures are medians of 10 repeats.
 
 | Target | Result | Met |

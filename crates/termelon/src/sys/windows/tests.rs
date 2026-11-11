@@ -1053,9 +1053,9 @@ fn a_console_control_event_gives_the_console_back() {
     assert!(screen.close(b"", LONG));
 }
 
-/// The tests that need a real console, for the spikes that settle how Windows consoles behave.
+/// The tests that need a real console, which settle how Windows consoles behave.
 /// They run on a Windows runner with `cargo test -- --ignored`, under conhost and under Windows
-/// Terminal, and with the system's pseudoconsole and the one Windows Terminal ships (spike S8).
+/// Terminal, and with the system's pseudoconsole and the one Windows Terminal ships.
 #[cfg(windows)]
 mod real {
     use super::*;
@@ -1099,7 +1099,7 @@ mod real {
 
     /// One program on a real console. Shift+Enter, a click and a focus change put into the input
     /// buffer come out as events, and closing gives the console back as it was found, its code
-    /// pages untouched (spike S3, in process).
+    /// pages untouched.
     #[test]
     #[ignore = "needs a real console"]
     fn a_real_console_is_taken_and_given_back() {
@@ -1209,7 +1209,7 @@ mod real {
     /// Spike S2: what the console delivers for the probe's queries in each input mode. In virtual
     /// terminal input mode the replies decode as replies, and in records mode they come as
     /// records the reader takes for bytes, so none becomes a key. It prints how each reply's ESC
-    /// came (its virtual key) for the spike's record.
+    /// came (its virtual key), to keep a record of it.
     #[test]
     #[ignore = "needs a real console"]
     fn the_probe_s_replies_never_become_keys() {

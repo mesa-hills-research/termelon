@@ -14,7 +14,7 @@ A terminal UI framework in pure Rust. It covers the whole stack a full-screen te
 It has no C dependencies, and its unsafe code is limited to the operating system calls that need it,
 each explained in [docs/why-this-is-safe.md](docs/why-this-is-safe.md).
 
-The project is in its first milestones and isn't published yet. `cargo run --example todo` shows a
+It isn't on crates.io yet. `cargo run --example todo` shows a
 small program.
 
 ## Docs

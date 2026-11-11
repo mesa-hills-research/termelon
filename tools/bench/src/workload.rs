@@ -1,4 +1,4 @@
-//! The workloads that concern output (DESIGN.md section 15.2). Each is a sequence of frames, and
+//! The workloads that concern output. Each is a sequence of frames, and
 //! every stack draws exactly the same ones.
 
 use crate::content;
