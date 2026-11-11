@@ -27,7 +27,7 @@ futures-core = "0.3.31"
 proptest = { version = "1.6", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
-unsafe_code = "deny"                      # allowed only in sys/macos.rs and sys/windows/console.rs
+unsafe_code = "deny"                      # allowed only in sys/macos.rs, sys/windows/console.rs and the harness's Windows driver
 unsafe_op_in_unsafe_fn = "deny"           # every unsafe operation in its own block with its reason
 missing_docs = "warn"                     # a public library documents every public item
 missing_debug_implementations = "warn"    # public types print in test failures
