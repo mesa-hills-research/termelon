@@ -1,0 +1,203 @@
+name: Terminals
+
+# Runs the harness in real terminals: each starts with the probe, shows its scenes, and is read back
+# and compared with tuiframe-vt. tmux and a kitty smoke test run on every push to main, and the
+# rest nightly, on demand, and on pull requests labelled `terminals`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminals-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+# Actions are pinned to commits of releases published at least 30 days before they were chosen.
+# Each job starts non-blocking (continue-on-error) and becomes required after two weeks of green
+# nightly runs.
+
+jobs:
+  tmux:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Ubuntu 24.04 has tmux 3.4, 26.04 has 3.6a, and Homebrew has 3.8.
+        os: [ubuntu-24.04, ubuntu-26.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install tmux
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then brew install tmux; else sudo apt-get update && sudo apt-get install -y tmux; fi
+      - run: cargo build -p harness -p probe --locked
+      - run: target/debug/harness version tmux
+      - run: cargo test -p harness --locked --test tmux --test samples
+      - run: target/debug/harness smoke tmux
+      - run: target/debug/harness run tmux --probe target/debug/probe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tmux-${{ matrix.os }}
+          path: harness-out
+          if-no-files-found: ignore
+
+  screen:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Ubuntu 24.04 has screen 4.9.1, and Homebrew has 5.0.2. The driver runs screen in a tmux pane.
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install screen and tmux
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then brew install screen tmux; else sudo apt-get update && sudo apt-get install -y screen tmux; fi
+      - run: cargo build -p harness -p probe --locked
+      - run: target/debug/harness version screen
+      - run: cargo test -p harness --locked --test screen
+      - run: target/debug/harness smoke screen
+      - run: target/debug/harness run screen --probe target/debug/probe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screen-${{ matrix.os }}
+          path: harness-out
+          if-no-files-found: ignore
+
+  kitty:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Ubuntu 24.04 has kitty 0.32.2, and 26.04 has 0.45.0.
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      DISPLAY: ":99"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install kitty and a display
+        run: sudo apt-get update && sudo apt-get install -y kitty xvfb x11-utils xdotool imagemagick
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 -dpi 96 -nolisten tcp &
+          for _ in $(seq 100); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.1; done
+          xdpyinfo | head -n 5
+      - run: cargo build -p harness -p probe --locked
+      - run: target/debug/harness version kitty
+      - run: target/debug/harness smoke kitty
+      # On a push only the smoke test runs, and the scenes run nightly.
+      - if: github.event_name != 'push'
+        run: target/debug/harness run kitty --probe target/debug/probe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kitty-${{ matrix.os }}
+          path: harness-out
+          if-no-files-found: ignore
+
+  xterm:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    env:
+      DISPLAY: ":99"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # xfonts-base has the 9x15 bitmap font the driver asks for.
+      - name: Install xterm and a display
+        run: sudo apt-get update && sudo apt-get install -y xterm xfonts-base xvfb x11-utils xdotool imagemagick
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 -dpi 96 -nolisten tcp &
+          for _ in $(seq 100); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.1; done
+          xdpyinfo | head -n 5
+      - run: cargo build -p harness -p probe --locked
+      - run: target/debug/harness version xterm
+      - run: target/debug/harness smoke xterm
+      - run: target/debug/harness run xterm --probe target/debug/probe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: xterm-ubuntu-24.04
+          path: harness-out
+          if-no-files-found: ignore
+
+  wezterm:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    env:
+      DISPLAY: ":99"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      # WezTerm isn't in Ubuntu's archive. This is its newest release, from 2024-02-03, checked
+      # against this SHA-256 before it's installed.
+      WEZTERM_DEB: https://github.com/wezterm/wezterm/releases/download/20240203-110809-5046fc22/wezterm-20240203-110809-5046fc22.Ubuntu22.04.deb
+      WEZTERM_SHA256: 86358dab5794a4fb63f7c91dd68d4fdc3da58faad648a58fc77d2bd51c7b0686
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install WezTerm and a display
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/wezterm.deb" "$WEZTERM_DEB"
+          echo "$WEZTERM_SHA256  $RUNNER_TEMP/wezterm.deb" | sha256sum -c -
+          sudo apt-get update
+          sudo apt-get install -y "$RUNNER_TEMP/wezterm.deb" xvfb x11-utils xdotool imagemagick
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 -dpi 96 -nolisten tcp &
+          for _ in $(seq 100); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.1; done
+          xdpyinfo | head -n 5
+      - run: cargo build -p harness -p probe --locked
+      - run: target/debug/harness version wezterm
+      - run: target/debug/harness smoke wezterm
+      - run: target/debug/harness run wezterm --probe target/debug/probe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wezterm-ubuntu-24.04
+          path: harness-out
+          if-no-files-found: ignore
