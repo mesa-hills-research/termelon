@@ -7,10 +7,9 @@ readback reports them.
 
 The probe opens the terminal with the framework, which asks what it supports and measures its
 widths, checks that it has the size the harness asked for, and draws the scene as a frame ending
-with a marker on the last row. Before drawing, it saves the bytes that show the frame on a cleared
-screen, leaving out what the framework leaves out for that terminal (underline styles, underline
-colours, links and cursor shapes it lacks). Once the screen is read back, the harness presses `q`,
-and the probe writes a report of the capabilities it found and the events it received.
+with a marker on the last row. Once the screen is read back, the harness presses `q`, and the probe
+saves every byte the framework wrote to the terminal, from its setup and queries to the frame, and
+writes a report of the capabilities it found and the events it received.
 
 ```sh
 cargo build -p harness -p probe

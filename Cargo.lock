@@ -1135,7 +1135,6 @@ name = "probe"
 version = "0.1.0"
 dependencies = [
  "tuiframe",
- "tuiframe-vt",
 ]
 
 [[package]]

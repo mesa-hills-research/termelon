@@ -7,12 +7,11 @@
 //!
 //! It opens the terminal with the framework, which asks what the terminal supports and measures
 //! its widths, and checks the size is the one asked for. It draws the scene as a frame, which ends
-//! with `probe-done:NAME` on the last row, after saving to `--record` the bytes that show the
-//! frame's cells and cursor on a cleared screen, for the harness to compute the screen the
-//! terminal should show. Then it holds the screen, recording every event, until its input ends,
-//! `q` is pressed, or `--hold` seconds pass (300 by default), and writes its report as JSON.
+//! with `probe-done:NAME` on the last row. Then it holds the screen, recording every event, until
+//! its input ends, `q` is pressed, or `--hold` seconds pass (300 by default). It saves to
+//! `--record` every byte the framework wrote, for the harness to compute the screen the terminal
+//! should show, and writes its report as JSON.
 
-mod record;
 mod report;
 mod scenes;
 
@@ -20,7 +19,7 @@ use std::io::{self, Write as _};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use tuiframe::{Buffer, Drawn, Event, KeyCode, Options, Rect, Terminal};
+use tuiframe::{Drawn, Event, KeyCode, Options, Terminal};
 
 use crate::report::Report;
 
@@ -100,8 +99,8 @@ fn draw(terminal: &mut Terminal, scene: &scenes::Scene) -> Result<(), String> {
 
 /// Runs the scene, filling in the report.
 fn run(args: &Args, report: &mut Report) -> Result<(), String> {
-    let mut terminal =
-        Terminal::open(Options::default().width_probes(true)).map_err(|error| error.to_string())?;
+    let options = Options::default().width_probes(true).record_output(true);
+    let mut terminal = Terminal::open(options).map_err(|error| error.to_string())?;
     let size = terminal.size();
     report.size = Some(size);
     report.capabilities = Some(terminal.capabilities().clone());
@@ -114,16 +113,6 @@ fn run(args: &Args, report: &mut Report) -> Result<(), String> {
             size.width, size.height
         ));
     }
-    // The recording is complete before the marker can show.
-    let mut buffer =
-        Buffer::with_width_profile(Rect::from(size), terminal.capabilities().width_profile);
-    scenes::draw(args.scene, &mut buffer);
-    let allowed = record::Allowed::new(terminal.capabilities());
-    std::fs::write(
-        &args.record,
-        record::render(&buffer, args.scene.cursor, allowed),
-    )
-    .map_err(|error| format!("couldn't write {}: {error}", args.record))?;
     draw(&mut terminal, args.scene)?;
     let mut events = terminal.events();
     let deadline = Instant::now() + args.hold;
@@ -140,7 +129,31 @@ fn run(args: &Args, report: &mut Report) -> Result<(), String> {
             Err(_) => break,
         }
     }
+    block_on(terminal.written(), Duration::from_secs(2));
+    std::fs::write(&args.record, terminal.take_written())
+        .map_err(|error| format!("couldn't write {}: {error}", args.record))?;
     terminal.close().map_err(|error| error.to_string())
+}
+
+/// Runs `future` on this thread until it completes or `timeout` passes.
+fn block_on(future: impl Future<Output = ()>, timeout: Duration) {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let until = Instant::now() + timeout;
+    let waker = std::task::Waker::from(std::sync::Arc::new(Unpark(std::thread::current())));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    while future.as_mut().poll(&mut cx).is_pending() {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::park_timeout(left);
+    }
 }
 
 fn main() -> ExitCode {
