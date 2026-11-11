@@ -50,6 +50,10 @@ struct State {
     input_fails: bool,
     records: VecDeque<InputRecord>,
     woken: bool,
+    /// The reader's wait goes on, as for a thread that doesn't get to run.
+    held: bool,
+    /// The reader is in its wait.
+    waiting: bool,
     /// Reading fails, as when the console goes away.
     broken: bool,
     written: Vec<u8>,
@@ -90,6 +94,19 @@ impl Fake {
     /// Puts records in the input, as if typed.
     pub(crate) fn type_in(&self, records: &[InputRecord]) {
         self.with(|state| state.records.extend(records.iter().copied()));
+    }
+
+    /// Calls `then` while the reader is held in its wait, so the records and wakes `then` gives
+    /// reach it together, as when its thread runs late.
+    fn while_held(&self, then: impl FnOnce()) {
+        self.with(|state| state.held = true);
+        let started = Instant::now();
+        while !self.with(|state| state.waiting) {
+            assert!(started.elapsed() < LONG, "the reader never waited");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        then();
+        self.with(|state| state.held = false);
     }
 
     fn saved(&self) -> Saved {
@@ -201,25 +218,29 @@ impl Input for FakeInput {
         let until = timeout.map(|timeout| Instant::now() + timeout);
         let mut state = lock(&self.0.state);
         loop {
-            if state.broken {
-                return Err(io::Error::from(io::ErrorKind::BrokenPipe));
-            }
-            if !state.records.is_empty() {
-                return Ok(Ready::Input);
-            }
-            if std::mem::take(&mut state.woken) {
-                return Ok(Ready::Woken);
-            }
             let left = until.map(|until| until.saturating_duration_since(Instant::now()));
-            if left.is_some_and(|left| left.is_zero()) {
-                return Ok(Ready::TimedOut);
+            if !state.held {
+                if state.broken {
+                    return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+                }
+                if !state.records.is_empty() {
+                    return Ok(Ready::Input);
+                }
+                if std::mem::take(&mut state.woken) {
+                    return Ok(Ready::Woken);
+                }
+                if left.is_some_and(|left| left.is_zero()) {
+                    return Ok(Ready::TimedOut);
+                }
             }
+            state.waiting = true;
             state = self
                 .0
                 .changed
-                .wait_timeout(state, left.unwrap_or(LONG))
+                .wait_timeout(state, left.filter(|left| !left.is_zero()).unwrap_or(LONG))
                 .unwrap_or_else(PoisonError::into_inner)
                 .0;
+            state.waiting = false;
         }
     }
 
@@ -540,6 +561,35 @@ fn vt_input_waits_the_escape_timeout() {
     assert!(typed.elapsed() >= timeout);
 }
 
+/// A query to expect and a new escape timeout apply to input that came before the reader ran
+/// again, as on a busy machine where it runs late.
+#[test]
+fn requests_apply_to_what_a_late_reader_reads() {
+    use crate::event::decode::{Query, Reply};
+    let fake = Fake::new();
+    let settings = Arc::new(Settings::default());
+    settings.set_mode(InputMode::Vt);
+    let (reader, shared) = reading(&fake, &settings, Duration::ZERO);
+    shared.replies.open();
+    fake.while_held(|| {
+        reader.expect(Query::CursorPosition);
+        fake.type_in(&vt_records("\x1b[3;5R"));
+    });
+    assert!(shared.replies.wait(LONG, |replies| !replies.is_empty()));
+    assert_eq!(
+        shared.replies.close(),
+        [Reply::CursorPosition { row: 2, column: 4 }]
+    );
+    let timeout = Duration::from_millis(300);
+    let typed = Instant::now();
+    fake.while_held(|| {
+        reader.set_escape_timeout(timeout);
+        fake.type_in(&vt_records("\x1b"));
+    });
+    assert_eq!(next(&shared), key(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(typed.elapsed() >= timeout, "{:?}", typed.elapsed());
+}
+
 /// A query the reader is told to expect makes its answer a reply, not a key.
 #[test]
 fn an_expected_cursor_report_is_no_key() {
@@ -550,14 +600,11 @@ fn an_expected_cursor_report_is_no_key() {
     fake.type_in(&vt_records("\x1b[1;5R"));
     assert_eq!(next(&shared), key(KeyCode::F(3), KeyModifiers::CONTROL));
     reader.expect(crate::event::decode::Query::CursorPosition);
-    // (The reader takes the query at its next turn, which the wake starts.)
-    std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     nothing_more(&shared);
     // A probe that stopped waiting cancels it, and the next report is the key again.
     reader.expect(crate::event::decode::Query::CursorPosition);
     reader.cancel_expected();
-    std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     assert_eq!(next(&shared), key(KeyCode::F(3), KeyModifiers::CONTROL));
 }
@@ -696,9 +743,9 @@ fn a_screen_takes_the_console_and_gives_it_back_exactly() {
         next(screen.shared()),
         key(KeyCode::Enter, KeyModifiers::SHIFT)
     );
-    // A lone ESC waits the escape timeout the program sets.
-    screen.set_escape_timeout(Duration::from_millis(300));
-    std::thread::sleep(Duration::from_millis(50));
+    // A lone ESC waits the escape timeout the program sets. (The rest comes 50 ms later, well
+    // within a long timeout however busy the machine.)
+    screen.set_escape_timeout(LONG);
     fake.type_in(&vt_records("\x1b"));
     std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("x"));
@@ -707,12 +754,10 @@ fn a_screen_takes_the_console_and_gives_it_back_exactly() {
         key(KeyCode::Char('x'), KeyModifiers::ALT)
     );
     screen.expect(crate::event::decode::Query::CursorPosition);
-    std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     nothing_more(screen.shared());
     screen.expect(crate::event::decode::Query::CursorPosition);
     screen.cancel_expected();
-    std::thread::sleep(Duration::from_millis(50));
     fake.type_in(&vt_records("\x1b[1;5R"));
     assert_eq!(
         next(screen.shared()),

@@ -703,14 +703,7 @@ impl<D: Decode> Loop<D> {
                     Ok(0) => break,
                     Ok(read) => {
                         last_read = Instant::now();
-                        // (Queries asked for before their answers could have come.)
-                        let asks = std::mem::take(&mut lock(&self.ended.control.state).asks);
-                        for ask in asks {
-                            match ask {
-                                Ask::Expect(query) => self.decoder.expect(query),
-                                Ask::Cancel => self.decoder.cancel_expected(),
-                            }
-                        }
+                        self.take_requests();
                         self.decoder.feed(&buffer[..read], &mut self.decoded);
                         pending_since = None;
                         if self.decoder.has_pending() {
@@ -760,6 +753,28 @@ impl<D: Decode> Loop<D> {
             }
         }
         shared.events.push(events);
+    }
+
+    /// Takes the queries the program asked to expect or forget and a new escape timeout, just
+    /// before decoding a read, so they apply to whatever came after they were asked for, also when
+    /// the reader runs late.
+    fn take_requests(&mut self) {
+        let (asks, timeout) = {
+            let mut requests = lock(&self.ended.control.state);
+            (
+                std::mem::take(&mut requests.asks),
+                requests.escape_timeout.take(),
+            )
+        };
+        for ask in asks {
+            match ask {
+                Ask::Expect(query) => self.decoder.expect(query),
+                Ask::Cancel => self.decoder.cancel_expected(),
+            }
+        }
+        if let Some(timeout) = timeout {
+            self.escape_timeout = timeout;
+        }
     }
 
     /// Follows the program's requests. Holds still while it's parked, and returns whether to go
@@ -1173,6 +1188,41 @@ pub(crate) mod tests {
             Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         );
         assert!(typed.elapsed() >= timeout);
+    }
+
+    /// A query to expect and a new escape timeout apply to input that came before the reader ran
+    /// again, as on a busy machine where it runs late. (A parked reader finds the input and the
+    /// wake together.)
+    #[test]
+    fn requests_apply_to_what_a_late_reader_reads() {
+        use crate::event::decode::{DecoderOptions, Reply};
+        let mut reading = reading_with(Decoder::new(DecoderOptions::default()), Duration::ZERO);
+        reading.shared.replies.open();
+        assert!(reading.reader.park());
+        reading.reader.expect(Query::CursorPosition);
+        reading.pty.type_in(b"\x1b[3;5R");
+        reading.reader.unpark();
+        assert!(
+            reading
+                .shared
+                .replies
+                .wait(LONG, |replies| !replies.is_empty())
+        );
+        assert_eq!(
+            reading.shared.replies.close(),
+            [Reply::CursorPosition { row: 2, column: 4 }]
+        );
+        let timeout = Duration::from_millis(300);
+        assert!(reading.reader.park());
+        reading.reader.set_escape_timeout(timeout);
+        let typed = Instant::now();
+        reading.pty.type_in(b"\x1b");
+        reading.reader.unpark();
+        assert_eq!(
+            next(&reading.shared),
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        );
+        assert!(typed.elapsed() >= timeout, "{:?}", typed.elapsed());
     }
 
     /// A resize reads the new size into the atomic, queues it and asks for a full redraw. A

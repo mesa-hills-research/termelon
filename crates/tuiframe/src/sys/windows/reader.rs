@@ -70,7 +70,7 @@ struct Control {
     changed: Condvar,
 }
 
-/// What the program asks of the decoder, done at the reader's next turn.
+/// What the program asks of the decoder, done before it decodes what the reader reads next.
 #[derive(Debug)]
 enum Ask {
     Expect(Query),
@@ -79,9 +79,9 @@ enum Ask {
 
 #[derive(Debug, Default)]
 struct Requests {
-    /// What the decoder is to do at the next turn, in order.
+    /// What the decoder is to do before it decodes what the reader reads next, in order.
     asks: Vec<Ask>,
-    /// A new escape timeout, from the next turn.
+    /// A new escape timeout, from what the reader reads next.
     escape_timeout: Option<Duration>,
     /// The program asks the reader to hold still.
     park: bool,
@@ -131,23 +131,21 @@ impl Reader {
         })
     }
 
-    /// Makes the decoder expect the answer to `query`, from the reader's next turn, so calling it
-    /// before the query is written is enough.
+    /// Makes the decoder expect the answer to `query`, before it decodes what the reader reads
+    /// next, so calling it before the query is written is enough.
     pub(crate) fn expect(&self, query: Query) {
         lock(&self.control.state).asks.push(Ask::Expect(query));
-        self.wake.wake();
     }
 
-    /// Makes a pending ESC wait `timeout` for what follows it, from the next turn.
+    /// Makes a pending ESC wait `timeout` for what follows it, from what the reader reads next.
     pub(crate) fn set_escape_timeout(&self, timeout: Duration) {
         lock(&self.control.state).escape_timeout = Some(timeout);
-        self.wake.wake();
     }
 
-    /// Makes the decoder forget the queries whose answers are outstanding, from the next turn.
+    /// Makes the decoder forget the queries whose answers are outstanding, before it decodes what
+    /// the reader reads next.
     pub(crate) fn cancel_expected(&self) {
         lock(&self.control.state).asks.push(Ask::Cancel);
-        self.wake.wake();
     }
 
     /// Holds the reader still, reading nothing until [`unpark`](Self::unpark), for while another
@@ -261,15 +259,6 @@ impl<I: Input, D: Decode> Loop<I, D> {
                 if requests.stop {
                     break;
                 }
-                if let Some(timeout) = requests.escape_timeout.take() {
-                    self.escape_timeout = timeout;
-                }
-                for ask in requests.asks.drain(..) {
-                    match ask {
-                        Ask::Expect(query) => self.decoder.expect(query),
-                        Ask::Cancel => self.decoder.cancel_expected(),
-                    }
-                }
             }
             let timeout = waiting.map(|(since, wait)| wait.saturating_sub(since.elapsed()));
             let ready = match self.input.wait(timeout) {
@@ -298,6 +287,7 @@ impl<I: Input, D: Decode> Loop<I, D> {
                         self.ended.shared.events.fail(error.kind());
                         break;
                     }
+                    self.take_requests();
                     self.decode(&records, &mut bytes, &mut decoded);
                     waiting = self.wait_for_rest(&mut decoded);
                 }
@@ -306,6 +296,28 @@ impl<I: Input, D: Decode> Loop<I, D> {
         }
         self.decoder.flush_pending(&mut decoded);
         self.deliver(&mut decoded);
+    }
+
+    /// Takes the queries the program asked to expect or forget and a new escape timeout, just
+    /// before decoding a read, so they apply to whatever came after they were asked for, also when
+    /// the reader runs late.
+    fn take_requests(&mut self) {
+        let (asks, timeout) = {
+            let mut requests = lock(&self.ended.control.state);
+            (
+                std::mem::take(&mut requests.asks),
+                requests.escape_timeout.take(),
+            )
+        };
+        for ask in asks {
+            match ask {
+                Ask::Expect(query) => self.decoder.expect(query),
+                Ask::Cancel => self.decoder.cancel_expected(),
+            }
+        }
+        if let Some(timeout) = timeout {
+            self.escape_timeout = timeout;
+        }
     }
 
     /// How long to wait for the rest of what the decoder holds, once the input is read. A pending

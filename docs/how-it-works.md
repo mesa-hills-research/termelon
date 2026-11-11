@@ -438,8 +438,8 @@ Each turn of the reader's loop does these steps.
 
 1. Wait on the input, the signal pipe and the wake pipe, with no timeout, or with the escape timeout
    while the decoder has a sequence pending.
-2. Read what's ready (up to 4 KiB, or up to 64 records on Windows), hand the decoder any queries
-   `expect` queued since the last turn, then decode.
+2. Read what's ready (up to 4 KiB, or up to 64 records on Windows), take the queries `expect` and
+   `cancel_expected` queued and a new escape timeout, then decode.
 3. Queue the events, notifying the condvar and waking every stored waker. Put replies in the reply
    slot when it's open, and drop them otherwise.
 4. When no more input is ready, call `flush_pending` once the escape timeout has passed, and
@@ -453,8 +453,9 @@ Each turn of the reader's loop does these steps.
    the program.
 6. When the input closes or fails, or the thread ends, mark the queue closed, so `Events` ends.
 
-`expect` queues the query for the reader's next turn, so calling it before the query is written is
-enough. `park` and `unpark` hold the reader still while another program has the terminal.
+What `expect`, `cancel_expected` and `set_escape_timeout` ask for applies to everything the reader
+reads after the call, however late its thread runs, so calling `expect` before the query is written
+is enough. `park` and `unpark` hold the reader still while another program has the terminal.
 `wait_for_stop` is how a suspend, which sends SIGTSTP to the process group, waits for the reader to
 handle it. `stop` ends the thread at close.
 
