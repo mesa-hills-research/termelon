@@ -150,7 +150,7 @@ fn check(buffer: &Buffer) -> Result<(), String> {
                 ));
             }
             let symbol = cell.symbol();
-            let expected = text::width(symbol, profile);
+            let expected = text::width_with(symbol, profile);
             if usize::from(width) != expected {
                 return Err(format!(
                     "{symbol:?} at ({x}, {y}) takes {width} cells, not its width {expected}"

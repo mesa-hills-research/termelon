@@ -354,7 +354,7 @@ mod tests {
     fn buffer(rows: &[&str]) -> Buffer {
         let width = rows
             .iter()
-            .map(|r| crate::text::width(r, crate::caps::WidthProfile::default()))
+            .map(|r| crate::text::width_with(r, crate::caps::WidthProfile::default()))
             .max()
             .unwrap_or(0);
         let mut b = Buffer::empty(Rect::new(
