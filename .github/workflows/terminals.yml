@@ -195,7 +195,8 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/wezterm.deb" "$WEZTERM_DEB"
           echo "$WEZTERM_SHA256  $RUNNER_TEMP/wezterm.deb" | sha256sum -c -
           sudo apt-get update
-          sudo apt-get install -y "$RUNNER_TEMP/wezterm.deb" xvfb x11-utils xdotool imagemagick
+          # WezTerm opens its window through EGL, even with the software renderer.
+          sudo apt-get install -y "$RUNNER_TEMP/wezterm.deb" libegl1 libegl-mesa0 xvfb x11-utils xdotool imagemagick
       - name: Start Xvfb
         run: |
           Xvfb :99 -screen 0 1280x800x24 -dpi 96 -nolisten tcp &
@@ -259,8 +260,9 @@ jobs:
         with:
           toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Alacritty loads libxkbcommon-x11 at run time, and its package doesn't pull it in.
       - name: Install Alacritty and a display
-        run: sudo apt-get update && sudo apt-get install -y alacritty xvfb x11-utils xdotool imagemagick
+        run: sudo apt-get update && sudo apt-get install -y alacritty libxkbcommon-x11-0 xvfb x11-utils xdotool imagemagick
       - name: Start Xvfb
         run: |
           Xvfb :99 -screen 0 1280x800x24 -dpi 96 -nolisten tcp &
