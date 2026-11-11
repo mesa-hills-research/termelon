@@ -77,6 +77,21 @@ impl Cell {
     const CONTINUATION_SYMBOL: [u8; 4] = [CONTINUATION_TAG, 0, 0, 0];
     const SPACE_SYMBOL: [u8; 4] = [b' ', 0, 0, 0];
 
+    /// The cell as two numbers, the symbol and the text colour, then the background, the
+    /// attributes and the extras.
+    pub(crate) const fn words(&self) -> (u64, u64) {
+        let [a, b, c, d] = self.symbol;
+        let low = u32::from_le_bytes([a, b, c, d]) as u64 | (self.fg.0 as u64) << 32;
+        let high = self.bg.0 as u64 | (self.attrs.0 as u64) << 32 | (self.extras as u64) << 48;
+        (low, high)
+    }
+
+    /// The cell as one number, for comparing rows without a branch a cell.
+    pub(crate) const fn bits(&self) -> u128 {
+        let (low, high) = self.words();
+        low as u128 | (high as u128) << 64
+    }
+
     pub(crate) const fn is_continuation(&self) -> bool {
         self.symbol[0] == CONTINUATION_TAG
     }
@@ -439,12 +454,26 @@ pub struct Buffer {
     /// values.
     rich_rows: Vec<bool>,
     width_profile: WidthProfile,
+    /// The regions writes may change, as rows `top..bottom` and columns `left..right` counted
+    /// inside the area, when `clipped`.
+    clip: Vec<ClipRegion>,
+    clipped: bool,
+}
+
+/// A region of a clip, in rows and columns counted inside the buffer's area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ClipRegion {
+    top: usize,
+    bottom: usize,
+    left: usize,
+    right: usize,
 }
 
 impl Buffer {
-    /// A buffer of blank cells over `area`, measuring text with the default [`WidthProfile`].
+    /// A buffer of blank cells over `area`, measuring text with the current
+    /// [`text::width_profile`], the terminal's once it's open.
     pub fn empty(area: Rect) -> Self {
-        Self::with_width_profile(area, WidthProfile::default())
+        Self::with_width_profile(area, text::width_profile())
     }
 
     /// A buffer of blank cells over `area`, measuring text with `profile`.
@@ -456,6 +485,8 @@ impl Buffer {
             extras: ExtrasTable::default(),
             rich_rows: Vec::new(),
             width_profile: profile,
+            clip: Vec::new(),
+            clipped: false,
         };
         buffer.resize(area);
         buffer
@@ -477,18 +508,33 @@ impl Buffer {
         self.width_profile = profile;
     }
 
-    /// Blanks every cell and empties the cluster and extras tables, keeping their memory.
+    /// Blanks every cell and empties the cluster and extras tables, keeping their memory. Under a
+    /// clip, it blanks the cells the clip allows and keeps the tables.
     pub fn reset(&mut self) {
+        if self.clipped {
+            let width = usize::from(self.area.width);
+            for i in 0..self.clip.len() {
+                let region = self.clip[i];
+                for row in region.top..region.bottom {
+                    for col in region.left..region.right {
+                        self.reset_cell(row * width + col);
+                    }
+                }
+            }
+            return;
+        }
         self.cells.fill(Cell::BLANK);
         self.clusters.clear();
         self.extras.clear();
         self.rich_rows.fill(false);
     }
 
-    /// Covers `area` instead, with every cell blank.
+    /// Covers `area` instead, with every cell blank and no clip.
     pub fn resize(&mut self, area: Rect) {
         let area = Rect::new(area.x, area.y, area.width, area.height);
         self.area = area;
+        self.clip.clear();
+        self.clipped = false;
         self.cells.clear();
         self.cells.resize(area.area() as usize, Cell::BLANK);
         self.rich_rows.clear();
@@ -767,6 +813,9 @@ impl Buffer {
     fn put(&mut self, row: usize, col: usize, glyph: Glyph, style: Option<Style>) {
         let width = usize::from(glyph.width.max(1));
         let row_len = usize::from(self.area.width);
+        if !self.may_write(row, col, width) {
+            return;
+        }
         self.break_wide(row, row_len, col, col + width);
         let i = row + col;
         if let Some(style) = style {
@@ -816,6 +865,9 @@ impl Buffer {
 
     /// Merges `style` over the cell at `index`, its underline colour included.
     fn patch_cell(&mut self, index: usize, style: Style) {
+        if !self.may_change(index) {
+            return;
+        }
         let Some(cell) = self.cells.get_mut(index) else {
             return;
         };
@@ -834,6 +886,9 @@ impl Buffer {
     }
 
     fn set_cell_link(&mut self, index: usize, link: u32) {
+        if !self.may_change(index) {
+            return;
+        }
         let Some(cell) = self.cells.get_mut(index) else {
             return;
         };
@@ -858,16 +913,53 @@ impl Buffer {
         }
     }
 
-    /// Makes the cell at `index`, in row `y`, blank.
-    fn reset_cell(&mut self, index: usize, y: u16) {
-        let Some(row) = self.row_start(y) else {
+    /// Makes the cell at `index` blank.
+    fn reset_cell(&mut self, index: usize) {
+        let width = usize::from(self.area.width);
+        if width == 0 || index >= self.cells.len() {
             return;
-        };
-        let col = index - row;
-        self.break_wide(row, usize::from(self.area.width), col, col + 1);
+        }
+        let (row, col) = (index - index % width, index % width);
+        if !self.may_write(row, col, 1) {
+            return;
+        }
+        self.break_wide(row, width, col, col + 1);
         if let Some(cell) = self.cells.get_mut(index) {
             *cell = Cell::BLANK;
         }
+    }
+
+    /// Whether the clip allows changing the cell at `index`.
+    fn may_change(&self, index: usize) -> bool {
+        if !self.clipped {
+            return true;
+        }
+        let width = usize::from(self.area.width).max(1);
+        let (row, col) = (index / width, index % width);
+        self.clip
+            .iter()
+            .any(|r| r.top <= row && row < r.bottom && r.left <= col && col < r.right)
+    }
+
+    /// Whether the clip allows writing `width` cells at column `col` of the row starting at
+    /// `row`, with the parts of wide characters the write would turn into spaces.
+    fn may_write(&self, row: usize, col: usize, width: usize) -> bool {
+        if !self.clipped {
+            return true;
+        }
+        let row_len = usize::from(self.area.width);
+        let Some(cells) = self.cells.get(row..row + row_len) else {
+            return false;
+        };
+        let mut from = col;
+        while from > 0 && cells.get(from).is_some_and(Cell::is_continuation) {
+            from -= 1;
+        }
+        let mut to = (col + width).min(row_len);
+        while to < row_len && cells[to].is_continuation() {
+            to += 1;
+        }
+        (from..to).all(|c| self.may_change(row + c))
     }
 
     /// The text of each row, with continuation cells left out.
@@ -877,6 +969,135 @@ impl Buffer {
             .chunks(width)
             .map(|row| row.iter().map(|cell| self.cell_symbol(cell)).collect())
             .collect()
+    }
+}
+
+/// The clip that partial frames draw under.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "`Terminal::draw_regions` sets the clip, and comes with the terminal API"
+    )
+)]
+impl Buffer {
+    /// Drops every write from now on that would change a cell outside `regions`, whatever the
+    /// call, until [`clear_clip`](Self::clear_clip). A wide character that crosses a region's
+    /// edge is neither written nor broken, and text goes on past the cells it couldn't write, so
+    /// a string over two regions lands in both.
+    pub(crate) fn set_clip(&mut self, regions: &[Rect]) {
+        self.clip.clear();
+        let area = self.area;
+        for region in regions {
+            let r = region.intersection(area);
+            if r.is_empty() {
+                continue;
+            }
+            self.clip.push(ClipRegion {
+                top: usize::from(r.y - area.y),
+                bottom: usize::from(r.bottom() - area.y),
+                left: usize::from(r.x - area.x),
+                right: usize::from(r.right() - area.x),
+            });
+        }
+        self.clipped = true;
+    }
+
+    /// Lets writes change every cell again.
+    pub(crate) fn clear_clip(&mut self) {
+        self.clip.clear();
+        self.clipped = false;
+    }
+}
+
+/// Reading for the diff and the encoder.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the encoder reads cells through these, and `Terminal` runs the encoder"
+    )
+)]
+impl Buffer {
+    /// Modifiers that show on a space.
+    const VISIBLE_ON_BLANK: Modifier = Modifier::REVERSED
+        .union(Modifier::UNDERLINED)
+        .union(Modifier::SLOW_BLINK)
+        .union(Modifier::RAPID_BLINK)
+        .union(Modifier::CROSSED_OUT)
+        .union(Modifier::OVERLINED);
+
+    /// The cells of row `y` of the area, counted from its top.
+    pub(crate) fn row(&self, y: usize) -> &[Cell] {
+        let width = usize::from(self.area.width);
+        self.cells.get(y * width..(y + 1) * width).unwrap_or(&[])
+    }
+
+    /// Whether two rows hold the same cells, compared as plain numbers a chunk at a time so the
+    /// comparison vectorises.
+    pub(crate) fn rows_equal(a: &[Cell], b: &[Cell]) -> bool {
+        a.len() == b.len()
+            && a.chunks(16).zip(b.chunks(16)).all(|(x, y)| {
+                x.iter()
+                    .zip(y)
+                    .fold(0, |acc, (p, q)| acc | (p.bits() ^ q.bits()))
+                    == 0
+            })
+    }
+
+    /// Whether row `y` of the area, counted from its top, may hold a cluster or an extra, so that
+    /// its cells must be compared by what they show.
+    pub(crate) fn is_rich_row(&self, y: usize) -> bool {
+        self.rich_rows.get(y).copied().unwrap_or(false)
+    }
+
+    /// Which link `cell`, a cell of this buffer, belongs to, as a number that's the same for
+    /// cells of this buffer with the same link, and 0 for none.
+    pub(crate) fn link_index(&self, cell: &Cell) -> u32 {
+        self.extras.get(cell.extras).link
+    }
+
+    /// Whether `cell`, a cell of this buffer, shows as a blank cell does, as a space on the default
+    /// background with no modifier that shows on a space and no link.
+    pub(crate) fn looks_blank(&self, cell: &Cell) -> bool {
+        cell.symbol == Cell::SPACE_SYMBOL
+            && cell.bg == PackedColor::RESET
+            && !cell.modifier().intersects(Self::VISIBLE_ON_BLANK)
+            && (cell.extras == 0 || self.link_index(cell) == 0)
+    }
+
+    /// Whether two cells of this buffer have the same colours, attributes and extras.
+    pub(crate) fn same_style(a: &Cell, b: &Cell) -> bool {
+        let mut attrs = (a.attrs, b.attrs);
+        attrs.0.set_uncertain(false);
+        attrs.1.set_uncertain(false);
+        a.fg == b.fg && a.bg == b.bg && attrs.0 == attrs.1 && a.extras == b.extras
+    }
+
+    /// A hash of what row `y` shows, the same for equal rows of any two buffers.
+    pub(crate) fn hash_row(&self, y: usize) -> u64 {
+        const K: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mix = |h: u64, v: u64| (h.rotate_left(5) ^ v).wrapping_mul(K);
+        let mut h = 0;
+        for cell in self.row(y) {
+            let (low, high) = cell.words();
+            if cell.cluster_index().is_none() && cell.extras == 0 {
+                h = mix(mix(h, low), high);
+                continue;
+            }
+            let mut hasher = Fnv::default();
+            match cell.cluster_index() {
+                Some(i) => hasher.write(self.clusters.get(i).as_bytes()),
+                None => hasher.write(&cell.symbol),
+            }
+            let extra = self.extras.get(cell.extras);
+            hasher.write(&extra.underline_color.0.to_le_bytes());
+            hasher.write(self.extras.link(extra).unwrap_or("").as_bytes());
+            // The colours and attributes, without the symbol or the extras' index.
+            h = mix(mix(h, hasher.finish()), low >> 32);
+            h = mix(h, high & 0x0000_FFFF_FFFF_FFFF);
+        }
+        h
     }
 }
 
@@ -1065,7 +1286,7 @@ impl CellMut<'_> {
 
     /// Makes the cell a space in the default colours.
     pub fn reset(&mut self) -> &mut Self {
-        self.buffer.reset_cell(self.index, self.y);
+        self.buffer.reset_cell(self.index);
         self
     }
 
@@ -1537,10 +1758,194 @@ mod tests {
     }
 
     #[test]
+    fn a_clip_drops_writes_outside_its_regions() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 12, 2));
+        buffer.set_string(0, 0, "............", Style::new());
+        buffer.set_clip(&[Rect::new(0, 0, 3, 1), Rect::new(6, 0, 3, 2)]);
+        assert_eq!(
+            buffer.set_stringn(0, 0, "abcdefghijkl", 12, Style::new()),
+            (12, 0)
+        );
+        assert_eq!(row(&buffer, 0), "abc...ghi...");
+        buffer.set_style(Rect::new(0, 0, 12, 2), Style::new().bg(Color::Red));
+        let reds: Vec<_> = (0..12)
+            .filter(|&x| buffer.cell((x, 1)).unwrap().bg() == Color::Red)
+            .collect();
+        assert_eq!(reds, [6, 7, 8]);
+        buffer.set_link(Rect::new(0, 0, 12, 1), Some("u"));
+        assert_eq!(buffer.cell((3, 0)).unwrap().link(), None);
+        assert_eq!(buffer.cell((2, 0)).unwrap().link(), Some("u"));
+        buffer
+            .cell_mut((4, 0))
+            .unwrap()
+            .set_symbol("x")
+            .set_fg(Color::Blue)
+            .reset();
+        assert_eq!(buffer.symbol((4, 0)), ".");
+        assert_eq!(buffer.cell((4, 0)).unwrap().fg(), Color::Reset);
+        buffer.clear_clip();
+        buffer.set_string(3, 0, "XYZ", Style::new());
+        assert_eq!(row(&buffer, 0), "abcXYZghi...");
+    }
+
+    #[test]
+    fn a_clip_neither_writes_nor_breaks_a_wide_character_across_its_edge() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 8, 1));
+        buffer.set_string(0, 0, "a界b界cd", Style::new());
+        buffer.set_clip(&[Rect::new(2, 0, 3, 1)]);
+        buffer.set_string(2, 0, "x", Style::new());
+        assert_eq!(
+            row(&buffer, 0),
+            "a界b界cd",
+            "x would break the 界 that starts outside"
+        );
+        buffer.set_string(3, 0, "yz", Style::new());
+        assert_eq!(
+            row(&buffer, 0),
+            "a界y界cd",
+            "z would break the 界 that ends outside"
+        );
+        buffer.set_string(3, 0, "界", Style::new());
+        assert_eq!(row(&buffer, 0), "a界y界cd");
+        buffer.cell_mut((4, 0)).unwrap().set_symbol("w");
+        assert_eq!(row(&buffer, 0), "a界y界cd");
+        let mut wide = Buffer::empty(Rect::new(0, 0, 6, 1));
+        wide.set_clip(&[Rect::new(0, 0, 3, 1)]);
+        wide.set_string(0, 0, "界界界", Style::new());
+        assert_eq!(
+            row(&wide, 0),
+            "界    ",
+            "the second 界 crosses the edge and the third is outside"
+        );
+    }
+
+    #[test]
+    fn reset_under_a_clip_blanks_only_the_clip() {
+        let mut buffer = Buffer::empty(Rect::new(2, 1, 6, 2));
+        buffer.set_string(2, 1, "abcdef", Style::new().fg(Color::Red));
+        buffer.set_string(2, 2, "👨\u{200d}👩\u{200d}👧", Style::new());
+        buffer.set_clip(&[Rect::new(3, 1, 2, 2), Rect::new(100, 100, 5, 5)]);
+        buffer.reset();
+        assert_eq!(row(&buffer, 1), "a  def");
+        assert_eq!(
+            buffer.symbol((2, 2)),
+            "👨\u{200d}👩\u{200d}👧",
+            "the family is wider than the clip"
+        );
+        assert_eq!(buffer.cell((3, 1)).unwrap().fg(), Color::Reset);
+        buffer.resize(Rect::new(0, 0, 3, 1));
+        buffer.set_string(0, 0, "abc", Style::new());
+        assert_eq!(row(&buffer, 0), "abc", "resizing ends the clip");
+    }
+
+    #[test]
     fn debug_shows_rows_as_text() {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 2));
         buffer.set_string(0, 1, "a界", Style::new());
         let debug = format!("{buffer:?}");
         assert!(debug.contains(r#"rows: ["   ", "a界"]"#), "{debug}");
+    }
+
+    mod clip {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        const PIECES: &[&str] = &[
+            "a",
+            "bc",
+            "界",
+            "e\u{301}",
+            "👍🏽",
+            "👨\u{200d}👩\u{200d}👧",
+            "\t",
+            " ",
+        ];
+
+        fn text() -> impl Strategy<Value = String> {
+            prop::collection::vec(prop::sample::select(PIECES), 0..6).prop_map(|p| p.concat())
+        }
+
+        fn rect() -> impl Strategy<Value = Rect> {
+            (0..10u16, 0..4u16, 0..10u16, 0..4u16).prop_map(|(x, y, w, h)| Rect::new(x, y, w, h))
+        }
+
+        #[derive(Debug, Clone)]
+        enum Op {
+            Text(u16, u16, String),
+            Symbol(u16, u16, &'static str),
+            Style(Rect),
+            Link(Rect),
+            Reset(u16, u16),
+            ResetAll,
+        }
+
+        fn op() -> impl Strategy<Value = Op> {
+            prop_oneof![
+                (0..10u16, 0..4u16, text()).prop_map(|(x, y, t)| Op::Text(x, y, t)),
+                (0..10u16, 0..4u16, prop::sample::select(PIECES))
+                    .prop_map(|(x, y, s)| Op::Symbol(x, y, s)),
+                rect().prop_map(Op::Style),
+                rect().prop_map(Op::Link),
+                (0..10u16, 0..4u16).prop_map(|(x, y)| Op::Reset(x, y)),
+                Just(Op::ResetAll),
+            ]
+        }
+
+        proptest! {
+            /// Under a clip, no write changes a cell outside it, and wide characters stay whole.
+            #[test]
+            fn writes_under_a_clip_change_only_the_clip(
+                setup in prop::collection::vec((0..4u16, text()), 0..4),
+                regions in prop::collection::vec(rect(), 0..3),
+                ops in prop::collection::vec(op(), 1..20),
+            ) {
+                let area = Rect::new(0, 0, 9, 3);
+                let mut buffer = Buffer::empty(area);
+                for (y, t) in &setup {
+                    buffer.set_string(0, *y, t, Style::new().fg(Color::Green));
+                }
+                let before = buffer.clone();
+                buffer.set_clip(&regions);
+                let inside = |x: u16, y: u16| regions.iter().any(|r| r.contains(Position::new(x, y)));
+                for op in &ops {
+                    match op {
+                        Op::Text(x, y, t) => {
+                            buffer.set_string(*x, *y, t, Style::new().bg(Color::Blue));
+                        }
+                        Op::Symbol(x, y, s) => {
+                            if let Some(mut cell) = buffer.cell_mut((*x, *y)) {
+                                cell.set_symbol(s);
+                            }
+                        }
+                        Op::Style(r) => buffer.set_style(*r, Style::new().add_modifier(Modifier::BOLD)),
+                        Op::Link(r) => buffer.set_link(*r, Some("u")),
+                        Op::Reset(x, y) => {
+                            if let Some(mut cell) = buffer.cell_mut((*x, *y)) {
+                                cell.reset();
+                            }
+                        }
+                        Op::ResetAll => buffer.reset(),
+                    }
+                    for y in 0..area.height {
+                        let mut x = 0;
+                        while x < area.width {
+                            let cell = buffer.cell((x, y)).unwrap();
+                            prop_assert!(cell.width() > 0, "an orphan continuation at ({}, {}) after {:?}", x, y, op);
+                            prop_assert_eq!(usize::from(cell.width()), text::width_with(cell.symbol(), WidthProfile::default()));
+                            x += cell.width();
+                        }
+                        for x in 0..area.width {
+                            if !inside(x, y) {
+                                let (a, b) = (buffer.cell((x, y)).unwrap(), before.cell((x, y)).unwrap());
+                                prop_assert_eq!(a.symbol(), b.symbol(), "({}, {}) after {:?}", x, y, op);
+                                prop_assert_eq!(a.style(), b.style(), "({}, {}) after {:?}", x, y, op);
+                                prop_assert_eq!(a.link(), b.link());
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

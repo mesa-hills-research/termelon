@@ -7,6 +7,7 @@ mod parity;
 mod paste;
 mod properties;
 mod replies;
+mod round_trips;
 mod tokens;
 mod windows;
 
