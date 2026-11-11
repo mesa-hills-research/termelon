@@ -236,6 +236,9 @@ enum Op {
     Erase(u16, u16, char, u16),
     Sgr(String),
     Region(u16, u16),
+    /// A move, IL or DL, and the same move again, since the two leave the cursor in different
+    /// columns.
+    Lines(u16, u16, char, u16),
     Scroll(char, u16),
     Raw(&'static str),
     Link(Option<String>),
@@ -254,6 +257,15 @@ impl Op {
             Op::Erase(y, x, letter, how) => format!("\x1b[{};{}H\x1b[{how}{letter}", y + 1, x + 1),
             Op::Sgr(params) => format!("\x1b[{params}m"),
             Op::Region(top, bottom) => format!("\x1b[{top};{bottom}r"),
+            Op::Lines(y, x, letter, n) => {
+                format!(
+                    "\x1b[{};{}H\x1b[{n}{letter}\x1b[{};{}H",
+                    y + 1,
+                    x + 1,
+                    y + 1,
+                    x + 1
+                )
+            }
             Op::Scroll(letter, n) => format!("\x1b[{n}{letter}"),
             Op::Link(Some(url)) => format!("\x1b]8;;{url}\x1b\\"),
             Op::Link(None) => "\x1b]8;;\x1b\\".to_owned(),
@@ -368,6 +380,8 @@ fn op(cols: u16, rows: u16, wide: bool, regions: bool) -> impl Strategy<Value = 
         4 => sgr().prop_map(Op::Sgr),
         1 => region,
         1 => (prop::sample::select(vec!['S', 'T']), 0..rows + 2).prop_map(|(letter, n)| Op::Scroll(letter, n)),
+        1 => (at.clone(), prop::sample::select(vec!['L', 'M']), 0..rows + 2)
+            .prop_map(|((y, x), letter, n)| Op::Lines(y, x, letter, n)),
         2 => prop::sample::select(vec![
             "\x1b7", "\x1b8", "\x1b[s", "\x1b[u", "\x1b[?1049h", "\x1b[?1049l", "\x1b[?7l", "\x1b[?7h\r",
             "\x1b[?25l", "\x1b[?25h", "\x1b[?1h", "\x1b[?1l", "\x1b[?2004h", "\x1b[?2004l", "\x1b[?1004h",
@@ -500,6 +514,14 @@ fn quirk_origin_mode_moves() {
     let (ours, theirs) = both(3, 4, b"\x1b[2;4r\x1b[?6h\x1b[1;1H\x1b[2GX");
     assert_eq!(ours.rows, ["", " X", "", ""]);
     assert_eq!(theirs.rows, ["", "", " X", ""]);
+}
+
+#[test]
+fn quirk_il_and_dl_move_the_cursor_to_the_first_column() {
+    let (ours, theirs) = both(5, 3, b"\x1b[2;4H\x1b[L");
+    assert_eq!((ours.cursor, theirs.cursor), ((0, 1), (3, 1)));
+    let (ours, theirs) = both(5, 3, b"\x1b[2;4H\x1b[M");
+    assert_eq!((ours.cursor, theirs.cursor), ((0, 1), (3, 1)));
 }
 
 #[test]

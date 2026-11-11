@@ -132,6 +132,8 @@ impl Emulator {
             b'K' if few(1) => return self.erase_line(params.get(0)),
             b'S' if few(1) => self.scroll_up(n),
             b'T' if few(1) => self.scroll_down(n),
+            b'L' if few(1) => self.insert_lines(n),
+            b'M' if few(1) => self.delete_lines(n),
             b'r' if few(2) => self.set_scroll_region(params),
             b's' if params.is_empty() => self.save_cursor(),
             b'u' if params.is_empty() => self.restore_cursor(),

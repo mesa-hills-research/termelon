@@ -703,6 +703,30 @@ impl Emulator {
         self.grid_mut().scroll_down(top, bottom, n, &blank);
     }
 
+    /// IL, inside the scroll region only. The rows from the cursor's down move down by `n`, and
+    /// the cursor goes to the first column, as DEC terminals do.
+    fn insert_lines(&mut self, n: u16) {
+        if self.y < self.top || self.y > self.bottom {
+            return;
+        }
+        let (y, bottom, blank) = (self.y, self.bottom, self.blank());
+        self.grid_mut().scroll_down(y, bottom, n, &blank);
+        self.x = 0;
+        self.pending_wrap = false;
+    }
+
+    /// DL, inside the scroll region only. The rows below the cursor's move up by `n`, and the
+    /// cursor goes to the first column.
+    fn delete_lines(&mut self, n: u16) {
+        if self.y < self.top || self.y > self.bottom {
+            return;
+        }
+        let (y, bottom, blank) = (self.y, self.bottom, self.blank());
+        self.grid_mut().scroll_up(y, bottom, n, &blank);
+        self.x = 0;
+        self.pending_wrap = false;
+    }
+
     fn tab(&mut self) {
         let next = (self.x / 8 + 1) * 8;
         self.x = next.min(self.cols - 1);
