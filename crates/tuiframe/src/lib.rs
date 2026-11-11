@@ -15,6 +15,14 @@ pub mod caps;
 pub mod event;
 mod flags;
 pub mod layout;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "used by `Terminal`, which comes with the terminal API"
+    )
+)]
+mod output;
 pub mod style;
 
 pub use caps::{Capabilities, WidthProfile};
