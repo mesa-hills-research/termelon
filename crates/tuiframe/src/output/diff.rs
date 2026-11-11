@@ -45,7 +45,7 @@ pub(crate) fn diff_row(
     let prev = match before {
         Before::Row(prev, py) => {
             let prev_row = prev.row(py);
-            if prev_row == row && !prev.is_rich_row(py) && !next.is_rich_row(y) {
+            if !prev.is_rich_row(py) && !next.is_rich_row(y) && Buffer::rows_equal(prev_row, row) {
                 return;
             }
             Some((prev, prev_row))
@@ -242,16 +242,20 @@ pub(crate) fn detect_scroll(
     if height < MIN_REGION + 1 || prev.area() != next.area() {
         return None;
     }
-    scratch.prev.clear();
-    scratch.next.clear();
-    scratch.prev.extend((0..height).map(|y| prev.hash_row(y)));
-    scratch.next.extend((0..height).map(|y| next.hash_row(y)));
     let changed_rows = (0..height)
-        .filter(|&y| scratch.prev[y] != scratch.next[y])
+        .filter(|&y| {
+            prev.is_rich_row(y)
+                || next.is_rich_row(y)
+                || !Buffer::rows_equal(prev.row(y), next.row(y))
+        })
         .count();
     if changed_rows * 2 <= height {
         return None;
     }
+    scratch.prev.clear();
+    scratch.next.clear();
+    scratch.prev.extend((0..height).map(|y| prev.hash_row(y)));
+    scratch.next.extend((0..height).map(|y| next.hash_row(y)));
     scratch.changed.clear();
     scratch.drawn.clear();
     scratch.changed.push(0);

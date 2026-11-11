@@ -77,6 +77,21 @@ impl Cell {
     const CONTINUATION_SYMBOL: [u8; 4] = [CONTINUATION_TAG, 0, 0, 0];
     const SPACE_SYMBOL: [u8; 4] = [b' ', 0, 0, 0];
 
+    /// The cell as two numbers, the symbol and the text colour, then the background, the
+    /// attributes and the extras.
+    pub(crate) const fn words(&self) -> (u64, u64) {
+        let [a, b, c, d] = self.symbol;
+        let low = u32::from_le_bytes([a, b, c, d]) as u64 | (self.fg.0 as u64) << 32;
+        let high = self.bg.0 as u64 | (self.attrs.0 as u64) << 32 | (self.extras as u64) << 48;
+        (low, high)
+    }
+
+    /// The cell as one number, for comparing rows without a branch a cell.
+    pub(crate) const fn bits(&self) -> u128 {
+        let (low, high) = self.words();
+        low as u128 | (high as u128) << 64
+    }
+
     pub(crate) const fn is_continuation(&self) -> bool {
         self.symbol[0] == CONTINUATION_TAG
     }
@@ -903,6 +918,18 @@ impl Buffer {
         self.cells.get(y * width..(y + 1) * width).unwrap_or(&[])
     }
 
+    /// Whether two rows hold the same cells, compared as plain numbers a chunk at a time so the
+    /// comparison vectorises.
+    pub(crate) fn rows_equal(a: &[Cell], b: &[Cell]) -> bool {
+        a.len() == b.len()
+            && a.chunks(16).zip(b.chunks(16)).all(|(x, y)| {
+                x.iter()
+                    .zip(y)
+                    .fold(0, |acc, (p, q)| acc | (p.bits() ^ q.bits()))
+                    == 0
+            })
+    }
+
     /// Whether row `y` of the area, counted from its top, may hold a cluster or an extra, so that
     /// its cells must be compared by what they show.
     pub(crate) fn is_rich_row(&self, y: usize) -> bool {
@@ -934,23 +961,28 @@ impl Buffer {
 
     /// A hash of what row `y` shows, the same for equal rows of any two buffers.
     pub(crate) fn hash_row(&self, y: usize) -> u64 {
-        let mut hasher = Fnv::default();
+        const K: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mix = |h: u64, v: u64| (h.rotate_left(5) ^ v).wrapping_mul(K);
+        let mut h = 0;
         for cell in self.row(y) {
+            let (low, high) = cell.words();
+            if cell.cluster_index().is_none() && cell.extras == 0 {
+                h = mix(mix(h, low), high);
+                continue;
+            }
+            let mut hasher = Fnv::default();
             match cell.cluster_index() {
                 Some(i) => hasher.write(self.clusters.get(i).as_bytes()),
                 None => hasher.write(&cell.symbol),
             }
-            hasher.write(&cell.fg.0.to_le_bytes());
-            hasher.write(&cell.bg.0.to_le_bytes());
-            hasher.write(&cell.attrs.0.to_le_bytes());
-            if cell.extras != 0 {
-                let extra = self.extras.get(cell.extras);
-                hasher.write(&extra.underline_color.0.to_le_bytes());
-                hasher.write(self.extras.link(extra).unwrap_or("").as_bytes());
-                hasher.write(&[0xFF]);
-            }
+            let extra = self.extras.get(cell.extras);
+            hasher.write(&extra.underline_color.0.to_le_bytes());
+            hasher.write(self.extras.link(extra).unwrap_or("").as_bytes());
+            // The colours and attributes, without the symbol or the extras' index.
+            h = mix(mix(h, hasher.finish()), low >> 32);
+            h = mix(h, high & 0x0000_FFFF_FFFF_FFFF);
         }
-        hasher.finish()
+        h
     }
 }
 

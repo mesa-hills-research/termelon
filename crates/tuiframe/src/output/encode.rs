@@ -481,19 +481,21 @@ impl Encoder {
         if self.pen == Some(kept) {
             return;
         }
-        self.reset_params.clear();
-        push_reset_form(fresh, allowed, &mut self.reset_params);
-        let (params, pen) = match self.pen {
-            Some(current) => {
-                self.params.clear();
-                push_delta(current, kept, allowed, &mut self.params);
-                if self.params.len() <= self.reset_params.len() {
-                    (&self.params, kept)
-                } else {
-                    (&self.reset_params, fresh)
-                }
+        let delta = self.pen.map(|current| {
+            self.params.clear();
+            push_delta(current, kept, allowed, &mut self.params)
+        });
+        // Without turning anything off, the change is part of the whole style, so it's shorter.
+        let (params, pen) = if delta == Some(false) {
+            (&self.params, kept)
+        } else {
+            self.reset_params.clear();
+            push_reset_form(fresh, allowed, &mut self.reset_params);
+            if delta.is_some() && self.params.len() <= self.reset_params.len() {
+                (&self.params, kept)
+            } else {
+                (&self.reset_params, fresh)
             }
-            None => (&self.reset_params, fresh),
         };
         if !params.is_empty() {
             out.extend_from_slice(b"\x1b[");
@@ -644,6 +646,13 @@ fn push_cup(out: &mut Vec<u8>, x: u16, y: u16) {
 
 /// Writes `n` in decimal.
 pub(crate) fn push_number(out: &mut Vec<u8>, n: usize) {
+    let digit = |d: usize| b'0' + u8::try_from(d % 10).unwrap_or(0);
+    match n {
+        0..=9 => return out.push(digit(n)),
+        10..=99 => return out.extend_from_slice(&[digit(n / 10), digit(n)]),
+        100..=999 => return out.extend_from_slice(&[digit(n / 100), digit(n / 10), digit(n)]),
+        _ => {}
+    }
     let mut digits = [0u8; 20];
     let mut i = digits.len();
     let mut n = n;
@@ -729,9 +738,10 @@ fn push_color(params: &mut Vec<u8>, color: Color, base: usize) {
     }
 }
 
-/// The parameters that take the pen from `from` to `to`. Turning off bold or dim takes 22, which
-/// turns off both, so the other comes back after it, and the blinks share 25 the same way.
-fn push_delta(from: Pen, to: Pen, allowed: Allowed, params: &mut Vec<u8>) {
+/// The parameters that take the pen from `from` to `to`, and whether any turns something off.
+/// Turning off bold or dim takes 22, which turns off both, so the other comes back after it, and
+/// the blinks share 25 the same way.
+fn push_delta(from: Pen, to: Pen, allowed: Allowed, params: &mut Vec<u8>) -> bool {
     let off = from.modifier - to.modifier;
     let mut on = to.modifier - from.modifier;
     let intensity = Modifier::BOLD | Modifier::DIM;
@@ -775,6 +785,13 @@ fn push_delta(from: Pen, to: Pen, allowed: Allowed, params: &mut Vec<u8>) {
     if to.underline.is_some() && to.underline_color != from.underline_color {
         push_color(params, to.underline_color, 50);
     }
+    !off.is_empty()
+        || (from.underline.is_some() && to.underline.is_none())
+        || (to.fg == Color::Reset && from.fg != Color::Reset)
+        || (to.bg == Color::Reset && from.bg != Color::Reset)
+        || (to.underline.is_some()
+            && to.underline_color == Color::Reset
+            && from.underline_color != Color::Reset)
 }
 
 /// The parameters that set `pen` from SGR 0, which always has the 0, so it's never empty.
