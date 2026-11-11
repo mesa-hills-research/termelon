@@ -915,3 +915,72 @@ fn out_of_band_commands_wait_for_a_busy_terminal() {
     assert!(!rest.contains(&super::base64(b"old")));
     assert_eq!(rest.matches('\x07').count(), 1, "{rest:?}");
 }
+
+/// Releasing gives the terminal back for another program, and reacquiring takes it back, with
+/// the next frame redrawing everything on the screen the release left.
+#[test]
+fn release_and_reacquire_lend_the_terminal() {
+    use crate::style::Style;
+    let (played, signals) = Played::new(Profile::kitty());
+    let before = played.pty.modes();
+    let mut terminal = open(&played, signals, &[], &Options::default());
+    let draw = |terminal: &mut Terminal| {
+        wait_until_written(terminal);
+        let drawn = terminal.draw(|frame| frame.buffer_mut().set_string(0, 0, "x", Style::new()));
+        assert!(matches!(drawn, Ok(Drawn::Written(_))));
+    };
+    draw(&mut terminal);
+    played.until("drawn", |emulator| {
+        emulator.row_text(0).as_deref() == Some("x")
+    });
+    terminal.release().unwrap();
+    played.until("released", |emulator| {
+        !emulator.alternate_screen() && emulator.mode(25)
+    });
+    assert_eq!(played.pty.modes(), before);
+    terminal.reacquire().unwrap();
+    played.until("taken back", |emulator| {
+        emulator.alternate_screen() && emulator.row_text(0).as_deref() == Some("")
+    });
+    assert!(played.pty.is_raw());
+    draw(&mut terminal);
+    played.until("redrawn", |emulator| {
+        emulator.row_text(0).as_deref() == Some("x")
+    });
+    terminal.close().unwrap();
+    assert_eq!(played.pty.modes(), before);
+    assert!(
+        lock(&played.unknown).is_empty(),
+        "{:?}",
+        lock(&played.unknown)
+    );
+}
+
+/// `Terminal::open` installs the panic hook, so a panic gives the terminal back before its
+/// message prints.
+#[test]
+fn open_installs_the_panic_hook() {
+    use crate::sys::unix::tests::{is_child, spawn_child};
+    if is_child("terminal-panic") {
+        let _terminal =
+            Terminal::open(Options::default().probe_timeout(Duration::from_millis(50))).unwrap();
+        panic!("the program breaks");
+    }
+    let mut pty = Pty::open(Size::new(80, 24));
+    let before = pty.modes();
+    let mut child = spawn_child(
+        module_path!(),
+        "open_installs_the_panic_hook",
+        "terminal-panic",
+        &pty,
+    );
+    let message = pty.read_until(0, b"the program breaks", LONG);
+    let _ = child.wait();
+    let given_back = find(&pty.shown, b"\x1b[?1049l").expect("the reset");
+    assert!(
+        given_back < message,
+        "{:?}",
+        String::from_utf8_lossy(&pty.shown)
+    );
+    assert_eq!(pty.modes(), before);
+}

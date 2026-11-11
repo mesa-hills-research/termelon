@@ -378,35 +378,99 @@ fn give_back_on_panic() {
 /// The terminal while a program has it, on Unix.
 #[cfg(unix)]
 pub(crate) mod screen {
+    use std::ffi::c_int;
     use std::fs::File;
     use std::io::{self, Write};
+    use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use super::{CLOSE_WAIT, Enabled, RestoreHandle, register, unregister};
-    use crate::output::writer::{Writer, lock};
-    use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-
     use crate::event::decode::Query;
     use crate::layout::Size;
+    use crate::output::writer::{Writer, lock};
     use crate::sys::Shared;
     use crate::sys::unix::{
-        Decode, Modes, Reader, Resume, Signals, Tty, stop_process, window_size,
+        Decode, Hooks, Modes, Reader, Signals, Tty, stop_group, stop_now, window_size,
     };
+
+    /// How long a suspend waits for the reader to take the SIGTSTP it sent. A process whose
+    /// group is orphaned never gets it, and the suspend then returns.
+    const STOP_START: Duration = Duration::from_millis(250);
 
     /// The terminal while a program has it, with its writer, its reader and its modes.
     #[derive(Debug)]
     pub(crate) struct Screen {
-        writer: Writer,
-        shared: Arc<Shared>,
+        session: Arc<Session>,
         reader: Option<Reader>,
-        restore: RestoreHandle,
-        modes: Arc<Modes>,
-        /// What takes the terminal, sent again when the program runs again after a stop.
-        setup: Arc<Mutex<Vec<u8>>>,
         /// The terminal, for its size.
         size_fd: OwnedFd,
         closed: bool,
+    }
+
+    /// What giving the terminal back and taking it back need, shared with the reader's hooks.
+    #[derive(Debug)]
+    struct Session {
+        writer: Writer,
+        shared: Arc<Shared>,
+        restore: RestoreHandle,
+        modes: Arc<Modes>,
+        /// What takes the terminal, sent again when the program runs again after a stop.
+        setup: Mutex<Vec<u8>>,
+    }
+
+    impl Session {
+        /// Gives the terminal back until [`take_back`](Self::take_back), with the program's output
+        /// still open.
+        fn give_back_for_now(&self) -> io::Result<()> {
+            self.writer.send(self.writer.reset().to_vec())?;
+            let _ = self.writer.wait(self.writer.ticket(), CLOSE_WAIT);
+            self.modes.restore()
+        }
+
+        /// Takes the terminal back, after something else had it, and makes the next frame a full
+        /// redraw. With `reset`, the reset goes first, for a terminal something else stopped,
+        /// which still has what the program turned on, so pushing it again doesn't grow the title
+        /// and keyboard stacks.
+        fn take_back(&self, reset: bool) -> io::Result<()> {
+            self.modes.apply_raw()?;
+            let mut packet = if reset {
+                self.writer.reset().to_vec()
+            } else {
+                Vec::new()
+            };
+            packet.extend_from_slice(&lock(&self.setup));
+            self.writer.send(packet)?;
+            self.shared.request_redraw();
+            Ok(())
+        }
+
+        /// What the reader does on the signals.
+        fn hooks(session: &Arc<Self>) -> Hooks {
+            let (resumed, stopped, ended) = (session.clone(), session.clone(), session.clone());
+            Hooks {
+                resume: Box::new(move || {
+                    if !resumed.restore.is_given_back() {
+                        let _ = resumed.take_back(true);
+                    }
+                }),
+                stop: Box::new(move || {
+                    if stopped.restore.is_given_back() {
+                        let _ = stop_now();
+                        return;
+                    }
+                    let given_back = stopped.give_back_for_now();
+                    let _ = stop_now();
+                    if given_back.is_ok() {
+                        let _ = stopped.take_back(false);
+                    }
+                }),
+                end: Box::new(move |signal: c_int| {
+                    ended.restore.restore_now(CLOSE_WAIT);
+                    let _ = signal_hook::low_level::emulate_default_handler(signal);
+                }),
+            }
+        }
     }
 
     /// The size of the terminal `fd` is on, unless it says 0x0.
@@ -434,10 +498,10 @@ pub(crate) mod screen {
     impl Screen {
         /// Takes the terminal `tty`. It puts it in raw mode, starts the writer, then starts the
         /// reader, whose decoder `decoder` makes from the byte Backspace sends, and which learns of
-        /// signals through `signals`. A panic gives the
-        /// terminal back from now on, where [`install_panic_hook`] was called, and a writer that
-        /// fails ends the events. [`enable`](Self::enable) then turns on what the program uses.
-        /// When it fails, the terminal is as it was.
+        /// signals through `signals`. A panic gives the terminal back from now on, where
+        /// [`install_panic_hook`](super::install_panic_hook) was called, and a writer that fails
+        /// ends the events. [`enable`](Self::enable) then turns on what the program uses. When it
+        /// fails, the terminal is as it was.
         pub(crate) fn open_with<D: Decode>(
             tty: Tty,
             decoder: impl FnOnce(u8) -> D,
@@ -487,44 +551,32 @@ pub(crate) mod screen {
                 let shared = shared.clone();
                 move || shared.events.close()
             });
-            let setup = Arc::new(Mutex::new(Vec::new()));
-            let resume: Resume = Box::new({
-                let (modes, writer, setup, restore) = (
-                    modes.clone(),
-                    writer.clone(),
-                    setup.clone(),
-                    restore.clone(),
-                );
-                move || {
-                    if !restore.is_given_back() {
-                        let _ = modes.apply_raw();
-                        let _ = writer.send(lock(&setup).clone());
-                    }
-                }
+            let session = Arc::new(Session {
+                writer,
+                shared,
+                restore,
+                modes,
+                setup: Mutex::new(Vec::new()),
             });
-            let decoder = decoder(modes.erase());
+            let decoder = decoder(session.modes.erase());
             let reader = Reader::spawn(
                 input,
                 decoder,
-                shared.clone(),
+                session.shared.clone(),
                 escape_timeout,
                 signals,
-                resume,
+                Session::hooks(&session),
             );
             match reader {
                 Ok(reader) => Ok(Self {
-                    writer,
-                    shared,
+                    session,
                     reader: Some(reader),
-                    restore,
-                    modes,
-                    setup,
                     size_fd,
                     closed: false,
                 }),
                 Err(error) => {
-                    restore.give_back(&writer, &[], CLOSE_WAIT);
-                    unregister(&restore);
+                    session.restore.give_back(&session.writer, &[], CLOSE_WAIT);
+                    unregister(&session.restore);
                     Err(error)
                 }
             }
@@ -536,20 +588,20 @@ pub(crate) mod screen {
         }
 
         pub(crate) fn writer(&self) -> &Writer {
-            &self.writer
+            &self.session.writer
         }
 
         pub(crate) fn shared(&self) -> &Arc<Shared> {
-            &self.shared
+            &self.session.shared
         }
 
         pub(crate) fn restore_handle(&self) -> RestoreHandle {
-            self.restore.clone()
+            self.session.restore.clone()
         }
 
         /// Makes this thread the one that draws, whose panic gives the terminal back.
         pub(crate) fn draw_here(&self) {
-            self.restore.draw_here();
+            self.session.restore.draw_here();
         }
 
         /// Tells the decoder of a query whose answer is outstanding, before the query is written.
@@ -577,50 +629,53 @@ pub(crate) mod screen {
         /// Fails once the writer failed.
         pub(crate) fn enable(&self, enabled: &Enabled) -> io::Result<()> {
             self.set_enabled(enabled);
-            self.writer.send(enabled.setup())?;
+            self.session.writer.send(enabled.setup())?;
             Ok(())
         }
 
         /// Makes `enabled` what the reset undoes and what a resume turns on again. The program
         /// sends what turns the change on.
         pub(crate) fn set_enabled(&self, enabled: &Enabled) {
-            self.writer.set_reset(enabled.reset());
-            *lock(&self.setup) = enabled.setup();
+            self.session.writer.set_reset(enabled.reset());
+            *lock(&self.session.setup) = enabled.setup();
         }
 
-        /// Suspends the program as Ctrl+Z does in a shell. It holds the reader still, gives the
-        /// terminal back as closing does, and stops the process with SIGTSTP. When the process
-        /// runs again, it takes the terminal back and queues [`Event::Resumed`], and the next
-        /// frame redraws everything. Fails when the terminal couldn't be given back or taken back.
+        /// Suspends the program as Ctrl+Z does in a shell. It sends SIGTSTP to the process's
+        /// group, and the reader takes it as it takes one from outside: it gives the terminal
+        /// back, stops the process, and when the process runs again takes the terminal back and
+        /// queues [`Event::Resumed`], and the next frame redraws everything. This returns once
+        /// that's done, or at once when the stop never came, as in a group the shell no longer
+        /// leads. Fails when the signal couldn't be sent.
         ///
         /// [`Event::Resumed`]: crate::event::Event::Resumed
         pub(crate) fn suspend(&self) -> io::Result<()> {
+            let Some(reader) = &self.reader else {
+                return Ok(());
+            };
+            let since = reader.stops();
+            stop_group()?;
+            reader.wait_for_stop(since, STOP_START);
+            Ok(())
+        }
+
+        /// Gives the terminal back as closing does, without ending the program's output, and holds
+        /// the reader still, for running another program on the terminal, such as an editor, until
+        /// [`reacquire`](Self::reacquire).
+        pub(crate) fn release(&self) -> io::Result<()> {
             if let Some(reader) = &self.reader {
                 reader.park();
             }
-            let given_back = self.give_back_for_now();
-            let resumed = given_back.is_ok();
-            let stopped = given_back.and_then(|()| stop_process());
-            let taken_back = self.take_back();
+            self.session.give_back_for_now()
+        }
+
+        /// Takes the terminal back after [`release`](Self::release), and makes the next frame a
+        /// full redraw.
+        pub(crate) fn reacquire(&self) -> io::Result<()> {
+            let taken_back = self.session.take_back(false);
             if let Some(reader) = &self.reader {
-                reader.unpark(resumed);
+                reader.unpark();
             }
-            stopped.and(taken_back)
-        }
-
-        /// Gives the terminal back until [`take_back`](Self::take_back), with the program's output
-        /// still open.
-        fn give_back_for_now(&self) -> io::Result<()> {
-            self.writer.send(self.writer.reset().to_vec())?;
-            let _ = self.writer.wait(self.writer.ticket(), CLOSE_WAIT);
-            self.modes.restore()
-        }
-
-        fn take_back(&self) -> io::Result<()> {
-            self.modes.apply_raw()?;
-            self.writer.send(lock(&self.setup).clone())?;
-            self.shared.request_redraw();
-            Ok(())
+            taken_back
         }
 
         /// Gives the terminal back, with `tail` after the reset, waiting at most `wait` for it.
@@ -634,8 +689,9 @@ pub(crate) mod screen {
             if let Some(reader) = self.reader.take() {
                 reader.stop();
             }
-            let written = self.restore.give_back(&self.writer, tail, wait);
-            unregister(&self.restore);
+            let session = &self.session;
+            let written = session.restore.give_back(&session.writer, tail, wait);
+            unregister(&session.restore);
             written
         }
     }
@@ -919,8 +975,9 @@ mod tests {
             assert_eq!(pty.modes(), before);
         }
 
-        /// After a stop that something else ended, SIGCONT puts raw mode back, sends the setup
-        /// again and queues `Resumed`, and the next frame redraws everything.
+        /// After a stop that something else ended, SIGCONT puts raw mode back, sends the reset and
+        /// then the setup, so the stacks the setup pushes don't grow, queues `Resumed`, and the
+        /// next frame redraws everything.
         #[test]
         fn sigcont_takes_the_terminal_back() {
             let mut pty = Pty::open(Size::new(80, 24));
@@ -951,7 +1008,9 @@ mod tests {
             resume.write_all(b"X").unwrap();
             assert_eq!(next(screen.shared()), Event::Resumed);
             assert_eq!(pty.modes(), raw);
-            pty.read_until(first + setup.len(), &changed.setup(), LONG);
+            let mut again = changed.reset();
+            again.extend_from_slice(&changed.setup());
+            pty.read_until(first + setup.len(), &again, LONG);
             assert!(screen.shared().take_redraw());
             assert!(screen.close(b"", LONG));
             pty.read_until(first + setup.len(), &changed.reset(), LONG);
@@ -979,7 +1038,7 @@ mod tests {
                         crate::sys::unix::Tty::open().unwrap(),
                         |_| Bytes::default(),
                         Duration::ZERO,
-                        Signals::register().unwrap(),
+                        Signals::register(false).unwrap(),
                     )
                     .unwrap();
                     screen.enable(&enabled()).unwrap();
@@ -1028,74 +1087,145 @@ mod tests {
             }
         }
 
-        /// Suspending gives the terminal back while the process is stopped, and once it runs again
-        /// takes it back, queues `Resumed` and asks for a full redraw.
+        /// Suspending, or a SIGTSTP from outside, gives the terminal back while the process is
+        /// stopped, and once it runs again takes it back, queues one `Resumed` and asks for a full
+        /// redraw.
         #[test]
-        fn suspend_gives_the_terminal_back_until_the_process_runs_again() {
+        fn a_stop_gives_the_terminal_back_until_the_process_runs_again() {
             use rustix::process::{Pid, Signal, WaitOptions, kill_process, waitpid};
-            const TEST: &str = "suspend_gives_the_terminal_back_until_the_process_runs_again";
-            if is_child("suspend") {
-                let screen = Screen::open_with(
-                    crate::sys::unix::Tty::open().unwrap(),
-                    |_| Bytes::default(),
-                    Duration::ZERO,
-                    Signals::register().unwrap(),
-                )
-                .unwrap();
-                screen.enable(&enabled()).unwrap();
-                assert!(screen.shared().take_redraw());
-                screen.writer().send(b"<ready>".to_vec()).unwrap();
-                screen.suspend().unwrap();
-                assert_eq!(next(screen.shared()), Event::Resumed);
-                assert!(screen.shared().take_redraw());
-                // (The SIGCONT that ended the stop gives no second `Resumed`.)
-                assert_eq!(
-                    screen
-                        .shared()
-                        .events
-                        .next_timeout(Duration::from_millis(200)),
-                    Next::Empty
-                );
-                let modes = rustix::termios::tcgetattr(rustix::stdio::stdin()).unwrap();
-                assert!(
-                    !modes
-                        .local_modes
-                        .contains(rustix::termios::LocalModes::ICANON)
-                );
-                screen.writer().send(b"<resumed>".to_vec()).unwrap();
-                assert!(screen.writer().wait_idle(LONG));
-                assert!(screen.close(b"", LONG));
-                return;
+            const TEST: &str = "a_stop_gives_the_terminal_back_until_the_process_runs_again";
+            for case in ["suspend", "outside"] {
+                if is_child(case) {
+                    let screen = Screen::open_with(
+                        crate::sys::unix::Tty::open().unwrap(),
+                        |_| Bytes::default(),
+                        Duration::ZERO,
+                        Signals::register(false).unwrap(),
+                    )
+                    .unwrap();
+                    screen.enable(&enabled()).unwrap();
+                    assert!(screen.shared().take_redraw());
+                    screen.writer().send(b"<ready>".to_vec()).unwrap();
+                    if case == "suspend" {
+                        screen.suspend().unwrap();
+                    }
+                    assert_eq!(next(screen.shared()), Event::Resumed);
+                    assert!(screen.shared().take_redraw());
+                    // (The SIGCONT that ended the stop gives no second `Resumed`.)
+                    assert_eq!(
+                        screen
+                            .shared()
+                            .events
+                            .next_timeout(Duration::from_millis(200)),
+                        Next::Empty
+                    );
+                    let modes = rustix::termios::tcgetattr(rustix::stdio::stdin()).unwrap();
+                    assert!(
+                        !modes
+                            .local_modes
+                            .contains(rustix::termios::LocalModes::ICANON)
+                    );
+                    screen.writer().send(b"<resumed>".to_vec()).unwrap();
+                    assert!(screen.writer().wait_idle(LONG));
+                    assert!(screen.close(b"", LONG));
+                    return;
+                }
             }
             let (setup, reset) = (enabled().setup(), enabled().reset());
+            for case in ["suspend", "outside"] {
+                let mut pty = Pty::open(Size::new(80, 24));
+                let before = pty.modes();
+                let mut child = spawn_child(module_path!(), TEST, case, &pty);
+                let pid = Pid::from_child(&child);
+                let ready = pty.read_until(0, b"<ready>", LONG);
+                if case == "outside" {
+                    kill_process(pid, Signal::TSTP).unwrap();
+                }
+                let given_back = pty.read_until(ready, &reset, LONG);
+                let started = std::time::Instant::now();
+                loop {
+                    let status = waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG);
+                    match status.unwrap() {
+                        Some((_, status)) if status.stopped() => break,
+                        Some((_, status)) => panic!("{case}: the child ended, {status:?}"),
+                        None => {
+                            assert!(started.elapsed() < LONG, "{case}: the child never stopped");
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                }
+                assert_eq!(pty.modes(), before, "{case}");
+                kill_process(pid, Signal::CONT).unwrap();
+                let taken_back = pty.read_until(given_back, &setup, LONG);
+                let resumed = pty.read_until(taken_back, b"<resumed>", LONG);
+                let status = child.wait().unwrap();
+                pty.read_ready();
+                let shown = String::from_utf8_lossy(&pty.shown).into_owned();
+                assert!(status.success(), "{case}: {status}: {shown:?}");
+                pty.read_until(resumed, &reset, LONG);
+                assert_eq!(pty.modes(), before, "{case}");
+            }
+        }
+
+        /// With the ending signals asked for, SIGTERM gives the terminal back and then ends the
+        /// program as it would have. Once the terminal closed, SIGTSTP and SIGTERM act as they did
+        /// before it opened.
+        #[test]
+        fn signals_act_as_before_once_the_terminal_closes() {
+            use rustix::process::{Pid, Signal, WaitOptions, kill_process, waitpid};
+            use std::os::unix::process::ExitStatusExt;
+            const TEST: &str = "signals_act_as_before_once_the_terminal_closes";
+            for case in ["term-open", "after-close"] {
+                if is_child(case) {
+                    let screen = Screen::open_with(
+                        crate::sys::unix::Tty::open().unwrap(),
+                        |_| Bytes::default(),
+                        Duration::ZERO,
+                        Signals::register(true).unwrap(),
+                    )
+                    .unwrap();
+                    screen.enable(&enabled()).unwrap();
+                    if case == "after-close" {
+                        assert!(screen.close(b"<closed>", LONG));
+                    } else {
+                        screen.writer().send(b"<ready>".to_vec()).unwrap();
+                    }
+                    std::thread::sleep(Duration::from_secs(10));
+                    return;
+                }
+            }
+            let reset = enabled().reset();
             let mut pty = Pty::open(Size::new(80, 24));
             let before = pty.modes();
-            let mut child = spawn_child(module_path!(), TEST, "suspend", &pty);
-            let pid = Pid::from_child(&child);
+            let child = spawn_child(module_path!(), TEST, "term-open", &pty);
             let ready = pty.read_until(0, b"<ready>", LONG);
-            let given_back = pty.read_until(ready, &reset, LONG);
+            kill_process(Pid::from_child(&child), Signal::TERM).unwrap();
+            let mut child = child;
+            let status = child.wait().unwrap();
+            assert_eq!(status.signal(), Some(Signal::TERM.as_raw()), "{status}");
+            pty.read_until(ready, &reset, LONG);
+            assert_eq!(pty.modes(), before);
+
+            let mut pty = Pty::open(Size::new(80, 24));
+            let mut child = spawn_child(module_path!(), TEST, "after-close", &pty);
+            let pid = Pid::from_child(&child);
+            pty.read_until(0, b"<closed>", LONG);
+            kill_process(pid, Signal::TSTP).unwrap();
             let started = std::time::Instant::now();
             loop {
-                let status = waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG);
-                match status.unwrap() {
+                match waitpid(Some(pid), WaitOptions::UNTRACED | WaitOptions::NOHANG).unwrap() {
                     Some((_, status)) if status.stopped() => break,
                     Some((_, status)) => panic!("the child ended, {status:?}"),
                     None => {
-                        assert!(started.elapsed() < LONG, "the child never stopped");
+                        assert!(started.elapsed() < LONG, "SIGTSTP didn't stop it");
                         std::thread::sleep(Duration::from_millis(5));
                     }
                 }
             }
-            assert_eq!(pty.modes(), before);
             kill_process(pid, Signal::CONT).unwrap();
-            let taken_back = pty.read_until(given_back, &setup, LONG);
-            let resumed = pty.read_until(taken_back, b"<resumed>", LONG);
+            kill_process(pid, Signal::TERM).unwrap();
             let status = child.wait().unwrap();
-            pty.read_ready();
-            let shown = String::from_utf8_lossy(&pty.shown).into_owned();
-            assert!(status.success(), "{status}: {shown:?}");
-            pty.read_until(resumed, &reset, LONG);
-            assert_eq!(pty.modes(), before);
+            assert_eq!(status.signal(), Some(Signal::TERM.as_raw()), "{status}");
         }
     }
 }

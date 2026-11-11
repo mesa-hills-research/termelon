@@ -92,6 +92,14 @@ pub struct Options {
     pub escape_timeout: Option<Duration>,
     /// Skips the probe and uses these, for tests and setups the probe gets wrong.
     pub capabilities: Option<Capabilities>,
+    /// Installs [`install_panic_hook`](crate::install_panic_hook) at open, so a panic gives the
+    /// terminal back before its message prints. On by default. A program with its own rules for
+    /// which panics end it turns this off and builds its hook on [`RestoreHandle`](crate::RestoreHandle).
+    pub panic_hook: bool,
+    /// Gives the terminal back on SIGTERM, SIGHUP, SIGINT and SIGQUIT, then lets the signal end
+    /// the program as it would have. Off by default, since a program usually has its own policy
+    /// for these. Once the terminal closes, they act as they did before.
+    pub restore_on_signals: bool,
 }
 
 impl Default for Options {
@@ -106,6 +114,8 @@ impl Default for Options {
             width_probes: false,
             escape_timeout: None,
             capabilities: None,
+            panic_hook: true,
+            restore_on_signals: false,
         }
     }
 }
@@ -138,6 +148,10 @@ builders! {
     save_title: bool,
     /// Sets [`width_probes`](Options::width_probes).
     width_probes: bool,
+    /// Sets [`panic_hook`](Options::panic_hook).
+    panic_hook: bool,
+    /// Sets [`restore_on_signals`](Options::restore_on_signals).
+    restore_on_signals: bool,
 }
 
 impl Options {
@@ -290,7 +304,11 @@ mod unix {
         /// failed. The terminal is then as it was.
         pub fn open(options: Options) -> Result<Self> {
             let tty = Tty::open().map_err(Error::NoTerminal)?;
-            let terminal = Self::open_on(tty, options, &caps::env::Process, Signals::register()?)?;
+            if options.panic_hook {
+                crate::install_panic_hook();
+            }
+            let signals = Signals::register(options.restore_on_signals)?;
+            let terminal = Self::open_on(tty, options, &caps::env::Process, signals)?;
             // (Text measures as the terminal draws it from now on.)
             crate::text::set_width_profile(terminal.caps.width_profile);
             Ok(terminal)
@@ -631,6 +649,27 @@ mod unix {
         /// [`Error::Io`] when the terminal couldn't be given back or taken back.
         pub fn suspend(&mut self) -> Result<()> {
             Ok(self.screen.suspend()?)
+        }
+
+        /// Gives the terminal back as closing does and stops reading it, for running another
+        /// program on it, such as an editor or a pager, until [`reacquire`](Self::reacquire).
+        /// Frames drawn meanwhile reach the terminal, so draw none.
+        ///
+        /// # Errors
+        ///
+        /// [`Error::Io`] when the terminal couldn't be given back.
+        pub fn release(&mut self) -> Result<()> {
+            Ok(self.screen.release()?)
+        }
+
+        /// Takes the terminal back after [`release`](Self::release). The next frame redraws
+        /// everything.
+        ///
+        /// # Errors
+        ///
+        /// [`Error::Io`] when the terminal couldn't be taken back.
+        pub fn reacquire(&mut self) -> Result<()> {
+            Ok(self.screen.reacquire()?)
         }
 
         /// Why the terminal takes no more output, once it doesn't. A write that failed gives its
