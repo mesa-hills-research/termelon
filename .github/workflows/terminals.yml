@@ -377,9 +377,10 @@ jobs:
       - run: cargo build -p harness -p probe --locked
       - run: target/debug/harness version foot
       - run: target/debug/harness smoke foot
+      # wtype's keys aren't a keyboard's: its keymap has one level per key, so Shift with a letter
+      # doesn't reach foot as a keyboard sends it, and the first key after a new keymap can be
+      # lost. foot's keys aren't checked.
       - run: target/debug/harness run foot --probe target/debug/probe --out harness-out
-      - if: always()
-        run: target/debug/harness keys foot --probe target/debug/probe --out harness-out
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -413,9 +414,9 @@ jobs:
       - run: cargo build -p harness -p probe --locked
       - run: target/debug/harness version ghostty
       - run: target/debug/harness smoke ghostty
+      # System Events types a non-ASCII character as another key, and macOS keeps Ctrl+Left and
+      # Ctrl+F5 for itself, so Ghostty's keys aren't checked.
       - run: target/debug/harness run ghostty --probe target/debug/probe --out harness-out
-      - if: always()
-        run: target/debug/harness keys ghostty --probe target/debug/probe --out harness-out
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
