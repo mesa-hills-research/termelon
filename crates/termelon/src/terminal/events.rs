@@ -208,13 +208,25 @@ mod tests {
             .enable_time()
             .build()
             .unwrap();
-        let pushing = push_later(&shared, vec![key('a'), key('b')]);
+        // (The keys come from another thread once the loop has ticked, so `next` was pending
+        // across a turn of the loop however slow the machine is.)
+        let (ticked, tick) = std::sync::mpsc::channel();
+        let pushing = {
+            let shared = shared.clone();
+            std::thread::spawn(move || {
+                tick.recv().unwrap();
+                shared.events.push(&mut vec![key('a'), key('b')]);
+            })
+        };
         let mut ticks = 0;
         let got = runtime.block_on(async {
             loop {
                 tokio::select! {
                     event = events.next() => break event.unwrap(),
-                    () = tokio::time::sleep(Duration::from_millis(5)) => ticks += 1,
+                    () = tokio::time::sleep(Duration::from_millis(5)) => {
+                        ticks += 1;
+                        let _ = ticked.send(());
+                    }
                 }
             }
         });
