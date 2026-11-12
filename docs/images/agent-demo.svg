@@ -148,10 +148,6 @@
 <g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.12962;0.13227" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
 <rect x="297" y="378" width="9" height="18" fill="#e5e5e5"/>
 </g>
-<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.13227;0.14285;0.48941;0.5;0.8201;0.83068" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
-<path fill="#1c9160" shape-rendering="crispEdges" d="M99 9h36v9h-36z"/>
-<path fill="#1c9160" shape-rendering="crispEdges" d="M99 18h36v18h-36z"/>
-</g>
 <g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.13227;0.13492" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
 <text x="36" y="391" textLength="270">Make the to-do list keep its i</text>
 <rect x="306" y="378" width="9" height="18" fill="#e5e5e5"/>

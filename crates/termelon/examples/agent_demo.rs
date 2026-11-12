@@ -166,10 +166,6 @@ const SCRIPT: &[Step] = &[
     Step::Pause(3_000),
 ];
 
-/// When the mascot blinks, in milliseconds into the loop, for `BLINK` each.
-const BLINKS: [u64; 3] = [2_000, 7_400, 12_400];
-const BLINK: u64 = 160;
-
 /// Milliseconds for each character typed.
 const TYPE_EVERY: u64 = 40;
 /// Milliseconds for each word streamed.
@@ -242,8 +238,6 @@ struct Motion {
     /// The spinner's frame and the running tool's seconds, while one runs.
     spinner: usize,
     seconds: u64,
-    /// Whether the mascot's winking eye is open.
-    eye_open: bool,
 }
 
 impl Scene {
@@ -268,10 +262,7 @@ impl Scene {
         let length = Scene::length().as_millis().max(1);
         let now = u64::try_from(elapsed.as_millis() % length).unwrap_or(0);
         let mut content = Content::default();
-        let mut motion = Motion {
-            eye_open: BLINKS.iter().any(|&at| (at..at + BLINK).contains(&now)),
-            ..Motion::default()
-        };
+        let mut motion = Motion::default();
         let mut start = 0;
         for step in SCRIPT {
             let Some(into) = now.checked_sub(start) else {
@@ -389,13 +380,7 @@ fn draw(frame: &mut Frame<'_>, scene: &Scene, theme: &Theme) -> Vec<Rect> {
     ])
     .areas(area);
     let mut moving = Vec::new();
-    moving.extend(draw_header(
-        frame,
-        header,
-        face,
-        scene.motion.eye_open,
-        theme,
-    ));
+    draw_header(frame, header, face, theme);
     let transcript = transcript.inner(Margin::new(2, 0));
     moving.extend(draw_transcript(frame, transcript, scene, theme));
     draw_input(frame, input, scene.content.input, theme);
@@ -405,14 +390,8 @@ fn draw(frame: &mut Frame<'_>, scene: &Scene, theme: &Theme) -> Vec<Rect> {
     moving
 }
 
-/// Draws the mascot and the program's name, and gives back where the mascot is.
-fn draw_header(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    face: Option<&Face>,
-    eye_open: bool,
-    theme: &Theme,
-) -> Option<Rect> {
+/// Draws the mascot and the program's name.
+fn draw_header(frame: &mut Frame<'_>, area: Rect, face: Option<&Face>, theme: &Theme) {
     let title = Line::from(vec![
         Span::styled("Termelon", BOLD),
         Span::styled(" agent demo", DIM),
@@ -423,10 +402,10 @@ fn draw_header(
             Layout::vertical([Constraint::Length(1); 2]).areas(area.inner(Margin::new(2, 0)));
         frame.render_widget(title, first);
         frame.render_widget(place, second);
-        return None;
+        return;
     };
     let face_area = Rect::new(area.x + 2, area.y, face.width(), face.height()).intersection(area);
-    face.draw(frame.buffer_mut(), face_area, eye_open, theme);
+    face.draw(frame.buffer_mut(), face_area, theme);
     let text_x = face_area.right() + 3;
     let text_y = area.y + face.height() / 2 - 1;
     let width = area.right().saturating_sub(text_x);
@@ -438,7 +417,6 @@ fn draw_header(
         place,
         Rect::new(text_x, text_y + 1, width, 1).intersection(area),
     );
-    Some(face_area)
 }
 
 /// An entry of the transcript as drawn, a marker in the margin with its text beside it, wrapped,
@@ -557,9 +535,6 @@ fn draw_input(frame: &mut Frame<'_>, area: Rect, typed: &str, theme: &Theme) {
 struct Face {
     /// The pixels, `G` for the rind's green and `F` for the flesh, two rows to a row of cells.
     pixels: &'static [&'static str],
-    /// The winking eye opened, the `_` raised to the top of the `>`, as the columns and rows it
-    /// fills (left, top, right, bottom, the ends excluded).
-    open_eye: [usize; 4],
 }
 
 impl Face {
@@ -583,7 +558,6 @@ impl Face {
             "......GGGG......",
             "................",
         ],
-        open_eye: [9, 1, 13, 6],
     };
 
     /// 32 pixels square, 32 cells by 16.
@@ -622,7 +596,6 @@ impl Face {
             "................................",
             "................................",
         ],
-        open_eye: [18, 2, 26, 12],
     };
 
     /// The face for a screen of `area`, the large one where there's room, and none where it would
@@ -646,11 +619,7 @@ impl Face {
     }
 
     /// The colour of the pixel at column `x` and row `y`, or `None` where the background shows.
-    fn pixel(&self, x: usize, y: usize, eye_open: bool, theme: &Theme) -> Option<Color> {
-        let [left, top, right, bottom] = self.open_eye;
-        if eye_open && (left..right).contains(&x) && (top..bottom).contains(&y) {
-            return Some(theme.rind);
-        }
+    fn pixel(&self, x: usize, y: usize, theme: &Theme) -> Option<Color> {
         match self.pixels[y].as_bytes()[x] {
             b'G' => Some(theme.rind),
             b'F' => Some(theme.flesh),
@@ -659,12 +628,12 @@ impl Face {
     }
 
     /// Draws the face in half blocks from `area`'s top left, as much of it as fits.
-    fn draw(&self, buf: &mut Buffer, area: Rect, eye_open: bool, theme: &Theme) {
+    fn draw(&self, buf: &mut Buffer, area: Rect, theme: &Theme) {
         for row in 0..area.height {
             for column in 0..area.width {
                 let (x, y) = (usize::from(column), 2 * usize::from(row));
-                let upper = self.pixel(x, y, eye_open, theme);
-                let lower = self.pixel(x, y + 1, eye_open, theme);
+                let upper = self.pixel(x, y, theme);
+                let lower = self.pixel(x, y + 1, theme);
                 let (symbol, fg, bg) = match (upper, lower) {
                     (None, None) => continue,
                     (Some(upper), None) => ("▀", upper, Color::Reset),
