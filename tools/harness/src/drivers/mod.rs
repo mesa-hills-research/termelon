@@ -14,7 +14,7 @@ pub mod x11;
 pub mod xterm;
 pub mod xtermjs;
 
-use termelon_vt::{KeyEncoding, Profile, WidthRules};
+use termelon_vt::{Key, KeyEncoding, Mods, Profile, WidthRules};
 
 use crate::driver::{Driver, Error};
 use crate::input::version_slug;
@@ -112,7 +112,9 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
             ..Profile::kitty()
         }),
         "xterm" => Some(Profile::xterm()),
-        // WezTerm keeps Alt+Enter, which toggles full screen, as xterm does.
+        // WezTerm runs with its defaults, so without the kitty keyboard protocol, and keeps
+        // Alt+Enter (full screen), Ctrl+Tab and Ctrl+Shift+Tab (the next and previous tab) for
+        // itself, as its default key assignments have them.
         "wezterm" => {
             let mut profile = Profile {
                 name: "wezterm".to_owned(),
@@ -121,7 +123,12 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
                     ..WidthRules::default()
                 },
                 hyperlinks: true,
-                kitty_keyboard: true,
+                keys: KeyEncoding::Wezterm,
+                bound_keys: vec![
+                    (Key::Enter, Mods::ALT),
+                    (Key::Tab, Mods::CTRL),
+                    (Key::Tab, Mods::CTRL | Mods::SHIFT),
+                ],
                 ..Profile::xterm()
             };
             profile.modes.extend([2026, 2027]);

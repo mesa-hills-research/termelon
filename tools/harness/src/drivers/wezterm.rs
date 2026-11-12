@@ -80,7 +80,8 @@ pub fn cli(runtime_dir: &Path, socket: &Path) -> Command {
 }
 
 /// The command line that starts WezTerm at a size, with no update check, no close prompt, no tab
-/// bar, the software renderer, and the kitty keyboard protocol on.
+/// bar and the software renderer, and its keyboard as it comes, without the kitty keyboard
+/// protocol.
 pub fn start_command(launch: &Launch, runtime_dir: &Path) -> Command {
     let mut command = clean_command("wezterm");
     command.env("XDG_RUNTIME_DIR", runtime_dir);
@@ -91,7 +92,6 @@ pub fn start_command(launch: &Launch, runtime_dir: &Path) -> Command {
         "window_close_confirmation=\"NeverPrompt\"".to_owned(),
         "front_end=\"Software\"".to_owned(),
         "enable_tab_bar=false".to_owned(),
-        "enable_kitty_keyboard=true".to_owned(),
         "audible_bell=\"Disabled\"".to_owned(),
     ] {
         command.arg("--config").arg(option);
@@ -108,6 +108,10 @@ pub fn start_command(launch: &Launch, runtime_dir: &Path) -> Command {
 }
 
 /// Rebuilds WezTerm's `get-text --escapes` output, with the cursor from `cli list --format json`.
+/// The output comes from termwiz's terminfo renderer, which writes no overline, underline style
+/// or underline colour, gives the palette's first sixteen colours as the named ones, and ends a
+/// row with `CSI K` while the last background is still set, where WezTerm's cells there have the
+/// default one, so those `CSI K` are dropped. WezTerm draws all of these, as its screenshots show.
 ///
 /// # Errors
 ///
@@ -117,7 +121,9 @@ pub fn parse(text: &[u8], list_json: &str, cols: u16, rows: u16) -> Result<Readb
         joins_emoji: true,
         ..WidthRules::default()
     };
-    let mut screen = ansi_screen(text, cols, rows, width)?;
+    // The rows are drawn on a blank screen, so dropping `CSI K` keeps the rest of a row blank.
+    let text = String::from_utf8_lossy(text).replace("\x1b[K", "");
+    let mut screen = ansi_screen(text.as_bytes(), cols, rows, width)?;
     let number =
         |field: &str| json_field(list_json, field).and_then(|value| value.parse::<u16>().ok());
     let (Some(x), Some(y)) = (number("cursor_x"), number("cursor_y")) else {
@@ -127,11 +133,15 @@ pub fn parse(text: &[u8], list_json: &str, cols: u16, rows: u16) -> Result<Readb
     set_cursor(&mut screen, x, y, visible, None)?;
     let reports = Reports {
         colors: Colors::AsWritten,
-        attributes: Attributes::ALL,
+        attributes: Attributes {
+            underline_style: false,
+            overline: false,
+            ..Attributes::ALL
+        },
         cursor: true,
         wide_text: true,
         trims_rows: false,
-        indexed_as_named: false,
+        indexed_as_named: true,
     };
     Ok(Readback::new(screen, reports))
 }
