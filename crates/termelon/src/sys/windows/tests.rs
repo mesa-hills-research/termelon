@@ -1229,56 +1229,54 @@ mod real {
         screen.enable(&enabled()).unwrap();
         let shift = 0x10;
         let top = u16::try_from(probe.window().unwrap().top).unwrap_or(0);
-        write_input(
-            &conin(),
-            &[
-                key_record(true, 0x0d, 0x0d, shift),
-                key_record(false, 0x0d, 0x0d, shift),
-                InputRecord::Mouse(MouseRecord {
-                    column: 3,
-                    row: top,
-                    button_state: 1,
-                    control_state: 0,
-                    event_flags: 0,
-                }),
-                InputRecord::Focus(FocusRecord { focused: true }),
-            ],
-        )
-        .unwrap();
         // (A console window sends records of its own, focus as it gains and loses it and mouse
-        // moves for the pointer over it, so the test takes every event until a second passes with
-        // none, and looks past those.)
-        let mut events = Vec::new();
-        while let Next::Event(event) = screen.shared().events.next_timeout(Duration::from_secs(1)) {
-            events.push(event);
-        }
-        assert!(events.contains(&Event::FocusGained), "{events:?}");
-        let typed: Vec<&Event> = events
-            .iter()
-            .filter(|event| {
-                !matches!(
-                    event,
-                    Event::FocusGained
-                        | Event::FocusLost
-                        | Event::Mouse(MouseEvent {
-                            kind: MouseEventKind::Moved,
-                            ..
-                        })
-                )
-            })
-            .collect();
-        assert_eq!(typed.len(), 3, "{events:?}");
-        assert_eq!(typed[0], &key(KeyCode::Enter, KeyModifiers::SHIFT));
-        assert!(matches!(typed[1], Event::Key(release) if release.code == KeyCode::Enter));
+        // moves for the pointer over it, so each step types its records and waits for the event
+        // it looks for, past any others.)
+        let typed = |records: &[InputRecord], wanted: &dyn Fn(&Event) -> bool| {
+            write_input(&conin(), records).unwrap();
+            let mut seen = Vec::new();
+            let until = Instant::now() + LONG;
+            while Instant::now() < until {
+                if let Next::Event(event) = screen
+                    .shared()
+                    .events
+                    .next_timeout(Duration::from_millis(100))
+                {
+                    if wanted(&event) {
+                        return event;
+                    }
+                    seen.push(event);
+                }
+            }
+            panic!("{records:?} gave no such event, only {seen:?}");
+        };
+        let is_key = |event: &Event| matches!(event, Event::Key(_));
         assert_eq!(
-            typed[2],
-            &Event::Mouse(MouseEvent::new(
+            typed(&[key_record(true, 0x0d, 0x0d, shift)], &is_key),
+            key(KeyCode::Enter, KeyModifiers::SHIFT)
+        );
+        let release = typed(&[key_record(false, 0x0d, 0x0d, shift)], &is_key);
+        assert!(matches!(release, Event::Key(release) if release.code == KeyCode::Enter));
+        let click = InputRecord::Mouse(MouseRecord {
+            column: 3,
+            row: top,
+            button_state: 1,
+            control_state: 0,
+            event_flags: 0,
+        });
+        let is_click = |event: &Event| matches!(event, Event::Mouse(mouse) if mouse.kind != MouseEventKind::Moved);
+        assert_eq!(
+            typed(&[click], &is_click),
+            Event::Mouse(MouseEvent::new(
                 MouseEventKind::Down(MouseButton::Left),
                 3,
                 0,
                 KeyModifiers::NONE
             ))
         );
+        let focus = InputRecord::Focus(FocusRecord { focused: true });
+        let is_focus = |event: &Event| *event == Event::FocusGained;
+        typed(&[focus], &is_focus);
         assert!(screen.close(b"", LONG));
         assert_eq!(found(&probe), before);
     }
