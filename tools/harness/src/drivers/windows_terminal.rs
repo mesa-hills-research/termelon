@@ -45,6 +45,9 @@ const EXPORT_CHORD: [u16; 3] = [0x11, 0x10, 0x78];
 
 /// How long the program may take to start in the new window, and the export to be written.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long a running Windows Terminal takes to load settings that changed.
+const SETTINGS_RELOAD: Duration = Duration::from_secs(2);
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Windows Terminal, a window per program.
@@ -90,8 +93,17 @@ impl WindowsTerminal {
             std::fs::create_dir_all(parent)
                 .map_err(|error| Error::Io(parent.display().to_string(), error))?;
         }
-        std::fs::write(&path, settings(&self.export_path()))
-            .map_err(|error| Error::Io(path.display().to_string(), error))
+        let ours = settings(&self.export_path());
+        if std::fs::read(&path).ok().as_deref() == Some(ours.as_bytes()) {
+            return Ok(());
+        }
+        std::fs::write(&path, ours)
+            .map_err(|error| Error::Io(path.display().to_string(), error))?;
+        // (A Windows Terminal that's running, as the runner's own console is on Server 2025,
+        // takes new settings a moment after they change, and a window opened before that has
+        // the old padding, and so the wrong size.)
+        std::thread::sleep(SETTINGS_RELOAD);
+        Ok(())
     }
 
     fn helper(&mut self) -> Result<&mut Helper, Error> {
