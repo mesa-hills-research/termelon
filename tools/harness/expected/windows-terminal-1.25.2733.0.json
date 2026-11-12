@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "Windows Terminal",
+    "version": null
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "ConsoleRecords",
+    "synchronized_output": "Yes",
+    "grapheme_clustering": "Yes",
+    "hyperlinks": "Yes",
+    "underline_styles": "Yes",
+    "underline_color": "Yes",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Yes",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Unknown",
+    "background": "Some(Rgb { r: 12, g: 12, b: 12 })",
+    "glyphs": "Full"
+  }
+}

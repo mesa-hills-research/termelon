@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": null,
+    "version": null
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: false, vs16_widens: true, ambiguous_wide: false }",
+    "alternate_screen": "Unknown",
+    "keyboard": "ConsoleRecords",
+    "synchronized_output": "No",
+    "grapheme_clustering": "No",
+    "hyperlinks": "Unknown",
+    "underline_styles": "Unknown",
+    "underline_color": "Unknown",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Unknown",
+    "cursor_shape": "Unknown",
+    "title": "Unknown",
+    "title_stack": "Unknown",
+    "background": "None",
+    "glyphs": "Full"
+  }
+}
