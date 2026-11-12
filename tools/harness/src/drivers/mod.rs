@@ -114,7 +114,8 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
         "xterm" => Some(Profile::xterm()),
         // WezTerm runs with its defaults, so without the kitty keyboard protocol, and keeps
         // Alt+Enter (full screen), Ctrl+Tab and Ctrl+Shift+Tab (the next and previous tab) for
-        // itself, as its default key assignments have them.
+        // itself, as its default key assignments have them. A cell keeps one intensity, so bold
+        // and dim replace each other.
         "wezterm" => {
             let mut profile = Profile {
                 name: "wezterm".to_owned(),
@@ -123,6 +124,7 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
                     ..WidthRules::default()
                 },
                 hyperlinks: true,
+                one_intensity: true,
                 keys: KeyEncoding::Wezterm,
                 bound_keys: vec![
                     (Key::Enter, Mods::ALT),

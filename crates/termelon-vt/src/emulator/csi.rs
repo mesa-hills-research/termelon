@@ -432,6 +432,10 @@ impl Emulator {
                     true
                 }
                 _ if self.profile.ignored_sgr.contains(&p) => true,
+                1 | 2 if self.profile.one_intensity => {
+                    (pen.bold, pen.dim) = (p == 1, p == 2);
+                    true
+                }
                 _ => sgr_simple(pen, p),
             };
             known &= ok;

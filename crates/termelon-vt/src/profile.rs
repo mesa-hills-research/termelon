@@ -103,6 +103,9 @@ pub struct Profile {
     pub hyperlinks: bool,
     /// The SGR attributes it takes and doesn't draw, such as 53 (overline) for kitty.
     pub ignored_sgr: Vec<u16>,
+    /// Whether bold and dim are one setting, so SGR 1 and SGR 2 each undo the other, as in
+    /// WezTerm, whose cells keep one intensity.
+    pub one_intensity: bool,
     /// Whether it has the title stack (`CSI 22 t` and `CSI 23 t`).
     pub title_stack: bool,
     /// Whether it sets the cursor's shape with DECSCUSR (`CSI n SP q`).
@@ -164,6 +167,7 @@ impl Profile {
             decrqm: true,
             hyperlinks: false,
             ignored_sgr: Vec::new(),
+            one_intensity: false,
             title_stack: true,
             cursor_shape: true,
             kitty_keyboard: false,
@@ -207,6 +211,7 @@ impl Profile {
             decrqm: true,
             hyperlinks: true,
             ignored_sgr: vec![5, 6, 8, 53],
+            one_intensity: false,
             title_stack: true,
             cursor_shape: true,
             kitty_keyboard: true,
@@ -247,6 +252,7 @@ impl Profile {
             decrqm: false,
             hyperlinks: true,
             ignored_sgr: Vec::new(),
+            one_intensity: false,
             title_stack: false,
             cursor_shape: true,
             kitty_keyboard: false,
@@ -280,6 +286,7 @@ impl Profile {
             decrqm: true,
             hyperlinks: true,
             ignored_sgr: Vec::new(),
+            one_intensity: false,
             title_stack: false,
             cursor_shape: true,
             kitty_keyboard: true,
@@ -316,6 +323,7 @@ impl Profile {
             decrqm: false,
             hyperlinks: true,
             ignored_sgr: Vec::new(),
+            one_intensity: false,
             title_stack: true,
             cursor_shape: true,
             kitty_keyboard: false,
@@ -347,6 +355,7 @@ impl Profile {
             decrqm: false,
             hyperlinks: false,
             ignored_sgr: Vec::new(),
+            one_intensity: false,
             title_stack: false,
             cursor_shape: false,
             kitty_keyboard: false,

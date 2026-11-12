@@ -592,6 +592,19 @@ fn sgr_a_profile_ignores() {
     assert!(!style.blink && !style.rapid_blink && !style.hidden && !style.overline);
 }
 
+/// WezTerm keeps one intensity, so dim after bold replaces it.
+#[test]
+fn sgr_bold_and_dim_as_one_setting() {
+    let one = Profile {
+        one_intensity: true,
+        ..Profile::xterm()
+    };
+    let style = run_as(one.clone(), 5, 1, b"\x1b[1;2mA").pen().clone();
+    assert!(style.dim && !style.bold);
+    let style = run_as(one, 5, 1, b"\x1b[2m\x1b[1mA").pen().clone();
+    assert!(style.bold && !style.dim);
+}
+
 #[test]
 fn sgr_22_clears_bold_and_dim_together() {
     let style = pen(b"\x1b[1;2m\x1b[22m");
