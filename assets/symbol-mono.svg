@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512" role="img" aria-label="Termelon">
+  <title>Termelon</title>
+  <path fill="currentColor" d="M4 9.66L26.34 32L4 54.34Z"/>
+  <path fill="currentColor" d="M15.31 4L43.31 32L15.31 60L4 60L32 32L4 4Z"/>
+  <path fill="currentColor" d="M40 52H60V60H40Z"/>
+</svg>

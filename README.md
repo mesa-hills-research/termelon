@@ -1,4 +1,9 @@
-# Termelon
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mesa-hills-research/termelon/main/assets/readme-header-dark.svg">
+    <img src="https://raw.githubusercontent.com/mesa-hills-research/termelon/main/assets/readme-header-light.svg" alt="Termelon" width="400">
+  </picture>
+</h1>
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/mesa-hills-research/termelon/main/docs/images/agent-demo-still.svg">
