@@ -423,3 +423,27 @@ jobs:
           name: ghostty-macos-26
           path: harness-out
           if-no-files-found: ignore
+
+  linux-console:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
+    continue-on-error: true
+    timeout-minutes: 20
+    # The runner's kernel has virtual consoles, on a framebuffer of 1024 by 768. The driver runs
+    # the probe on console 12 with openvt and reads it back from /dev/vcsu12, through sudo.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo build -p harness -p probe --locked
+      - run: target/debug/harness version linux
+      - run: target/debug/harness smoke linux
+      - run: target/debug/harness run linux --probe target/debug/probe --out harness-out
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-console-ubuntu-24.04
+          path: harness-out
+          if-no-files-found: ignore

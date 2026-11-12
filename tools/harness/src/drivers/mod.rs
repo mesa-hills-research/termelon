@@ -6,6 +6,7 @@ pub mod ghostty;
 pub mod kitty;
 pub mod konsole;
 pub mod lines;
+pub mod linux;
 pub mod screen;
 pub mod tmux;
 pub mod vte;
@@ -20,7 +21,7 @@ use crate::driver::{Driver, Error};
 use crate::input::version_slug;
 
 /// The terminals the harness has drivers for.
-pub const TERMINALS: [&str; 11] = [
+pub const TERMINALS: [&str; 12] = [
     "tmux",
     "screen",
     "kitty",
@@ -32,6 +33,7 @@ pub const TERMINALS: [&str; 11] = [
     "konsole",
     "foot",
     "ghostty",
+    "linux",
 ];
 
 /// A driver for a terminal by name.
@@ -56,6 +58,7 @@ pub fn driver(name: &str) -> Result<Box<dyn Driver>, Error> {
         "konsole" => Box::new(konsole::Konsole::new()?),
         "foot" => Box::new(foot::Foot::new()?),
         "ghostty" => Box::new(ghostty::Ghostty::new()?),
+        "linux" => Box::new(linux::LinuxConsole::new()?),
         _ => return Err(Error::Missing(format!("a driver for {name}"))),
     })
 }
@@ -165,6 +168,7 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
             Some(profile)
         }
         "konsole" => Some(Profile::konsole()),
+        "linux" => Some(Profile::linux_console()),
         // foot and Ghostty join clusters once a program sets mode 2027, and Ghostty has it on from
         // the start and widens VS16.
         "foot" | "ghostty" => {
