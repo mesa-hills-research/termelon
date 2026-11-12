@@ -1,2 +1,4 @@
 # Text files keep LF on every system, since tests read fixtures and goldens byte for byte.
 * text=auto eol=lf
+# Readbacks recorded from terminals keep their bytes as the terminal wrote them, CRLF and all.
+tools/harness/tests/samples/recorded/** -text

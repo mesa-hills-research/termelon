@@ -1,0 +1,24 @@
+bold dim italic underline reverse strike blink overline
+double curly dotted dashed red line indexed line
+ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
+ 0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15
+idx1 idx196  bg236 
+rgb fg  rgb bg 
+stacked bold dim
+a link after
+  blue     green reversed 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+probe-done:styles

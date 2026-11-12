@@ -1,0 +1,25 @@
+probe: text
+
+plain ASCII, punctuation !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+Latin-1: café ñ ß ü ¿
+CJK: 字幕 한국어 カタカナ
+Combining: é ä ñ
+Box: ┌──┐ │ok│ └──┘ ═ ║
+Symbols: ⣷ … → ✓ • ± °
+
+                                       column 40
+
+                                                                           edge!
+
+
+
+
+
+
+
+
+
+
+
+probe-done:text
+

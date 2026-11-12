@@ -1,16 +1,17 @@
 //! Each driver's parser on saved readbacks, so they're tested where the terminals can't run.
 //!
-//! The tmux, GNU screen, xterm.js and VTE samples were recorded from tmux 3.6, screen 4.9.1,
-//! `@xterm/headless` 6.0.0 and VTE 0.84 running the probe's scenes, and the Alacritty samples are
+//! The tmux, GNU screen, xterm.js and VTE 0.84 samples were recorded from tmux 3.6, screen 4.9.1,
+//! `@xterm/headless` 6.0.0 and VTE 0.84 running the probe's scenes, and the Alacritty grids are
 //! `alacritty_terminal` 0.26's serialization of its grid for those scenes, which is what
-//! `--ref-test` writes. The kitty, xterm, WezTerm, Konsole, foot and Ghostty samples are written by
-//! hand in the formats their docs describe, for the small screen in `small.bytes`, until a run on
-//! CI records real ones.
+//! `--ref-test` writes. The samples in `recorded` are what the terminals gave on GitHub's runners,
+//! each beside the bytes the probe wrote there, from the artifacts of a run of
+//! `.github/workflows/terminals.yml`.
 
 use std::path::{Path, PathBuf};
 
 use harness::drivers::{
-    alacritty, foot, ghostty, kitty, konsole, screen, tmux, vte, wezterm, xterm, xtermjs,
+    self, alacritty, foot, ghostty, kitty, konsole, linux, screen, tmux, vte, wezterm, xterm,
+    xtermjs,
 };
 use harness::json::Json;
 use harness::{Readback, compare};
@@ -102,49 +103,94 @@ fn screen_hardcopy_of_the_text_scene() {
     assert!(readback.rows()[4].starts_with("CJK: Wÿ"));
 }
 
-#[test]
-fn kitty_get_text() {
-    let readback = kitty::parse(
-        &sample("kitty-constructed-small.ansi"),
-        20,
-        4,
-        Profile::kitty().width,
-    )
+/// The terminals, versions and scenes in `recorded`.
+const RECORDED: [(&str, &str, &[&str]); 10] = [
+    ("xterm", "390", &["styles", "text"]),
+    ("kitty", "0.32.2", &["styles", "text"]),
+    ("kitty", "0.45.0", &["styles", "text"]),
+    ("wezterm", "20240203-110809-5046fc22", &["styles", "text"]),
+    ("alacritty", "0.13.2", &["styles"]),
+    ("konsole", "25.12.3", &["styles", "text"]),
+    ("foot", "1.25.0", &["styles", "text"]),
+    ("ghostty", "1.3.1", &["styles", "text"]),
+    ("vte", "0.76.0", &["styles", "text"]),
+    ("linux", "7.0", &["styles", "text"]),
+];
+
+/// A readback a terminal gave on a runner, rebuilt, and the screen `termelon-vt` computes under
+/// that terminal's profile for the bytes the probe wrote there. `edit` changes the readback's
+/// text first.
+#[expect(
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "a helper of tests, which fail on an error"
+)]
+fn recorded(
+    terminal: &str,
+    version: &str,
+    scene: &str,
+    edit: impl Fn(String) -> String,
+) -> (Emulator, Readback) {
+    let stem = format!("recorded/{terminal}-{version}-{scene}");
+    let raw = |part: &str| sample(&format!("{stem}.readback.{part}"));
+    let text = |part: &str| edit(String::from_utf8(raw(part)).unwrap());
+    let profile = drivers::profile(terminal, &format!("{terminal} {version}")).unwrap();
+    let readback = match terminal {
+        "xterm" => xterm::parse(&text("xhtml"), 80, 24),
+        "kitty" => kitty::parse(text("ansi").as_bytes(), 80, 24, profile.width),
+        "wezterm" => wezterm::parse(text("ansi").as_bytes(), &text("json"), 80, 24),
+        "alacritty" => alacritty::parse(&text("json")),
+        "konsole" => konsole::gvariant_string(&text("gdbus"))
+            .and_then(|displayed| konsole::parse(&displayed, 80, 24)),
+        "foot" => foot::parse(&text("txt"), 80, 24),
+        "ghostty" => ghostty::parse(&text("txt"), 80, 24),
+        "vte" => vte::parse(&Json::parse(&text("json")).unwrap(), 80, 24),
+        "linux" => linux::parse(&raw("vcsu"), &raw("vcsa")),
+        other => panic!("no recorded readbacks of {other}"),
+    }
     .unwrap();
-    assert_same(&expected(Profile::kitty(), 20, 4, "small.bytes"), &readback);
-    assert_eq!(
-        (readback.screen.cursor().x, readback.screen.cursor().y),
-        (2, 3)
-    );
+    (
+        expected(profile, 80, 24, &format!("{stem}.bytes")),
+        readback,
+    )
 }
 
+/// Every readback recorded on the runners shows what `termelon-vt` computes.
 #[test]
-fn wezterm_get_text_and_list() {
-    let list = String::from_utf8(sample("wezterm-constructed-small.json")).unwrap();
-    let readback = wezterm::parse(&sample("wezterm-constructed-small.ansi"), &list, 20, 4).unwrap();
-    assert_same(&expected(Profile::xterm(), 20, 4, "small.bytes"), &readback);
+fn recorded_readbacks() {
+    for (terminal, version, scenes) in RECORDED {
+        for scene in scenes {
+            let (expected, readback) = recorded(terminal, version, scene, |text| text);
+            let mismatches = compare(&expected, &readback);
+            assert!(
+                mismatches.is_empty(),
+                "{terminal} {version} {scene}:\n{}",
+                mismatches
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
+    }
 }
 
-#[test]
-fn xterm_screen_dump() {
-    let html = String::from_utf8(sample("xterm-constructed-small.xhtml")).unwrap();
-    let readback = xterm::parse(&html, 20, 4).unwrap();
-    assert_same(&expected(Profile::xterm(), 20, 4, "small.bytes"), &readback);
-    assert_eq!(readback.rows()[1], " bg  字x");
-}
-
+/// A colour changed in xterm's dump shows as a difference in the cells that have it.
 #[test]
 fn an_xterm_dump_shows_a_wrong_colour() {
-    let html = String::from_utf8(sample("xterm-constructed-small.xhtml"))
-        .unwrap()
-        .replace("#cd0000", "#00cd00");
-    let readback = xterm::parse(&html, 20, 4).unwrap();
-    let mismatches = compare(&expected(Profile::xterm(), 20, 4, "small.bytes"), &readback);
-    assert_eq!(mismatches.len(), 3);
+    let (expected, readback) = recorded("xterm", "390", "styles", |html| {
+        html.replace(
+            "color: rgb(80.39%, 0.00%, 0.00%)",
+            "color: rgb(0.00%, 80.39%, 0.00%)",
+        )
+    });
+    let mismatches = compare(&expected, &readback);
+    assert_ne!(mismatches, []);
     assert!(
         mismatches
             .iter()
-            .all(|m| m.what == "fg" && m.expected == "#cd0000" && m.got == "#00cd00")
+            .all(|m| m.what == "fg" && m.expected == "#cd0000" && m.got == "#00cd00"),
+        "{mismatches:?}"
     );
 }
 
@@ -262,17 +308,6 @@ fn alacritty_grids() {
 }
 
 #[test]
-fn konsole_displayed_text() {
-    let result = String::from_utf8(sample("konsole-constructed-small.gdbus")).unwrap();
-    let text = konsole::gvariant_string(&result).unwrap();
-    let readback = konsole::parse(&text, 20, 4).unwrap();
-    assert_same(
-        &expected(Profile::konsole(), 20, 4, "small.bytes"),
-        &readback,
-    );
-}
-
-#[test]
 fn gvariant_strings() {
     assert_eq!(
         konsole::gvariant_string("('a\\'b\\\\c\\u00e9\\U0001f600\\n',)").unwrap(),
@@ -281,13 +316,6 @@ fn gvariant_strings() {
     assert_eq!(konsole::gvariant_string("(\"it's\",)").unwrap(), "it's");
     assert!(konsole::gvariant_string("()").is_err());
     assert_eq!(konsole::gvariant_quote("a'b\\\u{1b}"), "'a\\'b\\\\\\u001b'");
-}
-
-#[test]
-fn foot_piped_text() {
-    let text = String::from_utf8(sample("foot-constructed-small.txt")).unwrap();
-    let readback = foot::parse(&text, 20, 4).unwrap();
-    assert_same(&expected(Profile::xterm(), 20, 4, "small.bytes"), &readback);
 }
 
 #[test]
@@ -311,13 +339,6 @@ fn foot_keys_and_binding() {
     assert!(
         config.contains("pipe-visible=[sh -c \"cat > '/tmp/f/screen.txt'\"] Control+Shift+F12")
     );
-}
-
-#[test]
-fn ghostty_screen_file() {
-    let text = String::from_utf8(sample("ghostty-constructed-small.txt")).unwrap();
-    let readback = ghostty::parse(&text, 20, 4).unwrap();
-    assert_same(&expected(Profile::kitty(), 20, 4, "small.bytes"), &readback);
 }
 
 #[test]

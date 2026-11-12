@@ -1,0 +1,24 @@
+[mprobe: text
+
+[mplain ASCII, punctuation !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+[mLatin-1: café ñ ß ü ¿
+[mCJK: 字幕 한국어 カタカナ
+[mCombining: é ä ñ
+[mBox: ┌──┐ │ok│ └──┘ ═ ║
+[mSymbols: ⣷ … → ✓ • ± °
+
+[m                                       column 40
+
+[m                                                                           edge!
+
+
+
+
+
+
+
+
+
+
+
+[mprobe-done:text[?25l[24;16H[?12h

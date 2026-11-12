@@ -1,0 +1,1 @@
+("probe: text\n\nplain ASCII, punctuation !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\nLatin-1: café ñ ß ü ¿\nCJK: 字幕 한국어 カタカナ\nCombining: é ä ñ\nBox: ┌──┐ │ok│ └──┘ ═ ║\nSymbols: ⣷ … → ✓ • ± °\n\n                                       column 40\n\n                                                                           edge!\n\n\n\n\n\n\n\n\n\n\n\nprobe-done:text",)
