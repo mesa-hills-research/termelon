@@ -19,6 +19,9 @@ use crate::readback::ansi_screen;
 /// How long foot may take to write the screen.
 const PIPE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long a press of the readback's binding gets before it's pressed again.
+const REPRESS: Duration = Duration::from_secs(1);
+
 /// foot in a process of its own.
 #[derive(Debug)]
 pub struct Foot {
@@ -199,10 +202,16 @@ impl Foot {
             .ok_or(Error::Missing("a running foot".to_owned()))?;
         let path = self.screen_file();
         let _ = std::fs::remove_file(&path);
-        wtype(&wtype_args(Key::F(12), Mods::CTRL | Mods::SHIFT).unwrap_or_default())?;
         let deadline = Instant::now() + timeout;
         let mut last = None;
+        // A key right after wtype's new keymap can be lost, so the binding is pressed again while
+        // nothing comes.
+        let mut pressed: Option<Instant> = None;
         loop {
+            if last.is_none() && pressed.is_none_or(|at| at.elapsed() >= REPRESS) {
+                wtype(&wtype_args(Key::F(12), Mods::CTRL | Mods::SHIFT).unwrap_or_default())?;
+                pressed = Some(Instant::now());
+            }
             let now = std::fs::read_to_string(&path).ok();
             if let Some(text) = now.as_ref().filter(|_| now == last) {
                 return Ok(parse(text, cols, rows)?.with_raw("txt", text.clone()));

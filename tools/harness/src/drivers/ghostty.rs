@@ -23,6 +23,9 @@ pub const APP_BINARY: &str = "/Applications/Ghostty.app/Contents/MacOS/ghostty";
 /// How long Ghostty may take to write the screen.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How long a press of the readback's binding gets before it's pressed again.
+const REPRESS: Duration = Duration::from_secs(1);
+
 /// Ghostty in a process of its own.
 #[derive(Debug)]
 pub struct Ghostty {
@@ -224,9 +227,17 @@ impl Ghostty {
         // An old path on the clipboard mustn't count as this screen's.
         let mut clear = clean_command("pbcopy");
         crate::driver::run_with_input(&mut clear, Some(b""))?;
-        osascript(&keystroke_script(Key::F(12), Mods::CTRL | Mods::SHIFT).unwrap_or_default())?;
         let deadline = Instant::now() + timeout;
+        // A keystroke can go astray while the window comes forward, so the binding is pressed
+        // again while nothing comes.
+        let mut pressed: Option<Instant> = None;
         loop {
+            if pressed.is_none_or(|at| at.elapsed() >= REPRESS) {
+                osascript(
+                    &keystroke_script(Key::F(12), Mods::CTRL | Mods::SHIFT).unwrap_or_default(),
+                )?;
+                pressed = Some(Instant::now());
+            }
             let mut paste = clean_command("pbpaste");
             let path = String::from_utf8_lossy(&run(&mut paste)?).trim().to_owned();
             if !path.is_empty()
