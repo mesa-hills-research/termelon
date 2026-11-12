@@ -122,23 +122,24 @@ change is tested without the terminal.
 
 Jobs run on every push to main (tmux, xterm.js, and kitty's smoke test), nightly, and on demand. A
 job is required, without `continue-on-error`, once it passed three runs in a row with its expected
-reports and fixtures in place.
+reports and fixtures in place. Every Linux and macOS job but the Linux console's did so, so a
+failure there fails the run.
 
 | Job | Required |
 |---|---|
-| tmux, on each runner | no |
-| GNU screen, on each runner | no |
-| kitty, on each runner | no |
-| xterm | no |
-| xterm.js | no |
-| VTE | no |
-| WezTerm | no |
-| Alacritty | no |
-| Konsole | no |
-| foot | no |
-| Ghostty | no |
-| Windows Terminal, on each runner | no |
-| conhost, on each runner | no |
+| tmux, on each runner | yes |
+| GNU screen, on each runner | yes |
+| kitty, on each runner | yes |
+| xterm | yes |
+| xterm.js | yes |
+| VTE | yes |
+| WezTerm | yes |
+| Alacritty | yes |
+| Konsole | yes |
+| foot | yes |
+| Ghostty | yes |
+| Windows Terminal, on each runner | no, it has no expected reports yet |
+| conhost, on each runner | no, it has no expected reports yet |
 | Linux console | no, it's an experiment |
 
 ## Setting up a runner

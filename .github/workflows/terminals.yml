@@ -25,13 +25,12 @@ env:
   CARGO_INCREMENTAL: 0
 
 # Actions are pinned to commits of releases published at least 30 days before they were chosen.
-# Each job starts non-blocking (continue-on-error) and becomes required after two weeks of green
-# nightly runs.
+# Each job starts non-blocking (continue-on-error), and becomes required once it passed three runs
+# in a row with its expected reports and fixtures in place. docs/real-terminals.md lists which are.
 
 jobs:
   tmux:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -64,7 +63,6 @@ jobs:
 
   screen:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -99,7 +97,6 @@ jobs:
 
   kitty:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -140,7 +137,6 @@ jobs:
 
   xterm:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     env:
@@ -174,7 +170,6 @@ jobs:
 
   wezterm:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     env:
@@ -218,7 +213,6 @@ jobs:
   xtermjs:
     # xterm.js is the terminal of VS Code and most web terminals, so it runs on every push.
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
@@ -247,7 +241,6 @@ jobs:
 
   alacritty:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     # Ubuntu 24.04 has Alacritty 0.13.2.
     runs-on: ubuntu-24.04
@@ -283,7 +276,6 @@ jobs:
 
   vte:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     # Ubuntu 24.04 has VTE 0.76, the first with get_text_format.
     runs-on: ubuntu-24.04
@@ -318,7 +310,6 @@ jobs:
 
   konsole:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 30
     # Ubuntu 26.04 has Konsole 25.12.3. 24.04's 23.08 has no way to read its screen.
     runs-on: ubuntu-26.04
@@ -352,7 +343,6 @@ jobs:
 
   foot:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     # Ubuntu 26.04 has foot 1.25.0. It runs under headless sway, drawn in software.
     runs-on: ubuntu-26.04
@@ -390,7 +380,6 @@ jobs:
 
   ghostty:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'terminals')
-    continue-on-error: true
     timeout-minutes: 20
     runs-on: macos-26
     env:
