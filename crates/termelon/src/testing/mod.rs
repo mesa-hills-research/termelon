@@ -295,6 +295,12 @@ impl<'a> Screen<'a> {
         self.emulator.to_html()
     }
 
+    /// The screen as an SVG image, with its colours, attributes and cursor. [`vt::SvgAnimation`]
+    /// makes an animation of screens one after another.
+    pub fn to_svg(&self) -> String {
+        self.emulator.to_svg()
+    }
+
     /// The cursor, or `None` when it's hidden.
     pub fn cursor(&self) -> Option<Cursor> {
         let cursor = self.emulator.cursor();

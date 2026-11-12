@@ -54,6 +54,7 @@ should.
 | `rows()` | The same rows, one string each |
 | `styled()` | The screen in the styled-text format, below |
 | `to_html()` | An HTML fragment with the colours and attributes, for looking at a screen in a browser |
+| `to_svg()` | An SVG image of the screen, for docs. `vt::SvgAnimation` makes an animated one of screens one after another |
 | `cursor()` | The cursor's position, shape and blinking, or `None` when it's hidden |
 | `cell(x, y)` | One cell, with its text, its width and its style as the terminal has it |
 

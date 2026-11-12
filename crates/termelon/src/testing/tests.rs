@@ -93,6 +93,9 @@ fn the_screen_reads_back_as_styled_text_and_html() {
     let html = screen.to_html();
     assert!(html.starts_with("<pre"), "{html}");
     assert!(html.contains("ok"));
+    let svg = screen.to_svg();
+    assert!(svg.starts_with("<svg"), "{svg}");
+    assert!(svg.contains(">ok</text>"), "{svg}");
     let cell = screen.cell(1, 1).unwrap();
     assert_eq!((cell.text(), cell.style().fg), ("o", vt::Color::Green));
     assert!(screen.cell(10, 0).is_none());
