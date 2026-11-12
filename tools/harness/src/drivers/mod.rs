@@ -150,10 +150,14 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
             bound_keys: Vec::new(),
             ..Profile::xterm()
         }),
+        // Alacritty has the kitty keyboard protocol and ignores modifyOtherKeys, as a run of 0.13.2
+        // showed.
         "alacritty" => {
             let mut profile = Profile {
                 name: "alacritty".to_owned(),
                 hyperlinks: true,
+                kitty_keyboard: true,
+                modify_other_keys: false,
                 bound_keys: Vec::new(),
                 ..Profile::xterm()
             };
