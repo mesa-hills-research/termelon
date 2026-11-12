@@ -1245,8 +1245,9 @@ mod real {
             ],
         )
         .unwrap();
-        // (A console window sends focus records of its own as it gains and loses focus, so the
-        // test takes every event until a second passes with none, and looks past those.)
+        // (A console window sends records of its own, focus as it gains and loses it and mouse
+        // moves for the pointer over it, so the test takes every event until a second passes with
+        // none, and looks past those.)
         let mut events = Vec::new();
         while let Next::Event(event) = screen.shared().events.next_timeout(Duration::from_secs(1)) {
             events.push(event);
@@ -1254,7 +1255,17 @@ mod real {
         assert!(events.contains(&Event::FocusGained), "{events:?}");
         let typed: Vec<&Event> = events
             .iter()
-            .filter(|event| !matches!(event, Event::FocusGained | Event::FocusLost))
+            .filter(|event| {
+                !matches!(
+                    event,
+                    Event::FocusGained
+                        | Event::FocusLost
+                        | Event::Mouse(MouseEvent {
+                            kind: MouseEventKind::Moved,
+                            ..
+                        })
+                )
+            })
             .collect();
         assert_eq!(typed.len(), 3, "{events:?}");
         assert_eq!(typed[0], &key(KeyCode::Enter, KeyModifiers::SHIFT));

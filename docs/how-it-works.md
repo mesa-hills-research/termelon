@@ -221,7 +221,8 @@ Key records written with `WriteConsoleInputW` come back from `ReadConsoleInputW`
 records mode. In virtual terminal input mode the console turns each key press into what the key
 sends as characters, `ESC [ A` for Up and a carriage return for Shift+Enter, its modifiers lost.
 conhost passes the releases as written, and Windows Terminal drops them. A conhost window and
-Windows Terminal send focus records of their own as their windows gain focus.
+Windows Terminal send focus records of their own as their windows gain focus, and a conhost window
+with mouse input on sends moves of the pointer over it.
 `ReadConsoleOutputCharacterW` gives a wide character once for its two cells, and U+FFFD for one
 outside the BMP.
 
