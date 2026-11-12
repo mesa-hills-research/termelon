@@ -154,7 +154,9 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
             ..Profile::xterm()
         }),
         // Alacritty has the kitty keyboard protocol and ignores modifyOtherKeys, as a run of 0.13.2
-        // showed.
+        // showed. Its default bindings send the legacy bytes of Shift+Tab and Backspace with Shift
+        // or Alt under the protocol too (`default_key_bindings` in its `bindings.rs`), and
+        // Shift+Enter sends its text.
         "alacritty" => {
             let mut profile = Profile {
                 name: "alacritty".to_owned(),
@@ -162,6 +164,14 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
                 kitty_keyboard: true,
                 modify_other_keys: false,
                 bound_keys: Vec::new(),
+                legacy_under_kitty: vec![
+                    (Key::Tab, Mods::SHIFT),
+                    (Key::Tab, Mods::SHIFT | Mods::ALT),
+                    (Key::Backspace, Mods::NONE),
+                    (Key::Backspace, Mods::SHIFT),
+                    (Key::Backspace, Mods::ALT),
+                    (Key::Enter, Mods::SHIFT),
+                ],
                 ..Profile::xterm()
             };
             profile.modes.push(2026);

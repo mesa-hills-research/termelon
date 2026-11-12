@@ -37,6 +37,13 @@ impl Emulator {
             0
         };
         if flags != 0 {
+            if flags & ALL_KEYS == 0 && self.profile.legacy_under_kitty.contains(&(key, mods)) {
+                return if kind == KeyKind::Release {
+                    Vec::new()
+                } else {
+                    self.legacy_key(key, mods)
+                };
+            }
             return self.kitty_key(key, mods, kind, flags);
         }
         if kind == KeyKind::Release {

@@ -122,6 +122,10 @@ pub struct Profile {
     /// The keys it keeps for itself and sends nothing for, such as xterm's Alt+Enter, which turns
     /// full screen on and off.
     pub bound_keys: Vec<(Key, Mods)>,
+    /// The keys that keep their legacy bytes under the kitty keyboard protocol, until a program
+    /// asks for every key as an escape code (flag 8), as Alacritty's default bindings keep
+    /// Shift+Tab and Alt+Backspace.
+    pub legacy_under_kitty: Vec<(Key, Mods)>,
     /// Its answer to DA1 (`CSI c`).
     pub da1: Option<String>,
     /// Its answer to DA2 (`CSI > c`).
@@ -175,6 +179,7 @@ impl Profile {
             linux_console: false,
             keys: KeyEncoding::Xterm,
             bound_keys: vec![(Key::Enter, Mods::ALT)],
+            legacy_under_kitty: Vec::new(),
             da1: Some("\x1b[?64;1;2;6;9;15;16;17;18;21;22;28c".to_owned()),
             da2: Some("\x1b[>41;390;0c".to_owned()),
             xtversion: Some("XTerm(390)".to_owned()),
@@ -219,6 +224,7 @@ impl Profile {
             linux_console: false,
             keys: KeyEncoding::Xterm,
             bound_keys: Vec::new(),
+            legacy_under_kitty: Vec::new(),
             da1: Some("\x1b[?62;c".to_owned()),
             da2: Some("\x1b[>1;4000;32c".to_owned()),
             xtversion: Some("kitty(0.32.2)".to_owned()),
@@ -260,6 +266,7 @@ impl Profile {
             linux_console: false,
             keys: KeyEncoding::Konsole,
             bound_keys: vec![(Key::Tab, Mods::CTRL)],
+            legacy_under_kitty: Vec::new(),
             da1: Some("\x1b[?62;1;4c".to_owned()),
             da2: Some("\x1b[>1;115;0c".to_owned()),
             xtversion: None,
@@ -294,6 +301,7 @@ impl Profile {
             linux_console: false,
             keys: KeyEncoding::Xterm,
             bound_keys: Vec::new(),
+            legacy_under_kitty: Vec::new(),
             da1: Some("\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c".to_owned()),
             da2: Some("\x1b[>0;10;1c".to_owned()),
             xtversion: None,
@@ -331,6 +339,7 @@ impl Profile {
             linux_console: false,
             keys: KeyEncoding::Tmux34,
             bound_keys: Vec::new(),
+            legacy_under_kitty: Vec::new(),
             da1: Some("\x1b[?1;2c".to_owned()),
             da2: Some("\x1b[>84;0;0c".to_owned()),
             xtversion: Some("tmux 3.4".to_owned()),
@@ -363,6 +372,7 @@ impl Profile {
             linux_console: true,
             keys: KeyEncoding::LinuxConsole,
             bound_keys: Vec::new(),
+            legacy_under_kitty: Vec::new(),
             da1: Some("\x1b[?6c".to_owned()),
             da2: None,
             xtversion: None,

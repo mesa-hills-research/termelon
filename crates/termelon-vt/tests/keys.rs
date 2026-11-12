@@ -631,3 +631,30 @@ fn wezterm_keys() {
         ],
     );
 }
+
+/// Alacritty's default bindings keep some keys' legacy bytes under the kitty protocol, but with
+/// its flag 8.
+#[test]
+fn keys_that_stay_legacy_under_the_kitty_protocol() {
+    let alacritty = Profile {
+        legacy_under_kitty: vec![
+            (Key::Tab, SHIFT),
+            (Key::Backspace, ALT),
+            (Key::Enter, SHIFT),
+        ],
+        ..Profile::kitty()
+    };
+    check(
+        &term(alacritty.clone(), b"\x1b[>1u"),
+        &[
+            (Key::Tab, SHIFT, Press, "\x1b[Z"),
+            (Key::Backspace, ALT, Press, "\x1b\x7f"),
+            (Key::Enter, SHIFT, Press, "\r"),
+            (Key::Enter, CTRL, Press, "\x1b[13;5u"),
+        ],
+    );
+    check(
+        &term(alacritty, b"\x1b[>9u"),
+        &[(Key::Tab, SHIFT, Press, "\x1b[9;2u")],
+    );
+}
