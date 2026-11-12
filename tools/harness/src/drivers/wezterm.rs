@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
-use termelon_vt::{Key, Mods, WidthRules};
+use termelon_vt::{Key, Mods, Underline, WidthRules};
 
 use crate::driver::{
     Attributes, Colors, Driver, Error, Launch, Readback, Reports, WorkDir, clean_command, run,
@@ -108,10 +108,11 @@ pub fn start_command(launch: &Launch, runtime_dir: &Path) -> Command {
 }
 
 /// Rebuilds WezTerm's `get-text --escapes` output, with the cursor from `cli list --format json`.
-/// The output comes from termwiz's terminfo renderer, which writes no overline, underline style
-/// or underline colour, gives the palette's first sixteen colours as the named ones, and ends a
-/// row with `CSI K` while the last background is still set, where WezTerm's cells there have the
-/// default one, so those `CSI K` are dropped. WezTerm draws all of these, as its screenshots show.
+/// The output comes from termwiz's terminfo renderer, which writes no overline, no curly, dotted
+/// or dashed underline, no underline colour, and the palette's first sixteen colours as the named
+/// ones. It ends a row's blank cells with `CSI K` and the last background still set, which doesn't
+/// say how far that background goes, so those `CSI K` are dropped and the blanks after a row's
+/// text aren't compared. WezTerm draws all of these, as its screenshots show.
 ///
 /// # Errors
 ///
@@ -135,12 +136,13 @@ pub fn parse(text: &[u8], list_json: &str, cols: u16, rows: u16) -> Result<Readb
         colors: Colors::AsWritten,
         attributes: Attributes {
             underline_style: false,
+            unreported_underlines: &[Underline::Curly, Underline::Dotted, Underline::Dashed],
             overline: false,
             ..Attributes::ALL
         },
         cursor: true,
         wide_text: true,
-        trims_rows: false,
+        trims_rows: true,
         indexed_as_named: true,
     };
     Ok(Readback::new(screen, reports))

@@ -214,12 +214,12 @@ fn compare_attributes(
             push(name, a.to_string(), b.to_string());
         }
     }
+    let underline = if attributes.unreported_underlines.contains(&e.underline) {
+        termelon_vt::Underline::None
+    } else {
+        e.underline
+    };
     if attributes.underline_style {
-        let underline = if attributes.unreported_underlines.contains(&e.underline) {
-            termelon_vt::Underline::None
-        } else {
-            e.underline
-        };
         push(
             "underline",
             format!("{underline:?}"),
@@ -235,8 +235,12 @@ fn compare_attributes(
             );
         }
     } else if attributes.underline {
-        let on = |style: &Style| style.underline != termelon_vt::Underline::None;
-        push("underline", on(e).to_string(), on(g).to_string());
+        let on = |underline: termelon_vt::Underline| underline != termelon_vt::Underline::None;
+        push(
+            "underline",
+            on(underline).to_string(),
+            on(g.underline).to_string(),
+        );
     }
     if attributes.link {
         let url = |style: &Style| {

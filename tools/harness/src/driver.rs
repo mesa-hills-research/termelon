@@ -143,8 +143,8 @@ pub struct Reports {
     pub cursor: bool,
     /// Text past U+00FF. GNU screen's hardcopy keeps one byte per cell.
     pub wide_text: bool,
-    /// Whether it drops the blank cells at the end of each row, background colour and all, as
-    /// VTE's HTML does.
+    /// Whether it leaves the background of the blank cells after a row's text unsaid, as VTE's HTML
+    /// drops them and WezTerm's `CSI K` doesn't say how far they go.
     pub trims_rows: bool,
     /// Whether it gives the first sixteen colours of the 256-colour palette (`38;5;n`) as the
     /// named ones (`30 + n`), as kitty's does.
