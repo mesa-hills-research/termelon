@@ -138,8 +138,8 @@ failure there fails the run.
 | Konsole | yes |
 | foot | yes |
 | Ghostty | yes |
-| Windows Terminal, on each runner | no, it has no expected reports yet |
-| conhost, on each runner | no, it has no expected reports yet |
+| Windows Terminal, on each runner | yes |
+| conhost, on each runner | yes |
 | Linux console | no, it's an experiment |
 
 ## Setting up a runner
