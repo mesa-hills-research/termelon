@@ -149,11 +149,11 @@ pub fn parse(vcsu: &[u8], vcsa_header: &[u8]) -> Result<Readback, Error> {
             text.push('\n');
         }
         let code = u32::from_le_bytes(*cell);
-        // The second cell of a wide character holds no character of its own.
+        // The second cell of a wide character holds U+200B, or no character at all.
         match char::from_u32(code) {
+            Some('\u{200b}') | None => {}
             Some(c) if !c.is_control() => text.push(c),
             Some(_) => text.push(' '),
-            None => {}
         }
     }
     let mut screen = ansi_screen(
@@ -261,15 +261,17 @@ mod tests {
 
     #[test]
     fn a_console_reads_back() {
-        // Two rows of four cells, where the second cell of 字 holds 0xFFFFFFFF, no character.
-        let mut cells: Vec<u8> = "ab  é字"
+        // Two rows of four cells, where the second cell of 字 holds U+200B, as the kernel writes
+        // it, and of 幕 0xFFFFFFFF, no character.
+        let mut cells: Vec<u8> = "ab  é字\u{200b}x幕"
             .chars()
             .flat_map(|c| u32::from(c).to_le_bytes())
             .collect();
         cells.extend_from_slice(&u32::MAX.to_le_bytes());
-        cells.extend_from_slice(&u32::from('x').to_le_bytes());
-        let readback = parse(&cells, &[2, 4, 1, 1]).unwrap();
-        assert_eq!(readback.rows(), ["ab", "é字x"]);
+        cells.extend_from_slice(&u32::from('y').to_le_bytes());
+        cells.extend_from_slice(&u32::from(' ').to_le_bytes());
+        let readback = parse(&cells, &[3, 4, 1, 1]).unwrap();
+        assert_eq!(readback.rows(), ["ab", "é字x", "幕y"]);
         let cursor = readback.screen.cursor();
         assert_eq!((cursor.x, cursor.y), (1, 1));
         assert!(parse(&cells[..8], &[2, 4, 0, 0]).is_err());
