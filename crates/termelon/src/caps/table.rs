@@ -74,13 +74,13 @@ const CURRENT: Row = Row {
 pub(crate) const ROWS: &[Row] = &[
     Row {
         name: "xterm",
-        source: "xterm's ctlseqs and a measured run of xterm 411. OSC 52 needs allowWindowOps, \
-                 and xterm ignores it otherwise. Its BCE is from xterm-256color in ncurses' \
-                 terminfo",
+        source: "xterm's ctlseqs, a measured run of xterm 411, and xterm 390's `charproc.c`, which \
+                 has no SGR 58 for the underline's colour. OSC 52 needs allowWindowOps, and xterm \
+                 ignores it otherwise. Its BCE is from xterm-256color in ncurses' terminfo",
         synchronized_output: No,
         hyperlinks: No,
         underline_styles: No,
-        underline_color: Unknown,
+        underline_color: No,
         title_stack: Yes,
         modify_other_keys: Yes,
         bce: Yes,

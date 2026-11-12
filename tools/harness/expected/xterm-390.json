@@ -14,7 +14,7 @@
     "grapheme_clustering": "No",
     "hyperlinks": "No",
     "underline_styles": "No",
-    "underline_color": "Unknown",
+    "underline_color": "No",
     "focus_events": "Yes",
     "bracketed_paste": "Yes",
     "mouse": "Yes",
