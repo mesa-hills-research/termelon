@@ -186,12 +186,13 @@ differs.
 | OSC 11 | nobody | nobody | the terminal, whose reply it drops | nobody | the terminal |
 
 conhost answers DA1 with `CSI ? 1 ; 0 c` on Server 2022 and `CSI ? 61 ; 1 ; 6 ; 7 ; 21 ; 22 ; 23 ;
-24 ; 28 ; 32 ; 42 c` on 2025, and DECRQM for 2026 with "not recognised". A pseudoconsole that answers
-DA1 itself does so at once, so the terminal's answers to the queries it passes on come after DA1's.
-That's why the probe waits for quiet after DA1 on Windows. Windows Terminal answers the kitty query
+24 ; 28 ; 32 ; 42 c` on 2025. On 2025 it answers DECRQM for 2026 with "not recognised", so behind
+the system's pseudoconsole a terminal's synchronized output goes unseen. A pseudoconsole that
+answers DA1 itself does so at once, so the terminal's answers to the queries it passes on come
+after DA1's. That's why the probe waits for quiet after DA1 on Windows. Windows Terminal answers the kitty query
 with flags 0 from 1.25, and 1.23 doesn't answer it. Neither answers XTVERSION.
 
-In records mode, what a pseudoconsole makes of a terminal's bytes:
+In records mode a pseudoconsole makes records of its terminal's bytes.
 
 - Known key sequences become the key's records (Up, F5, Ctrl+C, Alt+x), and win32-input-mode's
   sequences the records they carry. Windows Terminal speaks win32-input-mode, so its keys arrive
@@ -199,7 +200,7 @@ In records mode, what a pseudoconsole makes of a terminal's bytes:
 - Sequences the pseudoconsole doesn't know, a kitty `CSI 13 ; 2 u` or a late reply, pass as
   characters with no key through Windows Terminal's. The system's drops them, except that Server
   2025 turns the end of an XTVERSION reply into Alt+\.
-- Under Windows Terminal, a cursor report arrives as F3, whose sequence `CSI 1 ; 1 R` also is.
+- Under Windows Terminal a cursor report arrives as F3, since `CSI 1 ; 1 R` is also F3's sequence.
 - A paste loses its bracketed-paste markers and arrives as typed keys.
 - A lone ESC arrives as Esc on Server 2022. Server 2025's pseudoconsole and Windows Terminal's hold
   it.
@@ -207,8 +208,8 @@ In records mode, what a pseudoconsole makes of a terminal's bytes:
   pseudoconsole as an Alt code, Alt held while keypad digits go down, with the character on Alt's
   release, one per UTF-16 unit. It does so in virtual terminal input mode too. Windows Terminal's
   passes it as a character.
-- SGR mouse reports become mouse records, and focus reports focus records, Server 2022's
-  pseudoconsole dropping these.
+- SGR mouse reports become mouse records, and focus reports focus records, which Server 2022's
+  pseudoconsole drops.
 
 In virtual terminal input mode the terminal's bytes pass as characters with no key, with three
 exceptions. The system's pseudoconsoles drop OSC strings, and Server 2022's DCS strings too. Those
