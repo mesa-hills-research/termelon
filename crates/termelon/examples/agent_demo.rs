@@ -344,12 +344,9 @@ struct Theme {
 
 impl Theme {
     fn for_terminal(caps: &Capabilities) -> Theme {
-        // (The library brings true colour down to what the terminal shows, but of 16 colours the
-        // nearest to the rind is grey, so there the mascot takes the named colours it's made for.)
-        let (flesh, rind) = match caps.colors {
-            ColorDepth::Ansi16 => (Color::LightRed, Color::Green),
-            _ => (Color::Rgb(0xef, 0x4a, 0x5c), Color::Rgb(0x1c, 0x91, 0x60)),
-        };
+        // (The library brings these down to what the terminal shows, bright red and green where
+        // it has 16 colours.)
+        let (flesh, rind) = (Color::Rgb(0xef, 0x4a, 0x5c), Color::Rgb(0x1c, 0x91, 0x60));
         match caps.glyphs {
             GlyphSupport::Limited => Theme {
                 border: BorderSet::ASCII,

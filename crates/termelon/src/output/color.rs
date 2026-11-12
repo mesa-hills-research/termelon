@@ -118,11 +118,20 @@ pub(crate) fn nearest_256(r: u8, g: u8, b: u8) -> u8 {
     best
 }
 
-/// The ANSI number, 0 to 15, of the named colour nearest the colour.
+/// The ANSI number, 0 to 15, of the named colour nearest the colour. A clearly coloured colour
+/// takes the nearest of the twelve coloured entries and a greyish one the nearest of the four
+/// greys, since the palette's few entries sit far apart and a saturated green can otherwise lie
+/// nearer grey than any green.
 pub(crate) fn nearest_16(r: u8, g: u8, b: u8) -> u8 {
+    let (high, low) = (r.max(g).max(b), r.min(g).min(b));
+    // (Saturation over 0.35, and bright enough for its hue to show.)
+    let coloured = high >= 96 && u32::from(high - low) * 100 > u32::from(high) * 35;
     let mut best = 0;
     let mut best_distance = u32::MAX;
     for (n, &rgb) in (0..).zip(&PALETTE16) {
+        if coloured == matches!(n, 0 | 7 | 8 | 15) {
+            continue;
+        }
         let d = distance((r, g, b), rgb);
         if d < best_distance {
             best = n;
@@ -218,6 +227,11 @@ mod tests {
         assert_eq!(nearest_16(0xcd, 0, 0), 1);
         assert_eq!(nearest_16(250, 250, 250), 15);
         assert_eq!(nearest_16(0, 0, 0), 0);
+        // A saturated green stays green, though redmean puts it nearer dark grey.
+        assert_eq!(nearest_16(0x1c, 0x91, 0x60), 2);
+        assert_eq!(nearest_16(0xef, 0x4a, 0x5c), 9);
+        assert_eq!(nearest_16(0x80, 0x80, 0x88), 8);
+        assert_eq!(nearest_16(0x30, 0x10, 0x10), 0);
     }
 
     #[test]
