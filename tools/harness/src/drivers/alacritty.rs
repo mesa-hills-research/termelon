@@ -278,13 +278,14 @@ impl Driver for Alacritty {
         )?;
         let pid = child.id();
         let pid_file = self.pid_file();
+        // The program starts before the window shows, and keys need the window.
         let ready = x11::wait_until(&mut child, &self.dir, || {
             std::fs::read_to_string(&pid_file)
-                .map_err(|error| Error::Io("the pid file".to_owned(), error))
+                .map_err(|error| Error::Io("the pid file".to_owned(), error))?;
+            x11::window_of(pid)
         });
         self.child = Some(child);
-        ready?;
-        self.window = x11::window_of(pid).ok();
+        self.window = Some(ready?);
         self.size = Some((launch.cols, launch.rows));
         Ok(())
     }
