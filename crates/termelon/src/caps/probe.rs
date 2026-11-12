@@ -101,6 +101,14 @@ pub(crate) fn answers(replies: &[Reply]) -> Answers {
                             version: id.version,
                         });
                     }
+                    // VTE writes 0.76.0 as `VTE(7600)`, as in its DA2 answer and `VTE_VERSION`.
+                    Some("vte") => {
+                        let version = id.version.as_deref().and_then(|v| v.parse().ok());
+                        answers.terminal = Some(TerminalId {
+                            version: version.map(dotted).or(id.version),
+                            ..id
+                        });
+                    }
                     _ => answers.terminal = Some(id),
                 }
             }
@@ -244,6 +252,9 @@ mod tests {
             id("WezTerm", Some("20240203-110809-5046fc22"))
         );
         assert_eq!(terminal_id("foot"), id("foot", None));
+        // VTE's number becomes a version, as its DA2 answer gives it.
+        let vte = answers(&[Reply::XtVersion("VTE(7600)".to_owned())]);
+        assert_eq!(vte.terminal, Some(id("VTE", Some("0.76.0"))));
     }
 
     /// kitty answers everything, and the answers say what it has.

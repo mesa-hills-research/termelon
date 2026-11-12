@@ -1,7 +1,7 @@
 {
   "terminal": {
     "name": "VTE",
-    "version": "7600"
+    "version": "0.76.0"
   },
   "capabilities": {
     "probe": "Complete",
