@@ -1,6 +1,8 @@
 //! One driver per terminal.
 
 pub mod alacritty;
+pub mod conhost;
+pub mod console;
 pub mod foot;
 pub mod ghostty;
 pub mod kitty;
@@ -11,6 +13,7 @@ pub mod screen;
 pub mod tmux;
 pub mod vte;
 pub mod wezterm;
+pub mod windows_terminal;
 pub mod x11;
 pub mod xterm;
 pub mod xtermjs;
@@ -21,7 +24,7 @@ use crate::driver::{Driver, Error};
 use crate::input::version_slug;
 
 /// The terminals the harness has drivers for.
-pub const TERMINALS: [&str; 12] = [
+pub const TERMINALS: [&str; 14] = [
     "tmux",
     "screen",
     "kitty",
@@ -34,6 +37,8 @@ pub const TERMINALS: [&str; 12] = [
     "foot",
     "ghostty",
     "linux",
+    "windows-terminal",
+    "conhost",
 ];
 
 /// A driver for a terminal by name.
@@ -59,6 +64,8 @@ pub fn driver(name: &str) -> Result<Box<dyn Driver>, Error> {
         "foot" => Box::new(foot::Foot::new()?),
         "ghostty" => Box::new(ghostty::Ghostty::new()?),
         "linux" => Box::new(linux::LinuxConsole::new()?),
+        "windows-terminal" => Box::new(windows_terminal::WindowsTerminal::new()?),
+        "conhost" => Box::new(conhost::Conhost::new()?),
         _ => return Err(Error::Missing(format!("a driver for {name}"))),
     })
 }
@@ -199,6 +206,14 @@ pub fn profile(name: &str, version: &str) -> Option<Profile> {
             profile.modes.extend([2026, 2027]);
             Some(profile)
         }
+        "windows-terminal" => Some(Profile::windows_terminal()),
+        // conhost drops links.
+        "conhost" => Some(Profile {
+            name: "conhost".to_owned(),
+            hyperlinks: false,
+            kitty_keyboard: false,
+            ..Profile::windows_terminal()
+        }),
         _ => None,
     }
 }

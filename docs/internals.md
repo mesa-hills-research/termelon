@@ -335,8 +335,12 @@ impl<C: Console> ScreenOn<C> {
   size record reads the window's size, not the buffer's.
 - In `InputMode::Records` keys decode as key records. In `InputMode::Vt` each key-down record's
   character is a byte of what the terminal sent, so replies, the kitty protocol and bracketed paste
-  decode as on Unix. `Terminal` probes in `Vt`, where the console's answers decode as replies, and
-  then switches to `Records`. A probe left unanswered keeps `Vt` 200 ms longer first.
+  decode as on Unix. The Alt key's release carries one too, since a pseudoconsole delivers a
+  character its keyboard layout has no key for as an Alt code. `Terminal` probes in `Vt`, where
+  the console's answers decode as replies, and then switches to `Records`. A probe left
+  unanswered keeps `Vt` 200 ms longer first. One that DA1 answered waits until no reply has come
+  for 50 ms, 200 ms at most, since the system's pseudoconsole answers DA1 itself and passes some
+  queries on to its terminal, whose answers come after DA1's.
 - In `Records`, records that carry what a terminal sent rather than a key typed go to the byte
   decoder for the whole session. Those are records with no virtual key, an ESC key-down that more
   character records follow in the same read, and what comes while the byte decoder holds a sequence.
@@ -352,4 +356,8 @@ impl<C: Console> ScreenOn<C> {
 `tests/conpty.rs` runs programs on a pseudoconsole on Windows, with the emulator on its terminal
 side, through portable-pty. A `conpty.dll` and `OpenConsole.exe` copied beside the test binary
 make it the pseudoconsole Windows Terminal ships rather than the system's. The tests that need a
-real console window are in `sys/windows/tests.rs`, ignored unless run with `--ignored`.
+real console window are in `sys/windows/tests.rs`, ignored unless run with `--ignored`. Two of them
+record what a console and a pseudoconsole deliver for each query, typed key and terminal's bytes,
+read by read, and what the reader makes of it. `.github/workflows/windows-console.yml` runs them
+on Windows Server 2022 and 2025, in the runner's console, a conhost window and Windows Terminal,
+and with both pseudoconsoles, and keeps what they print.

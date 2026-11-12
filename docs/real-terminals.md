@@ -45,6 +45,8 @@ answer changed.
 | foot | ubuntu-26.04 (1.25.0), under headless sway | `pipe-visible`, bound to a key | text | none |
 | Ghostty | macos-26 (1.3.1) | the `write_screen_file` action | text | none |
 | Linux console | ubuntu-24.04 (kernel 7.0), console 12 | `/dev/vcsu12`, and the cursor from `/dev/vcsa12` | text, cursor | none |
+| Windows Terminal | windows-2025 (1.23), windows-2022 (the portable build of 1.25) | the `exportBuffer` action, on a key the driver's settings bind | text | none |
+| conhost | windows-2022, windows-2025 | `ReadConsoleOutputW`, through a helper attached to the program's console | text | none |
 
 Some readbacks can't say everything the terminal draws, so those parts aren't compared. Each
 driver's `parse` says what its readback leaves out.
@@ -55,6 +57,14 @@ driver's `parse` says what its readback leaves out.
   colour, and ends a row's blanks with `CSI K` and the last background still set.
 - xterm's dump gives every space as U+00A0 and a blinking cell as white on red.
 - The Linux console keeps a code point per cell, and U+200B in the second cell of a wide character.
+
+On Windows the program runs under `harness-console`, a helper the harness builds beside itself,
+which starts it in the new console at the size asked for. A second one, attached to that console,
+types with `WriteConsoleInputW` and, for conhost, reads the window. Windows Terminal is read back
+by bringing its window to the front and pressing the key its `exportBuffer` action is bound to,
+with `SendInput`, and its keys go the same way. The driver writes Windows Terminal's settings and
+puts back the ones it found when it's done. Screenshots on Windows come from .NET's
+`CopyFromScreen`.
 
 Alacritty reports its screen only as its window closes, so a readback ends the program, and the
 driver reads once after the program has had a moment to draw. The probe has saved its bytes and
@@ -127,6 +137,8 @@ reports and fixtures in place.
 | Konsole | no |
 | foot | no |
 | Ghostty | no |
+| Windows Terminal, on each runner | no |
+| conhost, on each runner | no |
 | Linux console | no, it's an experiment |
 
 ## Setting up a runner

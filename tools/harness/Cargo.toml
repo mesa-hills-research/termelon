@@ -15,5 +15,10 @@ termelon-vt.workspace = true
 # combining mark as the precomposed character where one exists.
 unicode-normalization = "0.1.25"
 
+[target.'cfg(windows)'.dependencies]
+# The console, window and keyboard calls the Windows Terminal and conhost drivers make, in
+# `src/windows.rs`.
+windows-sys = { workspace = true, features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+
 [lints]
 workspace = true

@@ -22,6 +22,8 @@
 //! | Konsole | `--separate --nofork`, under X | xdotool, bytes with D-Bus `sendText` | D-Bus `getAllDisplayedText` |
 //! | foot | `--window-size-chars`, under Wayland | wtype | `pipe-visible` on a key binding |
 //! | Ghostty | the app's binary with flags, on macOS | System Events | `write_screen_file:copy` on a key binding |
+//! | Windows Terminal | `--size`, with settings of the harness's | `SendInput`, bytes with `WriteConsoleInputW` | the `exportBuffer` action on a key binding |
+//! | conhost | `CREATE_NEW_CONSOLE`, sized by `harness-console` | `WriteConsoleInputW` | `ReadConsoleOutputW` through `AttachConsole` |
 
 pub mod compare;
 pub mod driver;
@@ -33,6 +35,8 @@ pub mod keys;
 pub mod readback;
 pub mod run;
 pub mod script;
+#[cfg(windows)]
+pub mod windows;
 
 pub use compare::{Mismatch, compare};
 pub use driver::{Attributes, Colors, Driver, Error, Launch, Readback, Reports};

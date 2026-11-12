@@ -29,6 +29,11 @@ use crate::restore::Enabled;
 use crate::sys::{Next, Shared};
 use crate::terminal::MouseMode;
 
+#[cfg(windows)]
+mod pseudo;
+#[cfg(windows)]
+mod record;
+
 const LONG: Duration = Duration::from_secs(5);
 
 /// A console in memory: its modes and window, the records waiting in its input, and
@@ -690,6 +695,17 @@ fn vt_bytes_are_the_characters_of_key_downs() {
         vt_bytes(key, &mut surrogate, &mut bytes);
     }
     assert_eq!(bytes, "é😀zzz".as_bytes());
+    // An Alt code's character comes with Alt's release.
+    bytes.clear();
+    for record in
+        recorded("K+12:38:0000:0002 K+68:48:0000:0002 K-68:48:0000:0002 K-12:38:00e9:0000")
+    {
+        let InputRecord::Key(key) = record else {
+            unreachable!()
+        };
+        vt_bytes(key, &mut surrogate, &mut bytes);
+    }
+    assert_eq!(bytes, "é".as_bytes());
     // A low surrogate with no high one before it is dropped.
     bytes.clear();
     vt_bytes(
@@ -998,6 +1014,91 @@ fn held_input_is_given_up_on_after_silence() {
     assert_eq!(next(&shared), key(KeyCode::Char('a'), KeyModifiers::NONE));
 }
 
+/// Key records as the console tests print them, such as `K+12:38:0000:0002`, a key's press (`+`)
+/// or release (`-`), then its virtual key, scan code, UTF-16 unit and control key state in hex.
+fn recorded(text: &str) -> Vec<InputRecord> {
+    text.split_whitespace()
+        .map(|record| {
+            let (key_down, fields) = match record.strip_prefix("K+") {
+                Some(fields) => (true, fields),
+                None => (false, record.strip_prefix("K-").unwrap()),
+            };
+            let fields: Vec<u32> = fields
+                .split(':')
+                .map(|field| u32::from_str_radix(field, 16).unwrap())
+                .collect();
+            let unit = |i: usize| u16::try_from(fields[i]).unwrap();
+            InputRecord::Key(KeyRecord {
+                key_down,
+                repeat: 1,
+                virtual_key: unit(0),
+                scan_code: unit(1),
+                unicode: unit(2),
+                control_state: fields[3],
+            })
+        })
+        .collect()
+}
+
+/// The system's pseudoconsole delivers a character its keyboard layout has no key for as an Alt
+/// code, Alt held while digits are typed on the keypad, with the character on Alt's release. It
+/// does so in either input mode, and either mode takes it as that character. (The records are
+/// what Windows Server 2025's pseudoconsole gave for U+1F600 sent by its terminal.)
+#[test]
+fn an_alt_code_from_a_pseudoconsole_is_its_character_in_either_mode() {
+    let emoji = recorded(
+        "K+12:38:0000:0002 K+66:4d:0000:0002 K-66:4d:0000:0002 K+63:51:0000:0002 \
+         K-63:51:0000:0002 K-12:38:d83d:0000 K+12:38:0000:0002 K+66:4d:0000:0002 \
+         K-66:4d:0000:0002 K+63:51:0000:0002 K-63:51:0000:0002 K-12:38:de00:0000",
+    );
+    for mode in [InputMode::Vt, InputMode::Records] {
+        let fake = Fake::new();
+        let settings = Arc::new(Settings::default());
+        settings.set_mode(mode);
+        let (_reader, shared) = reading(&fake, &settings, Duration::ZERO);
+        fake.type_in(&emoji);
+        assert_eq!(
+            next(&shared),
+            key(KeyCode::Char('😀'), KeyModifiers::NONE),
+            "{mode:?}"
+        );
+        nothing_more(&shared);
+    }
+}
+
+/// The system's pseudoconsole answers DA1 itself and passes the queries it doesn't know on to its
+/// terminal, whose answers come after DA1's. Waiting for the input to settle after DA1 keeps them
+/// as replies, rather than leaving them to records mode, where that pseudoconsole turns the end
+/// of an XTVERSION reply into Alt+\. (The characters are what Windows Server 2025's
+/// pseudoconsole gave for the probe's queries, with `termelon-vt` as its terminal.)
+#[test]
+fn the_terminal_s_answers_after_a_pseudoconsole_s_da1_are_replies() {
+    use crate::caps::probe::is_end;
+    use crate::event::decode::Reply;
+    let fake = Fake::new();
+    let settings = Arc::new(Settings::default());
+    settings.set_mode(InputMode::Vt);
+    let (_reader, shared) = reading(&fake, &settings, Duration::from_millis(100));
+    shared.replies.open();
+    fake.type_in(&vt_records(
+        "\x1b[?2026;0$y\x1b[>0;10;1c\x1b[?61;6;7;21;22;23;24;28;32;42c",
+    ));
+    assert!(
+        shared
+            .replies
+            .wait(LONG, |replies| replies.iter().any(is_end))
+    );
+    fake.type_in(&vt_records("\x1b[?0u\x1bP>|termelon-vt\x1b\\"));
+    shared.replies.settle(Duration::from_secs(1), LONG);
+    let replies = shared.replies.close();
+    assert!(
+        replies.contains(&Reply::XtVersion("termelon-vt".into()))
+            && replies.contains(&Reply::KittyKeyboard(0)),
+        "{replies:?}"
+    );
+    nothing_more(&shared);
+}
+
 /// The kitty keyboard flags go to the console only while keys come as bytes, since under a
 /// pseudoconsole the push reaches the terminal, which would send keys a client reading records
 /// can't take.
@@ -1128,31 +1229,44 @@ mod real {
         screen.enable(&enabled()).unwrap();
         let shift = 0x10;
         let top = u16::try_from(probe.window().unwrap().top).unwrap_or(0);
-        write_input(
-            &conin(),
-            &[
-                key_record(true, 0x0d, 0x0d, shift),
-                key_record(false, 0x0d, 0x0d, shift),
-                InputRecord::Mouse(MouseRecord {
-                    column: 3,
-                    row: top,
-                    button_state: 1,
-                    control_state: 0,
-                    event_flags: 0,
-                }),
-                InputRecord::Focus(FocusRecord { focused: true }),
-            ],
-        )
-        .unwrap();
+        // (A console window sends records of its own, focus as it gains and loses it and mouse
+        // moves for the pointer over it, so each step types its records and waits for the event
+        // it looks for, past any others.)
+        let typed = |records: &[InputRecord], wanted: &dyn Fn(&Event) -> bool| {
+            write_input(&conin(), records).unwrap();
+            let mut seen = Vec::new();
+            let until = Instant::now() + LONG;
+            while Instant::now() < until {
+                if let Next::Event(event) = screen
+                    .shared()
+                    .events
+                    .next_timeout(Duration::from_millis(100))
+                {
+                    if wanted(&event) {
+                        return event;
+                    }
+                    seen.push(event);
+                }
+            }
+            panic!("{records:?} gave no such event, only {seen:?}");
+        };
+        let is_key = |event: &Event| matches!(event, Event::Key(_));
         assert_eq!(
-            next(screen.shared()),
+            typed(&[key_record(true, 0x0d, 0x0d, shift)], &is_key),
             key(KeyCode::Enter, KeyModifiers::SHIFT)
         );
-        assert!(
-            matches!(next(screen.shared()), Event::Key(release) if release.code == KeyCode::Enter)
-        );
+        let release = typed(&[key_record(false, 0x0d, 0x0d, shift)], &is_key);
+        assert!(matches!(release, Event::Key(release) if release.code == KeyCode::Enter));
+        let click = InputRecord::Mouse(MouseRecord {
+            column: 3,
+            row: top,
+            button_state: 1,
+            control_state: 0,
+            event_flags: 0,
+        });
+        let is_click = |event: &Event| matches!(event, Event::Mouse(mouse) if mouse.kind != MouseEventKind::Moved);
         assert_eq!(
-            next(screen.shared()),
+            typed(&[click], &is_click),
             Event::Mouse(MouseEvent::new(
                 MouseEventKind::Down(MouseButton::Left),
                 3,
@@ -1160,7 +1274,9 @@ mod real {
                 KeyModifiers::NONE
             ))
         );
-        assert_eq!(next(screen.shared()), Event::FocusGained);
+        let focus = InputRecord::Focus(FocusRecord { focused: true });
+        let is_focus = |event: &Event| *event == Event::FocusGained;
+        typed(&[focus], &is_focus);
         assert!(screen.close(b"", LONG));
         assert_eq!(found(&probe), before);
     }
@@ -1200,7 +1316,9 @@ mod real {
     }
 
     /// UTF-8 the writer gets in pieces that end inside characters reaches the screen whole, as
-    /// UTF-16 through `WriteConsoleW`, whatever the code page.
+    /// UTF-16 through `WriteConsoleW`, whatever the code page. `ReadConsoleOutputCharacterW` gives
+    /// a wide character once for its two cells, and U+FFFD for one outside the BMP, so the emoji
+    /// reads back as one U+FFFD, where halves written apart would be two.
     #[test]
     #[ignore = "needs a real console"]
     fn split_utf8_reaches_the_screen_whole() {
@@ -1221,8 +1339,10 @@ mod real {
         let shown = read_text(&conout(), 0, window.bottom, 8).unwrap();
         out.write_all(b"\r\x1b[2K").unwrap();
         modes.restore().unwrap();
-        assert!(shown.starts_with("é日"), "{shown:?}");
-        assert!(shown.contains('😀') && shown.contains('x'), "{shown:?}");
+        let shown: Vec<char> = shown.chars().collect();
+        assert!(shown.starts_with(&['é', '日']), "{shown:?}");
+        assert!(matches!(shown.get(2), Some('😀' | '\u{fffd}')), "{shown:?}");
+        assert_eq!(shown.get(3), Some(&'x'), "{shown:?}");
     }
 
     /// Spike S2: what the console delivers for the probe's queries in each input mode. In virtual
@@ -1278,5 +1398,18 @@ mod real {
                 "{mode:?}: {decoded:?}"
             );
         }
+    }
+
+    /// What the console gives for each of the probe's queries and for key records typed with
+    /// `WriteConsoleInputW`, in each input mode, and what the library makes of it. It prints the
+    /// report, which says which console it was.
+    #[test]
+    #[ignore = "needs a real console"]
+    fn how_a_console_delivers_replies_and_keys() {
+        let mut steps = record::queries();
+        steps.extend(record::typed());
+        let mut report = record::host();
+        report.push_str(&record::record(&steps));
+        println!("{report}");
     }
 }

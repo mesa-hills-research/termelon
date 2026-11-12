@@ -569,6 +569,7 @@ version = "0.1.0"
 dependencies = [
  "termelon-vt",
  "unicode-normalization",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

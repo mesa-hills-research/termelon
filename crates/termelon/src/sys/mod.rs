@@ -235,6 +235,21 @@ impl ReplySlot {
         }
     }
 
+    /// Waits until no reply has come for `quiet`, or `limit` has passed. A pseudoconsole answers
+    /// some queries itself, DA1 among them, and passes the rest on to its terminal, whose answers
+    /// then come after DA1's.
+    #[cfg(any(windows, test))]
+    pub(crate) fn settle(&self, quiet: Duration, limit: Duration) {
+        let until = Instant::now() + limit;
+        loop {
+            let seen = lock(&self.state).as_ref().map_or(0, Vec::len);
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() || !self.wait(quiet.min(left), |replies| replies.len() > seen) {
+                return;
+            }
+        }
+    }
+
     /// Stops keeping replies, and returns those kept.
     pub(crate) fn close(&self) -> Vec<Reply> {
         lock(&self.state).take().unwrap_or_default()
@@ -318,6 +333,37 @@ mod tests {
         assert!(shared.redraw_pending());
         assert!(shared.take_redraw());
         assert!(!shared.redraw_pending());
+    }
+
+    /// Settling waits for `quiet` after the last reply, so replies that keep coming are kept,
+    /// and stops at the limit however many come.
+    #[test]
+    fn settling_waits_for_quiet_after_the_last_reply_up_to_the_limit() {
+        let slot = Arc::new(ReplySlot::default());
+        slot.open();
+        let started = Instant::now();
+        slot.settle(Duration::from_millis(100), Duration::from_secs(5));
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        // (A reply every 10 ms until told to stop, far more often than the quiet that ends the
+        // wait, even on a busy machine.)
+        let stop = Arc::new(AtomicBool::new(false));
+        let offering = {
+            let (slot, stop) = (slot.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    slot.offer(Reply::KittyKeyboard(0));
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })
+        };
+        let limit = Duration::from_millis(1500);
+        let started = Instant::now();
+        slot.settle(Duration::from_secs(1), limit);
+        let took = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        offering.join().unwrap();
+        assert!(took >= limit && took < Duration::from_secs(5), "{took:?}");
+        assert_ne!(slot.close(), [] as [Reply; 0]);
     }
 
     /// Every task waiting for an event is woken when one comes, not only the first.

@@ -1,0 +1,196 @@
+name: Windows console
+
+# Runs the tests that need a real Windows console, and the pseudoconsole tests, on GitHub's Windows
+# runners, and keeps what they print. The console tests run on Server 2022 and 2025, in the
+# runner's own console, in a conhost window started for them, and in Windows Terminal (the one
+# Server 2025 has, and the portable build on Server 2022). The pseudoconsole tests run with the
+# system's ConPTY and with the one Windows Terminal ships, its conpty.dll and OpenConsole.exe copied
+# beside the test binaries.
+
+on:
+  push:
+    branches: [windows-console]
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-console-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Windows Terminal 1.25.2733.0, from 2026-10-02, whose ConPTY package is checked against this
+  # SHA-256 before it's used.
+  CONPTY_NUPKG: https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.Windows.Console.ConPTY.1.25.260930003.nupkg
+  CONPTY_SHA256: 6d6f8b008c655d814c498d8205d4012dcd4d0b6dfc1096461d0a185d1e3caf03
+  # The same release's portable zip, for Server 2022, which has no Windows Terminal of its own.
+  WT_ZIP: https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_x64.zip
+  WT_SHA256: bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc043cdf831852e796
+
+# Actions are pinned to commits of releases published at least 30 days before they were chosen.
+# Each job starts non-blocking (continue-on-error), as in the terminals workflow, and becomes
+# required after two weeks of green nightly runs.
+
+jobs:
+  console:
+    name: console (${{ matrix.os }}, ${{ matrix.host }})
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            host: runner
+          - os: windows-2022
+            host: conhost
+          - os: windows-2022
+            host: windows-terminal
+          - os: windows-2025
+            host: runner
+          - os: windows-2025
+            host: conhost
+          - os: windows-2025
+            host: windows-terminal
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the tests
+        shell: pwsh
+        run: |
+          $lib = cargo test -p termelon --lib --locked --no-run --message-format=json |
+            ConvertFrom-Json |
+            Where-Object { $_.reason -eq 'compiler-artifact' -and $_.executable -and $_.target.name -eq 'termelon' } |
+            Select-Object -ExpandProperty executable -First 1
+          if (-not $lib) { throw "no test binary for the library" }
+          "LIB_TESTS=$lib" >> $env:GITHUB_ENV
+      - name: Show the console settings
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          [Environment]::OSVersion.Version
+          (Get-Item "$env:windir\System32\conhost.exe").VersionInfo.FileVersionRaw
+          Get-ItemProperty -Path 'HKCU:\Console\%%Startup' -ErrorAction SilentlyContinue | Format-List
+          powershell.exe -NoProfile -Command 'Get-AppxPackage Microsoft.WindowsTerminal | Format-List Name, Version, InstallLocation'
+          Get-Command wt.exe -ErrorAction SilentlyContinue | Format-List Source
+      - name: Install Windows Terminal's portable build
+        if: matrix.host == 'windows-terminal' && matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'wt.zip'
+          Invoke-WebRequest -Uri $env:WT_ZIP -OutFile $zip -UserAgent 'termelon-ci'
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:WT_SHA256) { throw "the Windows Terminal zip's SHA-256 is $hash" }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'wt'
+          Expand-Archive -Path $zip -DestinationPath $unpacked
+          $exe = Get-ChildItem $unpacked -Recurse -Filter WindowsTerminal.exe | Select-Object -First 1
+          $dir = Split-Path $exe.FullName
+          New-Item -ItemType File -Path (Join-Path $dir '.portable') | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $dir 'settings') | Out-Null
+          '{"profiles":{"defaults":{"closeOnExit":"always"}}}' | Set-Content (Join-Path $dir 'settings\settings.json')
+          "WT_EXE=$($exe.FullName)" >> $env:GITHUB_ENV
+      - name: Run the console tests in the runner's console
+        if: matrix.host == 'runner'
+        shell: bash
+        run: |
+          mkdir -p out
+          "$(cygpath -u "$LIB_TESTS")" --ignored --nocapture --test-threads 1 real:: 2>&1 | tee out/console.txt
+      - name: Run the console tests in a new console window
+        if: matrix.host != 'runner'
+        shell: pwsh
+        env:
+          HOST: ${{ matrix.host }}
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $out = (Resolve-Path out).Path
+          $script = Join-Path $env:RUNNER_TEMP 'console-tests.cmd'
+          Set-Content -Path $script -Encoding ascii -Value @(
+            '@echo off',
+            "`"$env:LIB_TESTS`" --ignored --nocapture --test-threads 1 real:: > `"$out\console.txt`" 2>&1",
+            ">`"$out\exit-code.txt`" echo %ERRORLEVEL%"
+          )
+          if ($env:HOST -eq 'conhost') {
+            Start-Process -FilePath "$env:windir\System32\conhost.exe" -ArgumentList "cmd.exe /d /c `"$script`""
+          } else {
+            $wt = if ($env:WT_EXE) { $env:WT_EXE } else { 'wt.exe' }
+            Start-Process -FilePath $wt -ArgumentList "-w new --size 120,40 cmd.exe /d /c `"$script`""
+          }
+          $until = (Get-Date).AddMinutes(15)
+          while (-not (Test-Path "$out\exit-code.txt") -and (Get-Date) -lt $until) { Start-Sleep -Seconds 1 }
+          Start-Sleep -Seconds 1
+          Get-Content "$out\console.txt" -ErrorAction SilentlyContinue
+          if (-not (Test-Path "$out\exit-code.txt")) { throw "the tests never finished" }
+          $code = [int](Get-Content "$out\exit-code.txt" | Select-Object -First 1)
+          "the tests exited with $code"
+          exit $code
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: console-${{ matrix.os }}-${{ matrix.host }}
+          path: out
+          if-no-files-found: ignore
+
+  pseudoconsole:
+    name: pseudoconsole (${{ matrix.os }}, ${{ matrix.conpty }})
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        conpty: [system, windows-terminal]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # 2026-10-09
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the tests
+        shell: pwsh
+        run: |
+          $built = cargo test -p termelon --locked --no-run --message-format=json |
+            ConvertFrom-Json |
+            Where-Object { $_.reason -eq 'compiler-artifact' -and $_.executable }
+          $lib = $built | Where-Object { $_.target.name -eq 'termelon' } | Select-Object -ExpandProperty executable -First 1
+          $conpty = $built | Where-Object { $_.target.name -eq 'conpty' } | Select-Object -ExpandProperty executable -First 1
+          if (-not $lib -or -not $conpty) { throw "no test binaries" }
+          "LIB_TESTS=$lib" >> $env:GITHUB_ENV
+          "CONPTY_TESTS=$conpty" >> $env:GITHUB_ENV
+      - name: Put Windows Terminal's ConPTY beside the test binaries
+        if: matrix.conpty == 'windows-terminal'
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'conpty.zip'
+          Invoke-WebRequest -Uri $env:CONPTY_NUPKG -OutFile $package -UserAgent 'termelon-ci'
+          $hash = (Get-FileHash -Algorithm SHA256 $package).Hash.ToLowerInvariant()
+          if ($hash -ne $env:CONPTY_SHA256) { throw "the ConPTY package's SHA-256 is $hash" }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'conpty'
+          Expand-Archive -Path $package -DestinationPath $unpacked
+          $deps = Split-Path $env:LIB_TESTS
+          Copy-Item "$unpacked\runtimes\win-x64\native\conpty.dll" $deps
+          Copy-Item "$unpacked\build\native\runtimes\x64\OpenConsole.exe" $deps
+          Get-ChildItem $deps -Filter *.dll
+      - name: Run the pseudoconsole tests
+        shell: bash
+        run: |
+          mkdir -p out
+          status=0
+          "$(cygpath -u "$LIB_TESTS")" --ignored --nocapture --test-threads 1 pseudo:: 2>&1 | tee out/recorded.txt || status=1
+          "$(cygpath -u "$CONPTY_TESTS")" --nocapture --test-threads 1 2>&1 | tee out/conpty.txt || status=1
+          exit $status
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pseudoconsole-${{ matrix.os }}-${{ matrix.conpty }}
+          path: out
+          if-no-files-found: ignore

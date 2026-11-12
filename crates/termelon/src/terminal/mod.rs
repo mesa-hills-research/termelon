@@ -837,9 +837,15 @@ mod platform {
     }
 
     /// How long late replies to the probe still decode as replies on Windows, after a probe the
-    /// console didn't answer in time.
+    /// console didn't answer in time, and at most after DA1 for the answers of the terminal behind
+    /// a pseudoconsole.
     #[cfg(windows)]
     const LATE_REPLIES: Duration = Duration::from_millis(200);
+
+    /// How long the probe waits on Windows, after DA1 and after each reply that follows it, for
+    /// the answers of the terminal behind a pseudoconsole.
+    #[cfg(windows)]
+    const PASSED_ON_QUIET: Duration = Duration::from_millis(50);
 
     /// The size to take when the terminal gives none, from `COLUMNS` and `LINES`, or 80x24.
     fn fallback_size(env: &dyn Environment) -> Size {
@@ -883,9 +889,16 @@ mod platform {
             screen.expect(Query::CursorPosition);
         }
         screen.writer().send(queries.to_vec())?;
-        if !slot.wait(timeout, |replies| replies.iter().any(probe::is_end)) {
+        let answered = slot.wait(timeout, |replies| replies.iter().any(probe::is_end));
+        if !answered {
             // (A cursor report that comes later must read as the key it looks like.)
             screen.cancel_expected();
+        }
+        #[cfg(windows)]
+        if answered {
+            // (The system's pseudoconsole answers DA1 itself and passes some queries on to the
+            // terminal, whose answers come after DA1's.)
+            slot.settle(PASSED_ON_QUIET, LATE_REPLIES);
         }
         Ok(slot.close())
     }
