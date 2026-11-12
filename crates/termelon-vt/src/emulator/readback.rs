@@ -6,9 +6,10 @@ use super::{CursorShape, Emulator};
 use crate::grid::Cell;
 use crate::style::{Style, Underline};
 
-/// The colours `to_html` uses for the default foreground and background, xterm's palette 7 and 0.
-const HTML_FG: (u8, u8, u8) = (0xe5, 0xe5, 0xe5);
-const HTML_BG: (u8, u8, u8) = (0, 0, 0);
+/// The colours `to_html` and `to_svg` use for the default foreground and background, xterm's palette
+/// 7 and 0.
+pub(super) const HTML_FG: (u8, u8, u8) = (0xe5, 0xe5, 0xe5);
+pub(super) const HTML_BG: (u8, u8, u8) = (0, 0, 0);
 
 impl Emulator {
     /// A row's text, with continuation cells left out and trailing spaces trimmed, or `None` past
@@ -143,7 +144,7 @@ fn json_string(text: &str) -> String {
     out
 }
 
-fn hex((r, g, b): (u8, u8, u8)) -> String {
+pub(super) fn hex((r, g, b): (u8, u8, u8)) -> String {
     format!("#{r:02x}{g:02x}{b:02x}")
 }
 

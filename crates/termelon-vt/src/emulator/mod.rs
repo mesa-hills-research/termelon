@@ -4,6 +4,9 @@ mod csi;
 mod keys;
 mod readback;
 mod strings;
+mod svg;
+
+pub use svg::SvgAnimation;
 
 use unicode_segmentation::UnicodeSegmentation;
 

@@ -84,6 +84,12 @@
 //! - Resetting any of modes 9, 1000, 1002 and 1003 turns mouse reports off, as in xterm. Alacritty
 //!   resets only the mode named.
 //!
+//! # Images
+//!
+//! [`Emulator::to_svg`] draws the screen as an SVG image, and [`SvgAnimation`] screens one after
+//! another as an animation that loops, for docs. Block elements, box drawing and braille are drawn
+//! as shapes, so they come out sharp whatever font the viewer has.
+//!
 //! # The styled-text format, version 1
 //!
 //! [`Emulator::styled`] writes the screen in a line format that reads well in a diff, and other
@@ -127,7 +133,7 @@ mod profile;
 mod style;
 mod width;
 
-pub use emulator::{Cursor, CursorShape, Emulator};
+pub use emulator::{Cursor, CursorShape, Emulator, SvgAnimation};
 pub use event::{ClipboardWrite, Event, FeedError, Pos, UnknownSequence};
 pub use grid::Cell;
 pub use input::{Key, KeyKind, Mods, Mouse, MouseButton, MouseKind};

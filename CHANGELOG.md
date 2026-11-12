@@ -11,4 +11,4 @@ The first release, with two crates.
 - The `testing` feature adds `TestTerminal` and golden files, and the `stream` feature adds `Stream`
   for `Events`.
 - `termelon-vt` is a terminal emulator library for tests. It has profiles of common terminals, and
-  fails on any sequence it doesn't know.
+  fails on any sequence it doesn't know. It draws screens as SVG, still or animated, for docs.

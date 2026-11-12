@@ -1,8 +1,9 @@
-//! The text, styled-text and HTML renderings of a screen.
+//! The text, styled-text, HTML and SVG renderings of a screen.
 
 use std::fmt::Write as _;
+use std::time::Duration;
 
-use termelon_vt::{Emulator, Profile};
+use termelon_vt::{Emulator, Profile, SvgAnimation};
 
 #[expect(
     clippy::unwrap_used,
@@ -180,4 +181,94 @@ fn html_has_colours_attributes_links_and_the_cursor() {
         html.contains("<span class=\"cursor\" style=\"outline:1px solid currentColor;\"> </span>")
     );
     assert_eq!(html.matches('\n').count(), 1);
+}
+
+#[test]
+fn svg_has_colours_attributes_and_the_cursor() {
+    let bytes = b"\x1b[31ma<b\x1b[0m \x1b[1;44mx\x1b[0m\x1b[2;3H";
+    let svg = run(Profile::xterm(), 8, 2, bytes).to_svg();
+    assert!(svg.starts_with(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"92\" height=\"56\" \
+         viewBox=\"0 0 92 56\""
+    ));
+    assert!(svg.ends_with("</g>\n</svg>\n"));
+    // (A run of text is stretched to its cells.)
+    assert!(
+        svg.contains("<text x=\"0\" y=\"13\" textLength=\"27\" fill=\"#cd0000\">a&lt;b</text>\n")
+    );
+    assert!(svg.contains(
+        "<rect x=\"36\" y=\"0\" width=\"9\" height=\"18\" fill=\"#0000ee\"/>\n\
+         <text x=\"36\" y=\"13\" font-weight=\"bold\">x</text>\n"
+    ));
+    // (A block cursor, on a blank cell.)
+    assert!(svg.contains("<rect x=\"18\" y=\"18\" width=\"9\" height=\"18\" fill=\"#e5e5e5\"/>\n"));
+
+    let bar = run(Profile::xterm(), 4, 1, b"ab\x1b[1;2H\x1b[6 q").to_svg();
+    assert!(bar.contains("<text x=\"9\" y=\"13\">b</text>\n<rect x=\"9\" y=\"0\" width=\"2\""));
+    // (Two spaces split the text, so the columns hold where a viewer collapses spaces.)
+    let gap = run(Profile::xterm(), 8, 1, b"a  bc \x1b[?25l").to_svg();
+    assert!(gap.contains(
+        "<text x=\"0\" y=\"13\">a</text>\n<text x=\"27\" y=\"13\" textLength=\"18\">bc</text>\n"
+    ));
+    let hidden = run(Profile::xterm(), 4, 1, b"\x1b[?25l").to_svg();
+    assert!(!hidden.contains("<rect x=\"0\" y=\"0\""));
+}
+
+#[test]
+fn svg_draws_blocks_lines_and_braille_as_shapes() {
+    let bytes = "█▀▄\r\n╭──\r\n⠋\x1b[?25l".as_bytes();
+    let svg = run(Profile::xterm(), 4, 3, bytes).to_svg();
+    assert!(!svg.contains("<text"), "{svg}");
+    assert!(svg.contains(
+        "<path shape-rendering=\"crispEdges\" d=\"M0 0h9v18h-9zM9 0h9v9h-9zM18 9h9v9h-9z\"/>"
+    ));
+    // (The corner rounds from the cell's bottom edge to its right, and the line after it is one.)
+    assert!(svg.contains("d=\"M4.5 36V32Q4.5 27.5 9 27.5H9M9 27.5h18\"/>"));
+    // (Dots 1, 2 and 4.)
+    let dot = |x: &str, y: &str| format!("M{x} {y}a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0");
+    let dots = [
+        dot("0.75", "38.25"),
+        dot("0.75", "42.75"),
+        dot("5.25", "38.25"),
+    ]
+    .concat();
+    assert!(svg.contains(&format!("<path d=\"{dots}\"/>")), "{svg}");
+}
+
+#[test]
+fn svg_animation_writes_each_element_once_with_its_times() {
+    let mut term = run(Profile::xterm(), 10, 1, b"\x1b[?25l");
+    let mut animation = SvgAnimation::new();
+    for spinner in ["⠋", "⠙", "⠙", "⠋"] {
+        term.feed(format!("\r{spinner} Working").as_bytes())
+            .unwrap();
+        animation.push(&term, Duration::from_millis(80));
+    }
+    let svg = animation.to_svg();
+    assert_eq!(svg.matches("Working").count(), 1);
+    assert_eq!(svg.matches("<animate").count(), 2);
+    let animate = |shows: &str, values: &str| {
+        format!(
+            "<g visibility=\"{shows}\"><animate attributeName=\"visibility\" values=\"{values}\" \
+             keyTimes=\"0;0.25;0.75\" dur=\"320ms\" calcMode=\"discrete\" repeatCount=\"indefinite\"/>"
+        )
+    };
+    assert!(
+        svg.contains(&animate("visible", "visible;hidden;visible")),
+        "{svg}"
+    );
+    assert!(
+        svg.contains(&animate("hidden", "hidden;visible;hidden")),
+        "{svg}"
+    );
+}
+
+#[test]
+fn svg_animation_of_nothing_is_an_empty_image() {
+    let term = run(Profile::xterm(), 4, 1, b"hi");
+    let mut animation = SvgAnimation::new();
+    animation.push(&term, Duration::ZERO);
+    let svg = animation.to_svg();
+    assert!(svg.contains("width=\"20\" height=\"20\""), "{svg}");
+    assert!(!svg.contains("<text"));
 }
