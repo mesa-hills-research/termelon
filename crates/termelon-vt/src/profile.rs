@@ -23,6 +23,14 @@ pub enum KeyEncoding {
     /// F1 to F4 with modifiers, `ESC O mods P` and on. Shift with Up, Down, Page Up, Page Down,
     /// Home and End scrolls the main screen and sends nothing there.
     Konsole,
+    /// WezTerm's, from `KeyCode::encode` in its termwiz at 20240203. A letter or punctuation with
+    /// Shift is its shifted character, and Alt with a letter, digit or punctuation sends ESC before
+    /// it, whatever the mode. Ctrl with an uppercase letter, Ctrl, Shift and Alt with Backspace
+    /// (Ctrl making it BS), Shift and Ctrl with Enter and Escape, and any key with Ctrl at
+    /// modifyOtherKeys level 2 go as modifyOtherKeys sends them where it's on, and as the legacy
+    /// bytes otherwise. Level 1 leaves out c, d, Escape, DEL and BS. Tab with modifiers is
+    /// `CSI 27 ; mods ; 9 ~` at either level, and otherwise `CSI 9 ; 5 u` with Ctrl.
+    Wezterm,
     /// The Linux console's. F1 to F5 are `CSI [ A` to `CSI [ E`, Home and End are `CSI 1 ~` and
     /// `CSI 4 ~`, and modifiers on the other special keys are lost.
     LinuxConsole,

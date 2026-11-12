@@ -583,3 +583,51 @@ fn encode_key_is_a_press() {
     let term = term(Profile::kitty(), b"\x1b[>3u");
     assert_eq!(term.encode_key(Key::Char('a'), CTRL), b"\x1b[97;5u");
 }
+
+/// WezTerm's keys after termwiz's `KeyCode::encode`, which a run of WezTerm 20240203 sent.
+#[test]
+fn wezterm_keys() {
+    let wezterm = Profile {
+        keys: termelon_vt::KeyEncoding::Wezterm,
+        ..Profile::xterm()
+    };
+    check(
+        &term(wezterm.clone(), b""),
+        &[
+            (Key::Char('a'), SHIFT, Press, "A"),
+            (Key::Char('a'), CTRL, Press, "\x01"),
+            (Key::Char('a'), ALT, Press, "\x1ba"),
+            (Key::Char('1'), CTRL, Press, "1"),
+            (Key::Enter, SHIFT, Press, "\r"),
+            (Key::Enter, CTRL, Press, "\r"),
+            (Key::Tab, SHIFT, Press, "\x1b[Z"),
+            (Key::Backspace, CTRL, Press, "\x08"),
+            (Key::Backspace, ALT, Press, "\x1b\x7f"),
+            (Key::Up, SHIFT, Press, "\x1b[1;2A"),
+        ],
+    );
+    check(
+        &term(wezterm.clone(), b"\x1b[>4;2m"),
+        &[
+            (Key::Char('a'), SHIFT, Press, "A"),
+            (Key::Char('a'), CTRL, Press, "\x1b[27;5;97~"),
+            (Key::Char('a'), CTRL | ALT, Press, "\x1b[27;7;97~"),
+            (Key::Char('a'), ALT, Press, "\x1ba"),
+            (Key::Char('1'), CTRL, Press, "\x1b[27;5;49~"),
+            (Key::Char(' '), CTRL, Press, "\x1b[27;5;32~"),
+            (Key::Enter, SHIFT, Press, "\x1b[27;2;13~"),
+            (Key::Tab, SHIFT, Press, "\x1b[27;2;9~"),
+            (Key::Backspace, CTRL, Press, "\x1b[27;5;8~"),
+            (Key::Backspace, ALT, Press, "\x1b\x7f"),
+        ],
+    );
+    check(
+        &term(wezterm, b"\x1b[>4;1m"),
+        &[
+            (Key::Char('a'), CTRL, Press, "\x01"),
+            (Key::Char('c'), CTRL, Press, "\x03"),
+            (Key::Enter, CTRL, Press, "\x1b[27;5;13~"),
+            (Key::Escape, CTRL, Press, "\x1b"),
+        ],
+    );
+}

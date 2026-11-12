@@ -42,8 +42,10 @@ impl Emulator {
         if kind == KeyKind::Release {
             return Vec::new();
         }
-        if self.profile.keys == KeyEncoding::Tmux34 {
-            return self.tmux_3_4_key(key, mods);
+        match self.profile.keys {
+            KeyEncoding::Tmux34 => return self.tmux_3_4_key(key, mods),
+            KeyEncoding::Wezterm => return self.wezterm_key(key, mods),
+            _ => {}
         }
         if self.profile.modify_other_keys
             && let Some(bytes) = self.modify_other_key(key, mods)
@@ -323,6 +325,92 @@ impl Emulator {
             '6' => vec![0x1e],
             '-' | '/' => vec![0x1f],
             _ => Vec::new(),
+        }
+    }
+
+    /// WezTerm's keys, after `KeyCode::encode` in its termwiz at 20240203.
+    fn wezterm_key(&self, key: Key, mods: Mods) -> Vec<u8> {
+        let level = if self.profile.modify_other_keys {
+            self.modify_other_keys
+        } else {
+            0
+        };
+        // The character a key types, and Shift dropped where that character holds it.
+        let (key, mods) = match key {
+            Key::Char(c) => {
+                let typed = typed_char(c, mods);
+                if typed.is_ascii_uppercase() || typed.is_ascii_punctuation() {
+                    (Key::Char(typed), mods.without(Mods::SHIFT))
+                } else {
+                    (Key::Char(typed), mods)
+                }
+            }
+            other => (other, mods),
+        };
+        let esc = |bytes: &[u8]| -> Vec<u8> {
+            if mods.contains(Mods::ALT) {
+                [&[ESC][..], bytes].concat()
+            } else {
+                bytes.to_vec()
+            }
+        };
+        let control = |c: char| match c {
+            '`' => Some(0),
+            '{' => Some(0x1b),
+            '|' => Some(0x1c),
+            '}' => Some(0x1d),
+            c => control_byte(c),
+        };
+        // termwiz's `csi_u_encode`: modifyOtherKeys where it's on, the legacy bytes otherwise.
+        let other_key = |c: char| -> Vec<u8> {
+            let left_out = level == 1 && matches!(c, 'c' | 'd' | '\x1b' | '\x7f' | '\x08');
+            if level != 0 && !left_out {
+                return format!("\x1b[27;{};{}~", mods.bits() + 1, u32::from(c)).into_bytes();
+            }
+            match control(c).filter(|_| mods.contains(Mods::CTRL)) {
+                Some(byte) => esc(&[byte]),
+                None => esc(c.to_string().as_bytes()),
+            }
+        };
+        let ctrl = mods.contains(Mods::CTRL);
+        let shift = mods.contains(Mods::SHIFT);
+        if let Key::Char(c) = key
+            && ctrl
+            && !c.is_ascii_uppercase()
+            && level != 2
+            && let Some(byte) = control(c)
+        {
+            return esc(&[byte]);
+        }
+        match key {
+            Key::Char(c) if ctrl && (c.is_ascii_uppercase() || level == 2) => other_key(c),
+            Key::Char(c)
+                if mods.contains(Mods::ALT)
+                    && (c.is_ascii_alphanumeric() || c.is_ascii_punctuation()) =>
+            {
+                esc(c.to_string().as_bytes())
+            }
+            Key::Char(c) if mods.is_empty() => c.to_string().into_bytes(),
+            Key::Char(c) => other_key(c),
+            Key::Backspace if ctrl => other_key('\x08'),
+            Key::Backspace if shift => other_key('\x7f'),
+            Key::Backspace => esc(&[0x7f]),
+            Key::Enter | Key::Escape => {
+                let byte = if key == Key::Enter { b'\r' } else { ESC };
+                if shift || ctrl {
+                    other_key(char::from(byte))
+                } else {
+                    esc(&[byte])
+                }
+            }
+            Key::Tab if !mods.is_empty() && level != 0 => other_key('\t'),
+            Key::Tab => esc(match mods.without(Mods::ALT) {
+                m if m == Mods::CTRL => b"\x1b[9;5u",
+                m if m == Mods::CTRL | Mods::SHIFT => b"\x1b[1;5Z",
+                m if m == Mods::SHIFT => b"\x1b[Z",
+                _ => b"\t",
+            }),
+            _ => self.legacy_key(key, mods),
         }
     }
 
