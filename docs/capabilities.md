@@ -50,8 +50,9 @@ follows an `ESC ]` it doesn't know. Replies that come late are dropped, never ta
 `TERM`, `COLORTERM` (`truecolor` or `24bit`), `NO_COLOR`, `TMUX` and `STY`, and the variables
 terminals set for themselves (`KITTY_WINDOW_ID`, `ALACRITTY_WINDOW_ID`, `WEZTERM_EXECUTABLE`,
 `WT_SESSION`, `KONSOLE_VERSION`, `VTE_VERSION`, `XTERM_VERSION`), then `TERM_PROGRAM` and its
-version. `COLORTERM` and `TERM` only ever raise the colour depth, and `NO_COLOR` takes colour away
-whatever else says.
+version. On Windows the console promises true colour, since every console the library runs on has
+virtual terminal processing. `COLORTERM` and `TERM` only ever raise the colour depth, and `NO_COLOR`
+takes colour away whatever else says.
 
 ### The table of known terminals
 

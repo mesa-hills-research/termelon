@@ -408,6 +408,13 @@ mod platform {
             screen.writer().record(options.record_output);
             let overrides = env.var("TERMELON_CAPS");
             let hints = caps::env::hints(env);
+            // (A Windows console with virtual terminal processing, which opening needs, draws
+            // 24-bit colour, and conhost sets no variable that says so.)
+            #[cfg(windows)]
+            let hints = caps::env::Hints {
+                colors: Some(caps::ColorDepth::TrueColor),
+                ..hints
+            };
             let probe_timeout = options.probe_timeout.unwrap_or(if hints.ssh {
                 SSH_PROBE_TIMEOUT
             } else {
