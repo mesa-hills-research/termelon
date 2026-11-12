@@ -2,14 +2,14 @@
 
 `tools/harness` starts a real terminal running `tools/probe`, waits until the probe's scene shows,
 reads the screen back, and compares it cell by cell with the screen `termelon-vt` computes for the
-probe's frame. Text and colours always count. Attributes and the cursor count where the terminal's
-readback reports them.
+probe's frame under that terminal's profile. Text, in Unicode's composed form, and colours always
+count. Attributes and the cursor count where the terminal's readback reports them.
 
 The probe opens the terminal with the framework, which asks what it supports and measures its
-widths, checks that it has the size the harness asked for, and draws the scene as a frame ending
-with a marker on the last row. Once the screen is read back, the harness presses `q`, and the probe
-saves every byte the framework wrote to the terminal, from its setup and queries to the frame, and
-writes a report of the capabilities it found and the events it received.
+widths, waits for the size the harness asked for, and draws the scene as a frame ending with a
+marker on the last row. It saves every byte the framework wrote to the terminal, from its setup and
+queries to the frame, and a report of the capabilities it found, once the frame is drawn and again
+when the harness presses `q` to end it.
 
 ```sh
 cargo build -p harness -p probe
@@ -19,66 +19,129 @@ target/debug/harness run tmux --probe target/debug/probe --out harness-out
 
 `smoke` starts the terminal with `echo` and reads it back, which tells a broken setup from a
 failure of the program under test. `run` runs every scene the probe lists (or those named with
-`--scene`) at 80 by 24 (or `--size`). For each scene it writes the probe's bytes and report, a JSON
-report with each difference, both screens in the styled-text format, an HTML page with the two side
-by side, and a screenshot where there's a display. Then it holds what the terminal answered the
-probe (its name and version, and the capabilities the framework found, widths among them) against
-the expected report for that version in `tools/harness/expected`, and names every change. It exits
-with 1 when a screen differs or an answer changed. A version with no report yet is only noted, and
-`--update` writes its report.
+`--scene`) at 80 by 24 (or `--size`). For each scene it writes the probe's bytes and report, the
+terminal's readback as the terminal gave it, a JSON report with each difference, both screens in
+the styled-text format, an HTML page with the two side by side, and a screenshot where there's a
+display. Then it holds what the terminal answered the probe (its name and version, and the
+capabilities the framework found, widths among them) against the expected report for that version
+in `tools/harness/expected`, and names every change. It exits with 1 when a screen differs or an
+answer changed.
 
-| Terminal | Needs | Read back with | Reports |
-|---|---|---|---|
-| tmux | tmux | `capture-pane -p -e -N` | text, colours, attributes, cursor |
-| GNU screen | screen and tmux | `hardcopy` | Latin-1 text only |
-| kitty | kitty, an X display, xdotool | `kitten @ get-text --ansi --add-cursor` | text, colours, attributes, cursor |
-| xterm | xterm, the `9x15` font, an X display, xdotool | the `CSI 10 i` XHTML dump | text, RGB colours, bold, italic, underline, strike |
-| WezTerm | wezterm, an X display, xdotool | `wezterm cli get-text --escapes` | text, colours, attributes, cursor |
-| xterm.js | node, and `npm ci` in `tools/harness/xtermjs` | `@xterm/headless`'s buffer, through a node script | text, colours, attributes, links, cursor |
-| VTE | Python's GObject bindings, VTE 2.91 (0.76 or later), a display | `get_text_format(HTML)` in `tools/harness/vte` | text, RGB colours, attributes |
-| Alacritty | alacritty, an X display | `--ref-test`'s `grid.json`, written as the window closes | text, colours, attributes, links |
-| Konsole | Konsole 24.02 or later, an X display, a D-Bus session, gdbus | D-Bus `getAllDisplayedText` | text only |
-| foot | foot and wtype, under a Wayland compositor | `pipe-visible`, bound to a key | text only |
-| Ghostty | Ghostty on macOS, with Accessibility for `osascript` | the `write_screen_file` action | text only |
+## The terminals
+
+`.github/workflows/terminals.yml` runs a job per terminal and runner on GitHub's hosted runners.
+
+| Terminal | Runner and version | Read back with | Compares | Keys |
+|---|---|---|---|---|
+| tmux | ubuntu-24.04 (3.4), ubuntu-26.04 (3.6), macos-26 (3.8) | `capture-pane -p -e -N` | text, colours, attributes, cursor | `send-keys` |
+| GNU screen | ubuntu-26.04 (4.9.1), macos-26 (5.0.2), in a tmux pane | `hardcopy` | Latin-1 text | the pane's `send-keys` |
+| kitty | ubuntu-24.04 (0.32.2), ubuntu-26.04 (0.45.0) | `kitten @ get-text --ansi --add-cursor` | text, colours, attributes, cursor | `kitten @ send-key` |
+| xterm | ubuntu-24.04 (390) | the `CSI 10 i` XHTML dump | text, RGB colours, bold, italic, underline, strike | xdotool |
+| WezTerm | ubuntu-24.04 (20240203) | `wezterm cli get-text --escapes` | text, colours, attributes, cursor | xdotool |
+| xterm.js | ubuntu-24.04 (`@xterm/headless` 6.0.0) | its buffer, through a node script | text, colours, attributes, links, cursor | none, mouse through its mouse service |
+| VTE | ubuntu-24.04 (0.76.0) | `get_text_format(HTML)` in `tools/harness/vte` | text, RGB colours, attributes | GTK key, button and scroll events |
+| Alacritty | ubuntu-24.04 (0.13.2) | `--ref-test`'s `grid.json`, written as the window closes | text, colours, attributes, links | xdotool |
+| Konsole | ubuntu-26.04 (25.12.3) | D-Bus `getAllDisplayedText` | text | xdotool |
+| foot | ubuntu-26.04 (1.25.0), under headless sway | `pipe-visible`, bound to a key | text | none |
+| Ghostty | macos-26 (1.3.1) | the `write_screen_file` action | text | none |
+| Linux console | ubuntu-24.04 (kernel 7.0), console 12 | `/dev/vcsu12`, and the cursor from `/dev/vcsa12` | text, cursor | none |
+
+Some readbacks can't say everything the terminal draws, so those parts aren't compared. Each
+driver's `parse` says what its readback leaves out.
+
+- kitty writes dotted and dashed underlines as none, and the palette's first sixteen colours as
+  the named ones.
+- WezTerm's `get-text` writes no overline, no curly, dotted or dashed underline and no underline
+  colour, and ends a row's blanks with `CSI K` and the last background still set.
+- xterm's dump gives every space as U+00A0 and a blinking cell as white on red.
+- The Linux console keeps a code point per cell, and U+200B in the second cell of a wide character.
 
 Alacritty reports its screen only as its window closes, so a readback ends the program, and the
-driver reads once after the program has had a moment to draw. xterm.js takes keys only as browser
-events, so its driver sends bytes, and mouse events through xterm.js's own mouse service.
+driver reads once after the program has had a moment to draw. The probe has saved its bytes and
+report by then. GNU screen runs in a tmux pane of the size wanted, since a detached screen keeps
+80 by 24, and its Linux job takes Ubuntu 26.04, where tmux 3.6 presses keys as a terminal sends
+them. tmux 3.4's `send-keys` drops Ctrl+Enter and Ctrl+1 and types Shift+Enter's name.
 
 ## Keys and mouse
 
 `keys` runs the probe as `probe --keys MODE`, which turns the mode on, shows a marker and saves
 every byte it reads. The harness presses a fixed list of keys and mouse events through the
-terminal's own encoder, with a `|` after each, and holds what the terminal sent against what
+terminal's own encoder, with a `/` after each, and holds what the terminal sent against what
 `termelon-vt` sends under that terminal's profile. The modes are `legacy`, `disambiguate` (the
-kitty keyboard protocol's flag 1) and `modify-other-keys` (xterm's level 2). Mouse events go in
-the legacy mode alone, since the keyboard modes leave them as they are.
+kitty keyboard protocol's flag 1) and `modify-other-keys` (xterm's level 2). Mouse events go in the
+legacy mode alone, since the keyboard modes leave them as they are.
 
 ```sh
 target/debug/harness keys tmux --probe target/debug/probe --out harness-out
 ```
 
-| Terminal | Keys | Mouse |
-|---|---|---|
-| tmux | `send-keys`, all but ctrl+backspace, which tmux 3.6 has no name for | none |
-| GNU screen | the tmux pane's `send-keys`, all but ctrl+backspace and ctrl+a, screen's command key | none |
-| VTE | GTK key events | GTK button and scroll events |
-| xterm.js | none, since it takes keys as browser events | its mouse service |
+Where a driver's tool can't press a key as a keyboard does, it leaves that key out.
 
-The other drivers press keys with the tools in the table above, and make no mouse events.
+- tmux has no name for Ctrl+Backspace, and before 3.5 types Shift+Enter's name where it can't
+  encode it.
+- Ctrl+A is GNU screen's command key.
+- kitty's `send-key` gives a key no text, so Shift with a character and é come out wrong.
+- Under Xvfb, Konsole reads xdotool's function keys as if Alt were held.
+- foot's `wtype` has one level per key and sometimes loses the first key after a new keymap, and
+  on macOS System Events types é as another key, and the system keeps Ctrl+Left and Ctrl+F5. foot
+  and Ghostty run no key checks.
+- Nothing can type into the Linux console, since the kernel's `dev.tty.legacy_tiocsti` is off.
 
 Each terminal, version and mode has a fixture in `crates/termelon/tests/fixtures/input`, with a
-line per event and the bytes in hex. `keys` names every change since the fixture, and `--update`
-writes it again. The decoder's tests decode each fixture, and the `decoded.txt` beside it lists
-the events that decode as another, such as ctrl+1, which these terminals send as `1`.
+line per event and the bytes in hex. `keys` names every change since the fixture. The decoder's
+tests decode each fixture, and the `decoded.txt` beside it lists the events that decode as
+another, such as Ctrl+1, which most of these terminals send as `1`.
 
-Under X, start Xvfb first and set `DISPLAY`, and for foot a headless sway and `WAYLAND_DISPLAY`, as
-`.github/workflows/terminals.yml` does. Screenshots
-are taken with ImageMagick's `import` where it's installed. They're for a person to look at, and
-never decide a result.
+## A new terminal version
+
+A version with no expected report or fixture yet is only noted. Every `run` and `keys` writes what
+it found into the output directory's `expected` and `fixtures`, so a runner's new version gets its
+files from the run's artifact. Copy them into `tools/harness/expected` and
+`crates/termelon/tests/fixtures/input`, then write the `decoded.txt` files.
+
+```sh
+UPDATE_GOLDENS=1 cargo test -p termelon --lib real_terminals_bytes_decode
+```
+
+`--update` writes the files in place instead, where the terminal runs locally. The parsers' tests
+in `tools/harness/tests/samples.rs` read readbacks recorded on the runners, in
+`tools/harness/tests/samples/recorded`, each beside the bytes the probe wrote there, so a parser
+change is tested without the terminal.
+
+## Which jobs are required
+
+Jobs run on every push to main (tmux, xterm.js, and kitty's smoke test), nightly, and on demand. A
+job is required, without `continue-on-error`, once it passed three runs in a row with its expected
+reports and fixtures in place.
+
+| Job | Required |
+|---|---|
+| tmux, on each runner | no |
+| GNU screen, on each runner | no |
+| kitty, on each runner | no |
+| xterm | no |
+| xterm.js | no |
+| VTE | no |
+| WezTerm | no |
+| Alacritty | no |
+| Konsole | no |
+| foot | no |
+| Ghostty | no |
+| Linux console | no, it's an experiment |
+
+## Setting up a runner
+
+Under X, start Xvfb first and set `DISPLAY`. foot needs a headless sway whose windows float, so
+they keep the size foot asks for, and `WAYLAND_DISPLAY`. Konsole needs a D-Bus session
+(`dbus-run-session`). Alacritty needs `libxkbcommon-x11-0`, and WezTerm `libegl1`, which their
+packages don't pull in. Ghostty runs on macOS with Accessibility for `osascript`, which GitHub's
+macOS runners grant. The Linux console needs `sudo` without a password, for `openvt` and the
+`/dev/vcs*` devices. `.github/workflows/terminals.yml` does all of this. Screenshots are taken
+with ImageMagick's `import` where it's installed, and `screencapture` on macOS. They're for a person
+to look at, and never decide a result.
 
 The harness's own tests run tmux and screen where they're installed, and check the drivers'
-parsers on saved readbacks everywhere:
+parsers on recorded readbacks everywhere:
 
 ```sh
 cargo test -p harness
