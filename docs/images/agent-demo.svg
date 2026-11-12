@@ -1,0 +1,441 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="740" height="452" viewBox="0 0 740 452" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'DejaVu Sans Mono','Liberation Mono',monospace" font-size="15">
+<rect width="740" height="452" rx="6" fill="#000000"/>
+<g transform="translate(10 10)" fill="#e5e5e5">
+<path fill="#1c9160" shape-rendering="crispEdges" d="M45 9h18v9h-18z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M54 18h9v9h-9zM63 18h9v18h-9zM72 27h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M45 45h9v9h-9zM54 36h9v18h-9zM63 36h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M99 36h36v18h-36z"/>
+<text x="189" y="67" textLength="72" font-weight="bold">Termelon</text>
+<text x="270" y="67" textLength="90" fill="#7f7f7f">agent demo</text>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M27 72h18v18h-18z"/>
+<path fill="#ef4a5c" shape-rendering="crispEdges" d="M54 72h72v18h-72z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M135 72h18v18h-18z"/>
+<text x="189" y="85" textLength="162" fill="#7f7f7f">~/projects/orchard</text>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M36 90h18v18h-18z"/>
+<path fill="#ef4a5c" shape-rendering="crispEdges" d="M63 90h9v9h-9zM72 90h36v18h-36zM108 90h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M126 90h18v18h-18z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M45 108h9v9h-9zM54 108h18v18h-18zM72 117h36v9h-36zM108 108h18v18h-18zM126 108h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M72 126h36v9h-36z"/>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M4.5 378V374Q4.5 369.5 9 369.5H9M9 369.5h702M715.5 378V374Q715.5 369.5 711 369.5H711"/>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M4.5 387.5V378M4.5 387.5V396"/>
+<text x="18" y="391" fill="#7f7f7f">›</text>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M715.5 387.5V378M715.5 387.5V396"/>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M4.5 396V401Q4.5 405.5 9 405.5H9M9 405.5h702M715.5 396V401Q715.5 405.5 711 405.5H711"/>
+<text x="9" y="427" textLength="54" fill="#7f7f7f">q quit</text>
+<text x="648" y="427" textLength="63" fill="#7f7f7f">melon-1</text>
+<g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible" keyTimes="0;0.05555;0.19973" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="36" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.05555;0.0582" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391">M</text>
+<rect x="45" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.0582;0.06084" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="18">Ma</text>
+<rect x="54" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.06084;0.06349" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="27">Mak</text>
+<rect x="63" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.06349;0.06878" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="36">Make</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.06349;0.06613" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="72" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.06613;0.06878" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="81" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.06878;0.07142" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="54">Make t</text>
+<rect x="90" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.07142;0.07407" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="63">Make th</text>
+<rect x="99" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.07407;0.07936" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="72">Make the</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.07407;0.07671" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="108" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.07671;0.07936" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="117" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.07936;0.08201" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="90">Make the t</text>
+<rect x="126" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.08201;0.08465" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="99">Make the to</text>
+<rect x="135" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.08465;0.0873" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="108">Make the to-</text>
+<rect x="144" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.0873;0.08994" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="117">Make the to-d</text>
+<rect x="153" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.08994;0.09523" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="126">Make the to-do</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.08994;0.09259" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="162" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.09259;0.09523" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="171" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.09523;0.09788" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="144">Make the to-do l</text>
+<rect x="180" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.09788;0.10052" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="153">Make the to-do li</text>
+<rect x="189" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.10052;0.10317" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="162">Make the to-do lis</text>
+<rect x="198" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.10317;0.10846" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="171">Make the to-do list</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.10317;0.10582" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="207" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.10582;0.10846" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="216" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.10846;0.11111" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="189">Make the to-do list k</text>
+<rect x="225" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.11111;0.11375" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="198">Make the to-do list ke</text>
+<rect x="234" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.11375;0.1164" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="207">Make the to-do list kee</text>
+<rect x="243" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.1164;0.12169" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="216">Make the to-do list keep</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.1164;0.11904" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="252" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.11904;0.12169" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="261" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.12169;0.12433" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="234">Make the to-do list keep i</text>
+<rect x="270" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.12433;0.12698" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="243">Make the to-do list keep it</text>
+<rect x="279" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.12698;0.13227" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="252">Make the to-do list keep its</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.12698;0.12962" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="288" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.12962;0.13227" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="297" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.13227;0.14285;0.48941;0.5;0.8201;0.83068" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M99 9h36v9h-36z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M99 18h36v18h-36z"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.13227;0.13492" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="270">Make the to-do list keep its i</text>
+<rect x="306" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.13492;0.13756" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="279">Make the to-do list keep its it</text>
+<rect x="315" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.13756;0.14021" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="288">Make the to-do list keep its ite</text>
+<rect x="324" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.14021;0.14285" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="297">Make the to-do list keep its item</text>
+<rect x="333" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.14285;0.14814" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="306">Make the to-do list keep its items</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.14285;0.1455" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="342" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.1455;0.14814" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="351" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.14814;0.15079" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="324">Make the to-do list keep its items b</text>
+<rect x="360" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.15079;0.15343" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="333">Make the to-do list keep its items be</text>
+<rect x="369" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.15343;0.15608" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="342">Make the to-do list keep its items bet</text>
+<rect x="378" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.15608;0.15873" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="351">Make the to-do list keep its items betw</text>
+<rect x="387" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.15873;0.16137" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="360">Make the to-do list keep its items betwe</text>
+<rect x="396" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.16137;0.16402" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="369">Make the to-do list keep its items betwee</text>
+<rect x="405" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.16402;0.16931" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="378">Make the to-do list keep its items between</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.16402;0.16666" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="414" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.16666;0.16931" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<rect x="423" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.16931;0.17195" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="396">Make the to-do list keep its items between r</text>
+<rect x="432" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.17195;0.1746" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="405">Make the to-do list keep its items between ru</text>
+<rect x="441" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.1746;0.17724" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="414">Make the to-do list keep its items between run</text>
+<rect x="450" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.17724;0.17989" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="423">Make the to-do list keep its items between runs</text>
+<rect x="459" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.17989;0.19973" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="391" textLength="432">Make the to-do list keep its items between runs.</text>
+<rect x="468" y="378" width="9" height="18" fill="#e5e5e5"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.19973" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="18" y="175" fill="#7f7f7f">›</text>
+<text x="36" y="175" textLength="432">Make the to-do list keep its items between runs.</text>
+<text x="18" y="211" fill="#ef4a5c">●</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.19973;0.20502" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="36">I'll</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.20502;0.21031" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="81">I'll save</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.21031;0.2156" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="117">I'll save the</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.2156;0.22089" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="171">I'll save the items</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.22089;0.22619" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="198">I'll save the items to</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.22619;0.23148" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="216">I'll save the items to a</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.23148;0.23677" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="261">I'll save the items to a file</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.23677;0.24206" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="342">I'll save the items to a file whenever</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.24206;0.24735" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="378">I'll save the items to a file whenever the</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.24735;0.25264" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="423">I'll save the items to a file whenever the list</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.25264;0.25793" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="504">I'll save the items to a file whenever the list changes,</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.25793;0.26322" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="540">I'll save the items to a file whenever the list changes, and</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.26322;0.26851" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="585">I'll save the items to a file whenever the list changes, and read</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.26851" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="211" textLength="630">I'll save the items to a file whenever the list changes, and read them</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.2738;0.2791" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="36">back</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.2791;0.28439" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="63">back at</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.28439;0.28968" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="126">back at start.</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.28968;0.29497" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="189">back at start. First,</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.29497;0.30026" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="225">back at start. First, how</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.30026;0.30555" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="261">back at start. First, how the</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.30555;0.31084" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="297">back at start. First, how the app</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.31084;0.31613" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="351">back at start. First, how the app holds</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.31613" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="229" textLength="405">back at start. First, how the app holds them.</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden" keyTimes="0;0.34126;0.34656;0.39417;0.39947" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.34126" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="265" textLength="36" font-weight="bold">Read</text>
+<text x="81" y="265" textLength="90">src/app.rs</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.34126;0.40079" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="180" y="265" textLength="36" fill="#7f7f7f">· 0s</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden" keyTimes="0;0.34656;0.35185;0.39947;0.40079" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.35185;0.35714" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.35714;0.36243" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M23.25 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.36243;0.36772" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.36772;0.37301" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.37301;0.3783" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.3783;0.38359" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.38359;0.38888" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.38888;0.39417" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 258.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 263.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 254.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.40079" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="18" y="265" fill="#1c9160">✓</text>
+<text x="180" y="265" textLength="90" fill="#7f7f7f">· 86 lines</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.42063;0.42592;0.47354;0.47883;0.52645;0.53174;0.57936;0.58465;0.63227;0.63756;0.68518;0.69047" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.42063" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="283" textLength="27" font-weight="bold">Run</text>
+<text x="72" y="283" textLength="90">cargo test</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.42063;0.48677" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="171" y="283" textLength="36" fill="#7f7f7f">· 0s</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.42592;0.43121;0.47883;0.48412;0.53174;0.53703;0.58465;0.58994;0.63756;0.64285;0.69047;0.69576" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.43121;0.4365;0.48412;0.48941;0.53703;0.54232;0.58994;0.59523;0.64285;0.64814;0.69576;0.69841" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.4365;0.44179;0.48941;0.4947;0.54232;0.54761;0.59523;0.60052;0.64814;0.65343" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M23.25 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.44179;0.44708;0.4947;0.5;0.54761;0.55291;0.60052;0.60582;0.65343;0.65873" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.44708;0.45238;0.5;0.50529;0.55291;0.5582;0.60582;0.61111;0.65873;0.66402" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.45238;0.45767;0.50529;0.51058;0.5582;0.56349;0.61111;0.6164;0.66402;0.66931" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.45767;0.46296;0.51058;0.51587;0.56349;0.56878;0.6164;0.62169;0.66931;0.6746" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.46296;0.46825;0.51587;0.52116;0.56878;0.57407;0.62169;0.62698;0.6746;0.67989" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden;visible;hidden" keyTimes="0;0.46825;0.47354;0.52116;0.52645;0.57407;0.57936;0.62698;0.63227;0.67989;0.68518" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<path fill="#ef4a5c" d="M18.75 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M18.75 281.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.48677;0.55291" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="171" y="283" textLength="36" fill="#7f7f7f">· 1s</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.55291;0.61904" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="171" y="283" textLength="36" fill="#7f7f7f">· 2s</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.61904;0.68518" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="171" y="283" textLength="36" fill="#7f7f7f">· 3s</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.68518;0.69841" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="171" y="283" textLength="36" fill="#7f7f7f">· 4s</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.69841" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="18" y="283" fill="#1c9160">✓</text>
+<text x="171" y="283" textLength="99" fill="#7f7f7f">· 14 passed</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.71825" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="18" y="319" fill="#ef4a5c">●</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.71825;0.72354" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="45">Done.</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.72354;0.72883" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="81">Done. The</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.72883;0.73412" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="126">Done. The list</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.73412;0.73941" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="162">Done. The list now</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.73941;0.7447" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="216">Done. The list now saves</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.7447;0.75" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="243">Done. The list now saves to</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.75;0.75529" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="333">Done. The list now saves to todo.json</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.75529;0.76058" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="369">Done. The list now saves to todo.json and</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.76058;0.76587" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="423">Done. The list now saves to todo.json and loads</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.76587;0.77116" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="450">Done. The list now saves to todo.json and loads it</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden" keyTimes="0;0.77116;0.77645" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="477">Done. The list now saves to todo.json and loads it at</text>
+</g>
+<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" keyTimes="0;0.77645" dur="15120ms" calcMode="discrete" repeatCount="indefinite"/>
+<text x="36" y="319" textLength="540">Done. The list now saves to todo.json and loads it at start.</text>
+</g>
+</g>
+</svg>

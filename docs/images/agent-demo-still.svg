@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="740" height="452" viewBox="0 0 740 452" font-family="ui-monospace,'SF Mono',Menlo,Consolas,'DejaVu Sans Mono','Liberation Mono',monospace" font-size="15">
+<rect width="740" height="452" rx="6" fill="#000000"/>
+<g transform="translate(10 10)" fill="#e5e5e5">
+<path fill="#1c9160" shape-rendering="crispEdges" d="M45 9h18v9h-18z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M54 18h9v9h-9zM63 18h9v18h-9zM72 27h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M45 45h9v9h-9zM54 36h9v18h-9zM63 36h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M99 36h36v18h-36z"/>
+<text x="189" y="67" textLength="72" font-weight="bold">Termelon</text>
+<text x="270" y="67" textLength="90" fill="#7f7f7f">agent demo</text>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M27 72h18v18h-18z"/>
+<path fill="#ef4a5c" shape-rendering="crispEdges" d="M54 72h72v18h-72z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M135 72h18v18h-18z"/>
+<text x="189" y="85" textLength="162" fill="#7f7f7f">~/projects/orchard</text>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M36 90h18v18h-18z"/>
+<path fill="#ef4a5c" shape-rendering="crispEdges" d="M63 90h9v9h-9zM72 90h36v18h-36zM108 90h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M126 90h18v18h-18z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M45 108h9v9h-9zM54 108h18v18h-18zM72 117h36v9h-36zM108 108h18v18h-18zM126 108h9v9h-9z"/>
+<path fill="#1c9160" shape-rendering="crispEdges" d="M72 126h36v9h-36z"/>
+<text x="18" y="175" fill="#7f7f7f">›</text>
+<text x="36" y="175" textLength="432">Make the to-do list keep its items between runs.</text>
+<text x="18" y="211" fill="#ef4a5c">●</text>
+<text x="36" y="211" textLength="630">I'll save the items to a file whenever the list changes, and read them</text>
+<text x="36" y="229" textLength="405">back at start. First, how the app holds them.</text>
+<text x="18" y="265" fill="#1c9160">✓</text>
+<text x="36" y="265" textLength="36" font-weight="bold">Read</text>
+<text x="81" y="265" textLength="90">src/app.rs</text>
+<text x="180" y="265" textLength="90" fill="#7f7f7f">· 86 lines</text>
+<path fill="#ef4a5c" d="M18.75 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 272.25a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0M23.25 276.75a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0 -3 0"/>
+<text x="36" y="283" textLength="27" font-weight="bold">Run</text>
+<text x="72" y="283" textLength="90">cargo test</text>
+<text x="171" y="283" textLength="36" fill="#7f7f7f">· 3s</text>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M4.5 378V374Q4.5 369.5 9 369.5H9M9 369.5h702M715.5 378V374Q715.5 369.5 711 369.5H711"/>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M4.5 387.5V378M4.5 387.5V396"/>
+<text x="18" y="391" fill="#7f7f7f">›</text>
+<rect x="36" y="378" width="9" height="18" fill="#e5e5e5"/>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M715.5 387.5V378M715.5 387.5V396"/>
+<path fill="none" stroke="#7f7f7f" stroke-width="1" stroke-linecap="square" d="M4.5 396V401Q4.5 405.5 9 405.5H9M9 405.5h702M715.5 396V401Q715.5 405.5 711 405.5H711"/>
+<text x="9" y="427" textLength="54" fill="#7f7f7f">q quit</text>
+<text x="648" y="427" textLength="63" fill="#7f7f7f">melon-1</text>
+</g>
+</svg>

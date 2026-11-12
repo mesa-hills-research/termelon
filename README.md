@@ -1,5 +1,12 @@
 # Termelon
 
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="https://raw.githubusercontent.com/mesa-hills-research/termelon/main/docs/images/agent-demo-still.svg">
+  <img src="https://raw.githubusercontent.com/mesa-hills-research/termelon/main/docs/images/agent-demo.svg" alt="A coding agent's screen drawn with Termelon, under its mascot, a winking face over a slice of melon. A request is sent, a reply streams in, and two tools run.">
+</picture>
+
+`cargo run --example agent_demo` plays this demo from a checkout.
+
 A terminal user interface library for Rust. It covers the whole stack a full-screen terminal program
 needs, in pure Rust:
 
