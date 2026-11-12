@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "kitty",
+    "version": "0.45.0"
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "Kitty { flags: 31 }",
+    "synchronized_output": "Yes",
+    "grapheme_clustering": "No",
+    "hyperlinks": "Yes",
+    "underline_styles": "Yes",
+    "underline_color": "Yes",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Yes",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Yes",
+    "background": "Some(Rgb { r: 0, g: 0, b: 0 })",
+    "glyphs": "Full"
+  }
+}

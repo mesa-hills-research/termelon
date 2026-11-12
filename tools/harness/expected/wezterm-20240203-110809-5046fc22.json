@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "WezTerm",
+    "version": "20240203-110809-5046fc22"
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: true, vs16_widens: false, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "ModifyOtherKeys",
+    "synchronized_output": "Yes",
+    "grapheme_clustering": "Yes",
+    "hyperlinks": "Yes",
+    "underline_styles": "Yes",
+    "underline_color": "Yes",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Yes",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Unknown",
+    "background": "Some(Rgb { r: 0, g: 0, b: 0 })",
+    "glyphs": "Full"
+  }
+}

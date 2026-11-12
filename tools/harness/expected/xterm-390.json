@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "XTerm",
+    "version": "390"
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: false, vs16_widens: false, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "ModifyOtherKeys",
+    "synchronized_output": "No",
+    "grapheme_clustering": "No",
+    "hyperlinks": "No",
+    "underline_styles": "No",
+    "underline_color": "Unknown",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Yes",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Yes",
+    "background": "None",
+    "glyphs": "Full"
+  }
+}

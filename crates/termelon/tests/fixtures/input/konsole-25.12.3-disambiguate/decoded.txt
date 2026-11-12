@@ -1,0 +1,5 @@
+# The events that decode as another, and what they decode as.
+ctrl+1	1
+shift+enter	enter
+ctrl+enter	enter
+ctrl+backspace	ctrl+h

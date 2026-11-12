@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "ghostty",
+    "version": "1.3.1"
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false }",
+    "alternate_screen": "Unknown",
+    "keyboard": "Kitty { flags: 31 }",
+    "synchronized_output": "Yes",
+    "grapheme_clustering": "Yes",
+    "hyperlinks": "Unknown",
+    "underline_styles": "Unknown",
+    "underline_color": "Unknown",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Unknown",
+    "cursor_shape": "Unknown",
+    "title": "Unknown",
+    "title_stack": "Unknown",
+    "background": "Some(Rgb { r: 40, g: 44, b: 52 })",
+    "glyphs": "Full"
+  }
+}

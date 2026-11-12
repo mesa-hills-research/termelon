@@ -1,0 +1,2 @@
+# The events that decode as another, and what they decode as.
+shift+enter	enter

@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": null,
+    "version": null
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "Some(Tmux { version: Some(\"3.4\") })",
+    "colors": "Ansi256",
+    "width_profile": "WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "Legacy",
+    "synchronized_output": "No",
+    "grapheme_clustering": "No",
+    "hyperlinks": "Yes",
+    "underline_styles": "Unknown",
+    "underline_color": "Unknown",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Yes",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Yes",
+    "background": "None",
+    "glyphs": "Full"
+  }
+}

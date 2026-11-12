@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "foot",
+    "version": "1.25.0"
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "Kitty { flags: 31 }",
+    "synchronized_output": "Yes",
+    "grapheme_clustering": "Yes",
+    "hyperlinks": "Yes",
+    "underline_styles": "Yes",
+    "underline_color": "Yes",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Yes",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Yes",
+    "background": "Some(Rgb { r: 36, g: 36, b: 36 })",
+    "glyphs": "Full"
+  }
+}

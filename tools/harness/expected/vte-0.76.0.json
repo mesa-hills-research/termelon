@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "VTE",
+    "version": "7600"
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: false, vs16_widens: false, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "Legacy",
+    "synchronized_output": "No",
+    "grapheme_clustering": "No",
+    "hyperlinks": "Yes",
+    "underline_styles": "Yes",
+    "underline_color": "Yes",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "No",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Unknown",
+    "background": "Some(Rgb { r: 255, g: 255, b: 255 })",
+    "glyphs": "Full"
+  }
+}

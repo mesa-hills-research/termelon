@@ -1,0 +1,28 @@
+{
+  "terminal": {
+    "name": "Konsole",
+    "version": "25.12.3"
+  },
+  "capabilities": {
+    "probe": "Complete",
+    "multiplexer": "None",
+    "colors": "TrueColor",
+    "width_profile": "WidthProfile { joins_emoji: true, vs16_widens: true, ambiguous_wide: false }",
+    "alternate_screen": "Yes",
+    "keyboard": "Legacy",
+    "synchronized_output": "Unknown",
+    "grapheme_clustering": "No",
+    "hyperlinks": "Yes",
+    "underline_styles": "Yes",
+    "underline_color": "Yes",
+    "focus_events": "Yes",
+    "bracketed_paste": "Yes",
+    "mouse": "Yes",
+    "clipboard_write": "Yes",
+    "cursor_shape": "Yes",
+    "title": "Yes",
+    "title_stack": "Unknown",
+    "background": "Some(Rgb { r: 35, g: 38, b: 39 })",
+    "glyphs": "Full"
+  }
+}
