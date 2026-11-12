@@ -154,12 +154,92 @@ for are dropped.
 
 At open, before any event reaches the program, the probe writes one batch of queries ending with DA1
 (`CSI c`). Every terminal tested answers DA1, and terminals answer in order, so a query whose answer
-hasn't come by the time DA1's does is unsupported, and the probe takes one round trip. A terminal
+hasn't come by the time DA1's does is unsupported, and the probe takes one round trip. On Windows
+it waits up to 200 ms more, as [Windows consoles](#windows-consoles) explains. A terminal
 that doesn't answer at all is waited for up to `Options::probe_timeout`. Environment variables
 and a table of known terminals and versions fill in what can't be asked, and a reply always beats a
 variable. `TERMELON_CAPS` overrides any field.
 
 Where support is unknown, private modes are sent, since terminals ignore modes they don't know, and
 strings (OSC and DCS) aren't, since a terminal that doesn't parse them may print them.
+
+## Windows consoles
+
+A program's console is conhost's window, or a pseudoconsole (ConPTY) with a terminal on its other
+side, such as Windows Terminal. The pseudoconsole is the system's own conhost, or the
+`OpenConsole.exe` a terminal ships. These facts come from the console tests on Windows Server 2022
+(conhost 10.0.20348) and 2025 (10.0.26100), with Windows Terminal 1.23 and 1.25 and the
+pseudoconsole of Windows Terminal 1.25.
+
+A console puts each reply to a query into its input as key records, one for each UTF-16 unit, with
+no virtual key, scan code or modifiers, the ESC too. Server 2022's conhost gives each character of
+its own replies a press and a release, and the rest a press alone. The replies a console makes
+itself arrive this way in records mode and in virtual terminal input mode alike. Who answers
+differs.
+
+| Query | conhost 2022 | conhost 2025 | system pseudoconsole 2022 | system pseudoconsole 2025 | Windows Terminal's pseudoconsole |
+|---|---|---|---|---|---|
+| DA1, DA2, cursor report | itself | itself | itself | itself | the terminal |
+| DECRQM, `CSI 18 t` | nobody | itself | the terminal | itself | the terminal |
+| kitty `CSI ? u` | nobody | nobody | the terminal | the terminal | the terminal |
+| XTVERSION | nobody | nobody | the terminal, whose reply it drops | the terminal | the terminal |
+| OSC 11 | nobody | nobody | the terminal, whose reply it drops | nobody | the terminal |
+
+conhost answers DA1 with `CSI ? 1 ; 0 c` on Server 2022 and `CSI ? 61 ; 1 ; 6 ; 7 ; 21 ; 22 ; 23 ;
+24 ; 28 ; 32 ; 42 c` on 2025, and DECRQM for 2026 with "not recognised". A pseudoconsole that answers
+DA1 itself does so at once, so the terminal's answers to the queries it passes on come after DA1's.
+That's why the probe waits for quiet after DA1 on Windows. Windows Terminal answers the kitty query
+with flags 0 from 1.25, and 1.23 doesn't answer it. Neither answers XTVERSION.
+
+In records mode, what a pseudoconsole makes of a terminal's bytes:
+
+- Known key sequences become the key's records (Up, F5, Ctrl+C, Alt+x), and win32-input-mode's
+  sequences the records they carry. Windows Terminal speaks win32-input-mode, so its keys arrive
+  whole.
+- Sequences the pseudoconsole doesn't know, a kitty `CSI 13 ; 2 u` or a late reply, pass as
+  characters with no key through Windows Terminal's. The system's drops them, except that Server
+  2025 turns the end of an XTVERSION reply into Alt+\.
+- Under Windows Terminal, a cursor report arrives as F3, whose sequence `CSI 1 ; 1 R` also is.
+- A paste loses its bracketed-paste markers and arrives as typed keys.
+- A lone ESC arrives as Esc on Server 2022. Server 2025's pseudoconsole and Windows Terminal's hold
+  it.
+- A character its keyboard layout has no key for, such as an emoji, arrives from the system's
+  pseudoconsole as an Alt code, Alt held while keypad digits go down, with the character on Alt's
+  release, one per UTF-16 unit. It does so in virtual terminal input mode too. Windows Terminal's
+  passes it as a character.
+- SGR mouse reports become mouse records, and focus reports focus records, Server 2022's
+  pseudoconsole dropping these.
+
+In virtual terminal input mode the terminal's bytes pass as characters with no key, with three
+exceptions. The system's pseudoconsoles drop OSC strings, and Server 2022's DCS strings too. Those
+of Server 2025 and Windows Terminal drop focus reports. The system's sends Alt codes as above.
+Windows Terminal's kitty keys and their releases under the protocol's flags weren't measured, so
+records stay the input mode once the probe is done.
+
+Key records written with `WriteConsoleInputW` come back from `ReadConsoleInputW` as written in
+records mode. In virtual terminal input mode the console turns each key press into what the key
+sends as characters, `ESC [ A` for Up and a carriage return for Shift+Enter, its modifiers lost.
+conhost passes the releases as written, and Windows Terminal drops them. A conhost window and
+Windows Terminal send focus records of their own as their windows gain focus.
+`ReadConsoleOutputCharacterW` gives a wide character once for its two cells, and U+FFFD for one
+outside the BMP.
+
+Output passes through Windows Terminal's pseudoconsole byte for byte, synchronized output, RGB
+colour, curly underlines, links and kitty pushes alike. Server 2025's passes it on with small
+rewrites, `CSI 0 m` as `CSI m` and an `id` added to each link. Server 2022's draws its own copy of
+the screen, so curly underlines are lost and a link's text comes apart from its sequence. Every
+pseudoconsole asks its terminal for the cursor position as it starts, and those of Server 2025 and
+Windows Terminal turn on focus reports and win32-input-mode.
+
+The runner's own console on both images is conhost with no window. `conhost.exe PROGRAM` opens a
+conhost window on Server 2025 too, and Windows Terminal's portable build runs on Server 2022.
+
+Another process can drive a conhost window. Started with `CREATE_NEW_CONSOLE`, the console takes
+key records from `WriteConsoleInputW` and gives its cells to `ReadConsoleOutputW`, in any process
+that attaches to it with `AttachConsole`. `GetConsoleCursorInfo` says the cursor shows on the
+alternate screen whatever the program set. Windows Terminal's `exportBuffer` action writes the text
+of the screen it shows to a file, on a key that `SendInput` presses once the window is in front,
+and `--size` gives its window exactly the cells asked for. Both work on both images, with Windows
+Terminal 1.23 installed and 1.25 portable.
 
 [Internals](internals.md) lists the private interfaces between these parts.

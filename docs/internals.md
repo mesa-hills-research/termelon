@@ -356,4 +356,8 @@ impl<C: Console> ScreenOn<C> {
 `tests/conpty.rs` runs programs on a pseudoconsole on Windows, with the emulator on its terminal
 side, through portable-pty. A `conpty.dll` and `OpenConsole.exe` copied beside the test binary
 make it the pseudoconsole Windows Terminal ships rather than the system's. The tests that need a
-real console window are in `sys/windows/tests.rs`, ignored unless run with `--ignored`.
+real console window are in `sys/windows/tests.rs`, ignored unless run with `--ignored`. Two of them
+record what a console and a pseudoconsole deliver for each query, typed key and terminal's bytes,
+read by read, and what the reader makes of it. `.github/workflows/windows-console.yml` runs them
+on Windows Server 2022 and 2025, in the runner's console, a conhost window and Windows Terminal,
+and with both pseudoconsoles, and keeps what they print.
