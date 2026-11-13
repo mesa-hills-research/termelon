@@ -184,6 +184,13 @@ The capability table says `Yes` for the terminals whose runs in the terminal mat
 regions right ([Testing in real terminals](real-terminals.md)). `TERMELON_CAPS=scroll_regions=yes`
 turns it on for another terminal.
 
+## Trying it
+
+`cargo run --release --example feed_demo` plays a coding agent's transcript that never stops,
+with replies streaming, "Working…" coming and going and folds opening and closing. Scroll it
+while it streams, and press 1, 2 and 3 to compare a place kept as a share of the top block with
+`FeedView`, with and without blank rows below the end.
+
 ## Costs
 
 On 6 cores of an i9-13980HX, release build, a 120 by 50 view of items of 1 to 550 words.
