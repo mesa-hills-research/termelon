@@ -26,6 +26,7 @@ Most fields are a `Support` of `Yes`, `No` or `Unknown`.
 | `clipboard_write` | Copying with OSC 52 |
 | `cursor_shape` | Cursor shapes (`CSI n SP q`) |
 | `bce` | Background colour erase, which lets the encoder erase a run of spaces in a colour instead of writing them |
+| `scroll_regions` | Scrolling a region of rows, which lets the encoder move the rows a widget says moved instead of writing them again. `Yes` only for terminals the terminal matrix checked |
 | `title`, `title_stack` | Setting the window title, and saving it on xterm's title stack |
 | `background` | The background colour, for choosing a dark or a light theme |
 | `glyphs` | `Full`, or `Limited` where the font may lack box drawing and braille |

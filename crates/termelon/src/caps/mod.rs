@@ -226,6 +226,11 @@ pub struct Capabilities {
     /// Background colour erase (BCE). Erasing fills cells with the pen's background colour, so
     /// the encoder may erase runs of spaces in a colour rather than write them.
     pub bce: Support,
+    /// Scrolling a region of rows, with DECSTBM and then insert or delete line. Where it's `Yes`,
+    /// rows a widget says moved ([`Buffer::note_scroll`](crate::Buffer::note_scroll)) are
+    /// scrolled in the terminal rather than written again. The table says `Yes` for the terminals
+    /// whose runs in the project's terminal matrix showed scrolled regions right.
+    pub scroll_regions: Support,
     /// The background colour, for choosing a dark or light theme.
     pub background: Option<Rgb>,
     /// Whether its font has box drawing and braille.
@@ -349,6 +354,7 @@ fn apply_row(caps: &mut Capabilities, row: &table::Row) {
     caps.title = row.title;
     caps.title_stack = row.title_stack;
     caps.bce = row.bce;
+    caps.scroll_regions = row.scroll_regions;
     caps.width_profile = row.width_profile;
     caps.glyphs = row.glyphs;
 }

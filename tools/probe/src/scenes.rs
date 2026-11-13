@@ -1,8 +1,12 @@
 //! The probe's scenes, drawn with the framework. Each fits in 80 by 24 cells and ends with its
 //! marker on the last row, which the harness waits for.
 
+use std::ops::Range;
+
+use termelon::feed::Measure;
 use termelon::{
-    Buffer, Color, Cursor, CursorShape, Modifier, Position, Rect, Style, UnderlineStyle,
+    Buffer, Color, Cursor, CursorShape, FeedRows, FeedView, Modifier, Position, Rect, Style,
+    UnderlineStyle,
 };
 
 /// A scene: its name, how it draws, and where it leaves the cursor (`None` hides it).
@@ -10,30 +14,41 @@ pub(crate) struct Scene {
     /// The name the harness asks for.
     pub(crate) name: &'static str,
     draw: fn(&mut Buffer),
+    /// Frames drawn before the scene's own, which has the marker.
+    pub(crate) before: &'static [fn(&mut Buffer)],
     /// The cursor the frame asks for.
     pub(crate) cursor: Option<Cursor>,
 }
 
 /// Every scene.
-pub(crate) const SCENES: [Scene; 3] = [
+pub(crate) const SCENES: [Scene; 4] = [
     Scene {
         name: "text",
         draw: text,
+        before: &[],
         cursor: None,
     },
     Scene {
         name: "styles",
         draw: styles,
+        before: &[],
         cursor: None,
     },
     Scene {
         name: "cursor",
         draw: cursor,
+        before: &[],
         cursor: Some(Cursor {
             position: Position::new(20, 10),
             shape: CursorShape::Bar,
             blinking: false,
         }),
+    },
+    Scene {
+        name: "scroll",
+        draw: |b| scroll(b, 2),
+        before: &[|b| scroll(b, 0), |b| scroll(b, 1)],
+        cursor: None,
     },
 ];
 
@@ -158,6 +173,69 @@ fn cursor(b: &mut Buffer) {
     b.set_string(0, 0, "the cursor ends at 20,10 as a bar", Style::new());
 }
 
+/// The words of the scroll scene's rows.
+const WORDS: [&str; 6] = ["rows", "move", "up", "and", "down", "here"];
+
+/// Items of one to three rows, some in colour, for the scroll scene's feed.
+struct Rows;
+
+impl Measure<u16> for Rows {
+    fn height(&mut self, key: &u16) -> u32 {
+        u32::from(key % 3 + 1)
+    }
+}
+
+impl FeedRows<u16> for Rows {
+    fn set_width(&mut self, _width: u16) {}
+
+    fn render(&mut self, key: &u16, rows: Range<u32>, area: Rect, buf: &mut Buffer) {
+        let style = match key % 5 {
+            0 => Style::new().fg(Color::Cyan),
+            3 => Style::new().bg(Color::Indexed(236)),
+            _ => Style::new(),
+        };
+        for (y, row) in (area.y..).zip(rows) {
+            let n = usize::from(*key) * 3 + row as usize;
+            let words: Vec<&str> = (0..6).map(|i| WORDS[(n + i * 5) % WORDS.len()]).collect();
+            let text = format!("item {key:02}.{row} {}", words.join(" "));
+            buf.set_stringn(area.x, y, text, usize::from(area.width), style);
+        }
+    }
+}
+
+/// A feed between a title and a column of notes, three rows down from its start in frame 1 and
+/// one back up in frame 2, so the terminal scrolls a region one way and then the other. The
+/// notes share the feed's rows, so they're written again after each scroll.
+fn scroll(b: &mut Buffer, frame: u8) {
+    let area = b.area();
+    let feed = Rect::new(0, 1, 60, area.height.saturating_sub(2));
+    let mut view = FeedView::new();
+    for key in 0..60 {
+        view.feed_mut().push(key, 1);
+    }
+    view.feed_mut().scroll_to_start();
+    let mut rows = Rows;
+    let mut scratch = Buffer::empty(area);
+    for step in 0..=frame {
+        match step {
+            1 => view.feed_mut().scroll_by(3),
+            2 => view.feed_mut().scroll_by(-1),
+            _ => {}
+        }
+        let target = if step == frame { &mut *b } else { &mut scratch };
+        target.set_string(0, 0, "probe: scroll", Style::new());
+        view.render(feed, target, &mut rows);
+        for y in feed.top()..feed.bottom() {
+            target.set_string(
+                62,
+                y,
+                format!("note {y:02}"),
+                Style::new().fg(Color::Yellow),
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,11 +247,21 @@ mod tests {
             let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
             draw(scene, &mut buffer);
             let mut term = termelon::testing::TestTerminal::new(80, 24);
+            for before in scene.before {
+                term.draw(|frame| before(frame.buffer_mut())).unwrap();
+            }
+            term.take_output();
             term.draw(|frame| {
                 draw(scene, frame.buffer_mut());
                 frame.set_cursor(scene.cursor);
             })
             .unwrap();
+            // The scroll scene's last frame scrolls a region, in a terminal that has them.
+            if !scene.before.is_empty() {
+                let bytes = String::from_utf8_lossy(&term.take_output()).into_owned();
+                assert!(bytes.contains("\x1b[2;23r"), "{bytes:?}");
+                assert!(!bytes.contains("item 03.0"), "{bytes:?}");
+            }
             let rows = term.screen().rows();
             for (y, shown) in (0..24).zip(&rows) {
                 let row: String = (0..80).map(|x| buffer.symbol((x, y)).to_owned()).collect();

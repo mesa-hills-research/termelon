@@ -67,6 +67,8 @@ struct Allowed {
     cursor_shape: bool,
     /// Erasing fills with the pen's background.
     bce: bool,
+    /// Rows a widget said moved may be scrolled in a region.
+    scroll_regions: bool,
 }
 
 impl Allowed {
@@ -80,6 +82,7 @@ impl Allowed {
             sync: caps.synchronized_output != Support::No,
             cursor_shape: caps.cursor_shape != Support::No,
             bce: caps.bce == Support::Yes,
+            scroll_regions: caps.scroll_regions == Support::Yes,
         }
     }
 }
@@ -224,7 +227,10 @@ impl Encoder {
                 }
             }
         } else {
-            if self.scroll_detection {
+            if allowed.scroll_regions {
+                scroll = diff::noted_scroll(prev, next, &mut self.scroll);
+            }
+            if scroll.is_none() && self.scroll_detection {
                 scroll = diff::detect_scroll(prev, next, &mut self.scroll);
             }
             for y in 0..height {

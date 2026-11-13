@@ -679,6 +679,81 @@ fn streaming_one_row_up_writes_one_row_of_text() {
     check_screen(&term, &after, None, &caps).unwrap();
 }
 
+/// A list of rows of text from `first` on, in rows 1 to 10 of a screen with a title above and a
+/// status line below, as a feed between two fixed rows.
+fn list_screen(area: Rect, first: usize) -> Buffer {
+    const WORDS: [&str; 7] = ["the", "scroll", "keeps", "each", "row", "still", "here"];
+    let mut buffer = Buffer::empty(area);
+    buffer.set_string(0, 0, "title", Style::new().fg(Color::Cyan));
+    for y in 1..11u16 {
+        let n = first + usize::from(y);
+        let words: Vec<&str> = (0..5)
+            .map(|i| WORDS[(n * 3 + i * 5) % WORDS.len()])
+            .collect();
+        let line = format!("row {n:02} {}", words.join(" "));
+        buffer.set_string(0, y, line, Style::new());
+    }
+    buffer.set_string(0, 11, "status", Style::new().bg(Color::Blue));
+    buffer
+}
+
+#[test]
+fn a_noted_scroll_moves_the_rows_and_writes_those_that_came_in() {
+    let mut caps = full_caps();
+    caps.scroll_regions = Support::Yes;
+    let area = Rect::new(0, 0, 30, 12);
+    let list = Rect::new(0, 1, 30, 10);
+    let before = list_screen(area, 0);
+    let mut term = emulator(WidthProfile::default(), area, true);
+    let mut encoder = Encoder::new();
+    feed(
+        &mut term,
+        &packet(&mut encoder, &Buffer::empty(area), &before, None, &caps),
+    );
+    // Three rows down the list, then two back up.
+    let mut down = list_screen(area, 3);
+    down.note_scroll(list, 3);
+    let got = packet(&mut encoder, &before, &down, None, &caps);
+    assert!(got.starts_with("␛[?2026h␛[2;11r␛[2H␛[3M␛[r"), "{got}");
+    assert!(!got.contains("row 04"), "{got}");
+    feed(&mut term, &got);
+    check_screen(&term, &down, None, &caps).unwrap();
+    let mut up = list_screen(area, 1);
+    up.note_scroll(list, -2);
+    let got = packet(&mut encoder, &down, &up, None, &caps);
+    assert!(got.contains("␛[2;11r␛[2H␛[2L␛[r"), "{got}");
+    feed(&mut term, &got);
+    check_screen(&term, &up, None, &caps).unwrap();
+}
+
+#[test]
+fn a_noted_scroll_is_left_out_where_it_saves_nothing_or_the_terminal_lacks_it() {
+    let area = Rect::new(0, 0, 30, 12);
+    let list = Rect::new(0, 1, 30, 10);
+    let before = list_screen(area, 0);
+    let mut caps = full_caps();
+    // The rows didn't move, whatever the note says.
+    caps.scroll_regions = Support::Yes;
+    let mut same = list_screen(area, 0);
+    same.note_scroll(list, 4);
+    let mut encoder = primed(&before, &caps);
+    assert_eq!(packet(&mut encoder, &before, &same, None, &caps), "");
+    // The terminal isn't known to scroll regions.
+    for support in [Support::Unknown, Support::No] {
+        caps.scroll_regions = support;
+        let mut down = list_screen(area, 3);
+        down.note_scroll(list, 3);
+        let mut encoder = primed(&before, &caps);
+        let got = packet(&mut encoder, &before, &down, None, &caps);
+        assert!(!got.contains("␛[2;11r"), "{got}");
+    }
+    // A frame drawn under a clip, as a partial frame is, ignores notes.
+    let mut clipped = list_screen(area, 0);
+    clipped.set_clip(&[list]);
+    clipped.note_scroll(list, 1);
+    assert_eq!(clipped.noted_scrolls().len(), 0);
+}
+
 #[test]
 fn the_cursor_is_never_visible_on_a_cell_being_drawn() {
     let caps = full_caps();
@@ -1051,6 +1126,10 @@ struct Frame {
     redraw: bool,
     /// The regions of a partial frame, drawn under a clip over the last frame.
     regions: Option<Vec<Rect>>,
+    /// Whether the frame notes its shift as a scroll of the whole screen.
+    note_shift: bool,
+    /// A scroll the frame notes, right or wrong.
+    note: Option<(Rect, i8)>,
 }
 
 const W: u16 = 12;
@@ -1081,14 +1160,20 @@ fn frame() -> impl Strategy<Value = Frame> {
         prop::option::of((0..W + 2, 0..H + 2, 0..4u8, any::<bool>())),
         prop::bool::weighted(0.1),
         prop::option::weighted(0.3, prop::collection::vec(rect(), 1..3)),
+        any::<bool>(),
+        prop::option::weighted(0.2, (rect(), -3i8..4)),
     )
-        .prop_map(|(ops, shift, cursor, redraw, regions)| Frame {
-            ops,
-            shift,
-            cursor,
-            redraw,
-            regions,
-        })
+        .prop_map(
+            |(ops, shift, cursor, redraw, regions, note_shift, note)| Frame {
+                ops,
+                shift,
+                cursor,
+                redraw,
+                regions,
+                note_shift,
+                note,
+            },
+        )
 }
 
 fn depth() -> impl Strategy<Value = ColorDepth> {
@@ -1107,17 +1192,26 @@ fn support() -> impl Strategy<Value = Support> {
 }
 
 fn caps() -> impl Strategy<Value = Capabilities> {
-    (depth(), support(), support(), support(), support()).prop_map(
-        |(colors, links, styles, color, shapes)| Capabilities {
-            colors,
-            hyperlinks: links,
-            underline_styles: styles,
-            underline_color: color,
-            cursor_shape: shapes,
-            synchronized_output: Support::Yes,
-            ..Capabilities::default()
-        },
+    (
+        depth(),
+        support(),
+        support(),
+        support(),
+        support(),
+        support(),
     )
+        .prop_map(
+            |(colors, links, styles, color, shapes, scroll_regions)| Capabilities {
+                colors,
+                hyperlinks: links,
+                underline_styles: styles,
+                underline_color: color,
+                cursor_shape: shapes,
+                synchronized_output: Support::Yes,
+                scroll_regions,
+                ..Capabilities::default()
+            },
+        )
 }
 
 fn width_profile() -> impl Strategy<Value = WidthProfile> {
@@ -1190,6 +1284,12 @@ fn draw(frame: &Frame, last: &Buffer, profile: WidthProfile) -> Buffer {
             }
             Op::Link { area, url } => next.set_link(*area, Some(URLS[*url])),
         }
+    }
+    if frame.note_shift {
+        next.note_scroll(area, i32::from(frame.shift));
+    }
+    if let Some((rect, rows)) = frame.note {
+        next.note_scroll(rect, i32::from(rows));
     }
     next
 }
@@ -1287,6 +1387,8 @@ fn a_partial_frame_over_wide_characters_at_its_edge() {
         cursor: None,
         redraw: false,
         regions: Some(vec![Rect::new(1, 0, 3, 1)]),
+        note_shift: false,
+        note: None,
     };
     let profile = WidthProfile {
         ambiguous_wide: true,
@@ -1313,6 +1415,8 @@ fn a_partial_frame_writes_what_a_wide_character_spilled_past_its_region() {
         cursor: None,
         redraw: false,
         regions: Some(vec![Rect::new(7, 0, 4, 2)]),
+        note_shift: false,
+        note: None,
     };
     run_frames(
         WidthProfile::default(),
@@ -1337,6 +1441,8 @@ fn a_partial_frame_that_breaks_a_wide_character_inside_it() {
         cursor: None,
         redraw: false,
         regions: Some(vec![Rect::new(1, 1, 3, 3)]),
+        note_shift: false,
+        note: None,
     };
     let profile = WidthProfile {
         joins_emoji: true,
@@ -1452,6 +1558,7 @@ proptest! {
             let caps = Capabilities {
                 synchronized_output: if quirk == Quirk::NoSync { Support::No } else { Support::Yes },
                 bce: if quirk == Quirk::NoBce { Support::No } else { Support::Yes },
+                scroll_regions: if quirk == Quirk::NoInsertDeleteLines { Support::No } else { Support::Yes },
                 ..full_caps()
             };
             let scroll = quirk != Quirk::NoInsertDeleteLines;

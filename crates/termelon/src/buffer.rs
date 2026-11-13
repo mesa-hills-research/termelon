@@ -479,6 +479,19 @@ pub struct Buffer {
     /// For each row, the columns outside the clip that writes under it changed, through wide
     /// characters across its edges, from the first to the one after the last.
     spill: Vec<Option<(usize, usize)>>,
+    /// The rows widgets said moved since the last frame.
+    scrolls: Vec<NotedScroll>,
+}
+
+/// Rows a widget said moved since the last frame, from [`Buffer::note_scroll`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NotedScroll {
+    /// The first row, counted inside the buffer's area.
+    pub(crate) top: usize,
+    /// The row after the last.
+    pub(crate) bottom: usize,
+    /// How far the rows' content moved up, or down when negative.
+    pub(crate) rows: i32,
 }
 
 /// A region of a clip, in rows and columns counted inside the buffer's area.
@@ -509,6 +522,7 @@ impl Buffer {
             clip: Vec::new(),
             clipped: false,
             spill: Vec::new(),
+            scrolls: Vec::new(),
         };
         buffer.resize(area);
         buffer
@@ -530,9 +544,11 @@ impl Buffer {
         self.width_profile = profile;
     }
 
-    /// Blanks every cell and empties the cluster and extras tables, keeping their memory. Under a
-    /// clip, it blanks the cells the clip allows and keeps the tables.
+    /// Blanks every cell, empties the cluster and extras tables, keeping their memory, and
+    /// forgets the rows [`note_scroll`](Self::note_scroll) said moved. Under a clip, it blanks
+    /// the cells the clip allows and keeps the tables.
     pub fn reset(&mut self) {
+        self.scrolls.clear();
         if self.clipped {
             let width = usize::from(self.area.width);
             for i in 0..self.clip.len() {
@@ -558,6 +574,7 @@ impl Buffer {
         self.clip.clear();
         self.clipped = false;
         self.spill.clear();
+        self.scrolls.clear();
         self.cells.clear();
         self.cells.resize(area.area() as usize, Cell::BLANK);
         self.rich_rows.clear();
@@ -729,6 +746,29 @@ impl Buffer {
                 self.mark_rich(y);
             }
         }
+    }
+
+    /// Says that the rows of `area` show what they showed in the last frame moved up by `rows`
+    /// rows, or down when `rows` is negative, as a list does when it scrolls. Where the terminal
+    /// can scroll a region of rows ([`Capabilities::scroll_regions`]), the encoder may scroll them
+    /// there and write only the rows that came in. Terminals scroll whole rows, so the cells of
+    /// those rows outside `area` are written again where they differ. A wrong note costs bytes,
+    /// never a wrong screen. [`reset`](Self::reset) forgets it, and a frame drawn under a clip
+    /// ignores it.
+    ///
+    /// [`FeedView`](crate::widgets::FeedView) notes its scrolls itself.
+    ///
+    /// [`Capabilities::scroll_regions`]: crate::caps::Capabilities::scroll_regions
+    pub fn note_scroll(&mut self, area: Rect, rows: i32) {
+        let area = self.area.intersection(area);
+        if self.clipped || rows == 0 || rows.unsigned_abs() >= u32::from(area.height) {
+            return;
+        }
+        self.scrolls.push(NotedScroll {
+            top: usize::from(area.y - self.area.y),
+            bottom: usize::from(area.bottom() - self.area.y),
+            rows,
+        });
     }
 
     /// The cell at `position`, or `None` outside the area.
@@ -1137,6 +1177,11 @@ mod copy_rows_tests {
 
 /// Reading for the diff and the encoder.
 impl Buffer {
+    /// The rows widgets said moved since the last frame.
+    pub(crate) fn noted_scrolls(&self) -> &[NotedScroll] {
+        &self.scrolls
+    }
+
     /// Modifiers that show on a space.
     const VISIBLE_ON_BLANK: Modifier = Modifier::REVERSED
         .union(Modifier::UNDERLINED)

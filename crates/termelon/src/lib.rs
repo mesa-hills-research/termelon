@@ -45,7 +45,8 @@
 //! | [`text`] | [`Span`], [`Line`] and [`Text`], and the measure of text in cells |
 //! | [`style`] | [`Color`], [`Modifier`], [`UnderlineStyle`] and [`Style`] |
 //! | [`layout`] | [`Position`], [`Size`], [`Rect`], and [`Layout`] by [`Constraint`]s |
-//! | [`widgets`] | [`Widget`], and the [`Clear`], [`Block`] and [`Paragraph`] widgets |
+//! | [`widgets`] | [`Widget`], and the [`Clear`], [`Block`], [`Paragraph`] and [`FeedView`] widgets |
+//! | [`feed`] | [`Feed`](feed::Feed), the scroll core under [`FeedView`], for long, live lists |
 //! | [`event`] | [`Event`] and the key and mouse types in it |
 //! | [`caps`] | [`Capabilities`], what the terminal supports |
 //! | [`frame`] | [`Frame`], what the closure of a draw gets to render into |
@@ -70,6 +71,7 @@
 pub mod buffer;
 pub mod caps;
 pub mod event;
+pub mod feed;
 mod flags;
 pub mod frame;
 pub mod layout;
@@ -98,4 +100,6 @@ pub use terminal::{Drawn, Error, Events, KeyboardRequest, MouseMode, Options, Re
 #[cfg(any(unix, windows))]
 pub use terminal::{Terminal, terminal_size};
 pub use text::{Line, Span, Text};
-pub use widgets::{Block, BorderSet, Borders, Clear, Padding, Paragraph, Widget, Wrap};
+pub use widgets::{
+    Block, BorderSet, Borders, Clear, FeedRows, FeedView, Padding, Paragraph, Widget, Wrap,
+};

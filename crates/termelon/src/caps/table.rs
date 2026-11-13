@@ -37,6 +37,9 @@ pub(crate) struct Row {
     pub(crate) bce: Support,
     /// xterm's modifyOtherKeys, which the library turns on where the kitty protocol isn't.
     pub(crate) modify_other_keys: Support,
+    /// Scrolled regions of rows, `Yes` where the harness's `scroll` scene matched the emulator
+    /// in the terminal matrix (`.github/workflows/terminals.yml`).
+    pub(crate) scroll_regions: Support,
     pub(crate) width_profile: WidthProfile,
     pub(crate) glyphs: GlyphSupport,
 }
@@ -62,6 +65,7 @@ const CURRENT: Row = Row {
     title_stack: Unknown,
     bce: Unknown,
     modify_other_keys: No,
+    scroll_regions: Unknown,
     width_profile: WidthProfile {
         joins_emoji: false,
         vs16_widens: false,
@@ -84,6 +88,7 @@ pub(crate) const ROWS: &[Row] = &[
         title_stack: Yes,
         modify_other_keys: Yes,
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -93,6 +98,7 @@ pub(crate) const ROWS: &[Row] = &[
         synchronized_output: No,
         clipboard_write: No,
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -101,6 +107,7 @@ pub(crate) const ROWS: &[Row] = &[
                  23.08 or 25.12. Its BCE is from konsole-256color in ncurses' terminfo",
         synchronized_output: Unknown,
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -115,6 +122,7 @@ pub(crate) const ROWS: &[Row] = &[
             ambiguous_wide: false,
         },
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -123,6 +131,7 @@ pub(crate) const ROWS: &[Row] = &[
                  Its BCE is from alacritty in ncurses' terminfo",
         title_stack: Yes,
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -137,6 +146,7 @@ pub(crate) const ROWS: &[Row] = &[
             ambiguous_wide: false,
         },
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -145,6 +155,7 @@ pub(crate) const ROWS: &[Row] = &[
         grapheme_clustering: Yes,
         title_stack: Yes,
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -160,6 +171,7 @@ pub(crate) const ROWS: &[Row] = &[
         underline_color: Unknown,
         title_stack: Yes,
         bce: No,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -173,6 +185,7 @@ pub(crate) const ROWS: &[Row] = &[
         underline_color: Unknown,
         title_stack: Yes,
         bce: No,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -191,6 +204,7 @@ pub(crate) const ROWS: &[Row] = &[
         cursor_shape: No,
         title_stack: No,
         bce: No,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -213,6 +227,7 @@ pub(crate) const ROWS: &[Row] = &[
         title_stack: No,
         glyphs: GlyphSupport::Limited,
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -221,6 +236,7 @@ pub(crate) const ROWS: &[Row] = &[
                  is from ms-terminal in ncurses' terminfo",
         grapheme_clustering: Yes,
         bce: Yes,
+        scroll_regions: Yes,
         ..CURRENT
     },
     Row {
@@ -325,6 +341,31 @@ mod tests {
         assert!(ROWS.iter().all(|row| row.bce != Unknown), "{ROWS:?}");
         assert_eq!(find("xterm", None).unwrap().bce, Yes);
         assert_eq!(find("tmux", Some("3.7")).unwrap().bce, No);
+    }
+
+    #[test]
+    fn scroll_regions_are_on_only_where_the_matrix_checked_them() {
+        let checked = [
+            "xterm",
+            "vte",
+            "konsole",
+            "kitty",
+            "alacritty",
+            "wezterm",
+            "foot",
+            "tmux",
+            "screen",
+            "linux",
+            "windows-terminal",
+        ];
+        for row in ROWS {
+            let expected = if checked.contains(&row.name) {
+                Yes
+            } else {
+                Unknown
+            };
+            assert_eq!(row.scroll_regions, expected, "{}", row.name);
+        }
     }
 
     #[test]
