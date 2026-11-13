@@ -745,6 +745,33 @@ fn the_readers_item_removed_leaves_them_at_its_neighbour() {
     assert_eq!(s.view.placement().outcome, Outcome::Kept);
 }
 
+/// Heights measured before the view's first frame, at a width it never draws at, count as hints,
+/// so scrolling up through them shows their rows and no blank ones.
+#[test]
+fn heights_measured_before_the_first_frame_are_measured_again() {
+    let build = |sweep_first: bool| {
+        let mut rng = Rng::new(37);
+        let mut s = Session::new(160, 40);
+        for _ in 0..600 {
+            let key = s.next_key;
+            s.push(vec![words(key, 0, 1 + rng.below(120))]);
+        }
+        if sweep_first {
+            // Idle time ran before the first frame, with the text set for 80 columns.
+            s.doc.width = 80;
+            s.view.feed_mut().sweep(600, &mut s.doc);
+        }
+        s.draw();
+        let mut screens = vec![s.term.screen().text()];
+        for _ in 0..8 {
+            s.scroll(-30);
+            screens.push(s.term.screen().text());
+        }
+        screens
+    };
+    assert_eq!(build(true), build(false));
+}
+
 /// The view's rows are what the emulator shows, and a row maps back to its item.
 #[test]
 fn a_screen_row_maps_to_its_item_and_row() {

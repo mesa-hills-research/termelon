@@ -18,6 +18,8 @@ use super::Widget;
 pub trait FeedRows<K>: Measure<K> {
     /// Measures and draws at `width` columns from now on. The view calls it before its first
     /// frame and whenever its width changes, and counts every height as a hint from then on.
+    /// Whatever else changes what the source measures, such as another width set from outside
+    /// or a new theme, calls [`Feed::set_geometry`] on [`FeedView::feed_mut`].
     fn set_width(&mut self, width: u16);
 
     /// Draws the rows `rows` of the item into `area`, with row `rows.start` on the area's first
@@ -154,9 +156,9 @@ impl<K> FeedView<K> {
         }
         let width_changed = self.width != Some(area.width);
         if width_changed {
-            if self.width.is_some() {
-                self.feed.set_geometry();
-            }
+            // (Heights measured before, the first frame's included, were at another width or
+            // at one the view never drew at.)
+            self.feed.set_geometry();
             rows.set_width(area.width);
             self.width = Some(area.width);
         }
