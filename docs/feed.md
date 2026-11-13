@@ -189,7 +189,8 @@ turns it on for another terminal.
 `cargo run --release --example feed_demo` plays a coding agent's transcript that never stops,
 with replies streaming, "Working…" coming and going and folds opening and closing. Scroll it
 while it streams, and press 1, 2 and 3 to compare a place kept as a share of the top block with
-`FeedView`, with and without blank rows below the end.
+`FeedView`, with and without blank rows below the end. The status line counts the frames where
+text moved under the reader, and the rows that moved flash.
 
 ## Costs
 

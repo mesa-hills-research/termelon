@@ -14,7 +14,13 @@
 //! | 3 | `FeedView` with `set_gap_limit(3)`, so a shorter end leaves blank rows below it |
 //! | The wheel, ↑ and ↓, Page Up and Page Down | Scroll |
 //! | Home, End | Go to the start, or to the end and follow it |
+//! | + and −, Space | Stream faster or slower, and pause it |
+//! | r | Count again |
 //! | q, Ctrl+C | Quit |
+//!
+//! The status line counts the frames where text moved under the reader without their input, the
+//! row at the top while scrolled up and any row moving down while following, for each mode. Those
+//! rows flash for 300 ms. The row above it suggests what to try.
 //!
 //! The session is the same in every mode, and switching keeps the row at the top. Mode 1 writes
 //! every row that changed, as Arko does today, and modes 2 and 3 scroll a region of rows where the
@@ -318,6 +324,10 @@ struct Session {
     reply: Option<(u64, Option<usize>)>,
     /// The tool whose output is growing.
     running: Option<u64>,
+    /// The words of the streaming reply so far.
+    streamed: u32,
+    /// The lines left of the code block streaming.
+    code: u32,
     tick: u64,
 }
 
@@ -337,6 +347,8 @@ impl Session {
             working: None,
             reply: None,
             running: None,
+            streamed: 0,
+            code: 0,
             tick: 0,
         }
     }
@@ -406,7 +418,7 @@ impl Session {
             self.plan.push_back(Act::Working(rng.between(5, 30)));
         }
         let words = if rng.chance(30) {
-            rng.between(250, 700)
+            rng.between(1_200, 2_500)
         } else {
             rng.between(20, 160)
         };
@@ -516,6 +528,7 @@ impl Session {
                     let text = self.rng.words(first);
                     let key = self.push(Kind::Reply, vec![text], Vec::new(), false);
                     self.reply = Some((key, None));
+                    self.streamed = first;
                     if words > first {
                         self.plan.push_front(Act::Reply(words - first));
                     } else {
@@ -562,6 +575,11 @@ impl Session {
         let Some((key, bold)) = self.reply else {
             return;
         };
+        // A long reply now and then shows a code block, which comes a line or a few at a time.
+        if self.code > 0 || (bold.is_none() && words > 300 && self.rng.chance(4)) {
+            self.stream_code(key, words);
+            return;
+        }
         let burst = if self.rng.chance(8) {
             self.rng.between(10, 30)
         } else {
@@ -604,12 +622,78 @@ impl Session {
             }
         }
         self.reply = Some((key, bold));
+        self.streamed += count;
         self.changed(key, change);
         if words > count {
             self.plan.push_front(Act::Reply(words - count));
         } else {
             self.reply = None;
         }
+    }
+}
+
+impl Session {
+    /// Lines of a code block in the reply, which count as 6 words each.
+    fn stream_code(&mut self, key: u64, words: u32) {
+        let mut lines = Vec::new();
+        if self.code == 0 {
+            self.code = self.rng.between(15, 60);
+            lines.push(self.doc.line(String::new()));
+            lines.push(self.doc.line("```rust".to_owned()));
+        }
+        for _ in 0..self.rng.between(1, 3).min(self.code) {
+            let indent = "    ".repeat(usize::try_from(self.rng.below(3)).unwrap_or(0));
+            let text = match self.rng.below(4) {
+                0 => format!(
+                    "{indent}let {} = {}({});",
+                    self.ident(),
+                    self.ident(),
+                    self.ident()
+                ),
+                1 => format!("{indent}if {}.{}() {{", self.ident(), self.ident()),
+                2 => format!(
+                    "{indent}{}.{}({}, {});",
+                    self.ident(),
+                    self.ident(),
+                    self.ident(),
+                    self.ident()
+                ),
+                _ => format!("{indent}}}"),
+            };
+            lines.push(self.doc.line(text));
+            self.code -= 1;
+        }
+        if self.code == 0 {
+            lines.push(self.doc.line("```".to_owned()));
+            lines.push(self.doc.line(String::new()));
+            lines.push(self.doc.line(String::new()));
+        }
+        let count = u32::try_from(lines.len()).unwrap_or(1) * 6;
+        if let Some(item) = self.doc.item(key) {
+            item.head.extend(lines);
+        }
+        self.changed(key, Change::Appended);
+        self.streamed += count;
+        if words > count {
+            self.plan.push_front(Act::Reply(words - count));
+        } else {
+            self.reply = None;
+            self.code = 0;
+        }
+    }
+
+    fn ident(&mut self) -> String {
+        let n = self.rng.between(1, 2);
+        self.rng.words(n).replace(' ', "_")
+    }
+
+    /// Whether a long reply is streaming, `rows` of it shown and much of it still to come.
+    fn long_reply_streaming(&mut self, rows: usize) -> bool {
+        let Some((key, _)) = self.reply else {
+            return false;
+        };
+        matches!(self.plan.front(), Some(Act::Reply(left)) if *left >= 600)
+            && self.doc.rows(key).len() >= rows
     }
 }
 
@@ -628,8 +712,9 @@ struct ShareView {
 }
 
 impl ShareView {
-    /// Draws the transcript into `area` and gives the rows below the screen.
-    fn render(&mut self, doc: &mut Doc, area: Rect, buf: &mut Buffer) -> usize {
+    /// Draws the transcript into `area`, and gives the rows below the screen and each block
+    /// drawn with the row its top is on.
+    fn render(&mut self, doc: &mut Doc, area: Rect, buf: &mut Buffer) -> (usize, Vec<(u64, i64)>) {
         let width = usize::from(area.width);
         if doc.width != width {
             doc.set_width(area.width);
@@ -682,11 +767,14 @@ impl ShareView {
             Some((keys[index], top - starts[index], heights[index]))
         };
         // The rows from `top` down.
+        let mut placed = Vec::new();
         let mut y = 0;
         let mut at = index;
         let mut skip = top.saturating_sub(starts.get(index).copied().unwrap_or(0));
         while y < height && at < keys.len() {
             let rows = heights[at].saturating_sub(skip).min(height - y);
+            let top = i64::try_from(y).unwrap_or(0) - i64::try_from(skip).unwrap_or(0);
+            placed.push((keys[at], top));
             if rows > 0 {
                 let (Ok(from), Ok(to), Ok(row), Ok(high)) = (
                     u32::try_from(skip),
@@ -703,7 +791,7 @@ impl ShareView {
             skip = 0;
             at += 1;
         }
-        bottom - top
+        (bottom - top, placed)
     }
 
     fn scroll_by(&mut self, rows: i64) {
@@ -716,6 +804,86 @@ enum Mode {
     Share,
     Feed,
     Gap,
+}
+
+impl Mode {
+    fn index(self) -> usize {
+        match self {
+            Mode::Share => 0,
+            Mode::Feed => 1,
+            Mode::Gap => 2,
+        }
+    }
+
+    /// The best thing to try in the mode, for the hint row.
+    fn hint(self) -> &'static str {
+        match self {
+            Mode::Share => "Try: press ↑ 5 times while a long reply streams. Rows that slip flash.",
+            Mode::Feed => {
+                "Try the same: ↑ 5 times during a long reply. Nothing flashes. Then End, and \
+                 watch Working… go."
+            }
+            Mode::Gap => {
+                "Try: End, and watch the bottom as Working… goes. Blank rows open instead."
+            }
+        }
+    }
+}
+
+/// A row of text on screen, as its item, its line, the byte of the line the row starts at, and
+/// the screen row it's on.
+#[derive(Clone, Copy)]
+struct Seen {
+    key: u64,
+    line: u64,
+    byte: usize,
+    y: i64,
+}
+
+/// What a frame showed, to compare the next one with.
+struct Shown {
+    area: Rect,
+    mode: Mode,
+    following: bool,
+    rows: Vec<Seen>,
+}
+
+/// How long a row that moved under the reader shows highlighted.
+const FLASH: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Counts the frames where text moved under the reader, and highlights the rows that moved.
+#[derive(Default)]
+struct Watch {
+    /// For each mode, the frames where text moved without the reader's input.
+    moved: [u32; 3],
+    /// For each mode, the ticks of the session it saw.
+    ticks: [u64; 3],
+    last: Option<Shown>,
+    /// The reader scrolled, switched or resized since the last frame.
+    input: bool,
+    flashes: Vec<(Seen, std::time::Instant)>,
+}
+
+impl Watch {
+    fn reset(&mut self) {
+        self.moved = [0; 3];
+        self.ticks = [0; 3];
+        self.flashes.clear();
+    }
+
+    /// When the next highlight ends.
+    fn next_flash_end(&self) -> Option<std::time::Instant> {
+        self.flashes.iter().map(|(_, until)| *until).min()
+    }
+}
+
+impl Doc {
+    /// The row of the item that holds byte `byte` of line `line` now, if the line shows.
+    fn row_of(&mut self, key: u64, line: u64, byte: usize) -> Option<usize> {
+        self.rows(key)
+            .iter()
+            .rposition(|row| row.line == line && row.byte <= byte)
+    }
 }
 
 impl Session {
@@ -779,35 +947,148 @@ impl Session {
         }
     }
 
-    /// Draws the transcript and the status line.
-    fn draw(&mut self, mode: Mode, buf: &mut Buffer) {
+    /// Draws the transcript, a hint and the status line, and counts and highlights the text
+    /// that moved under the reader since the last frame.
+    fn draw(&mut self, mode: Mode, watch: &mut Watch, status: &Status, buf: &mut Buffer) {
         let area = buf.area();
-        if area.height < 2 {
+        if area.height < 3 {
             return;
         }
-        let list = Rect::new(area.x, area.y, area.width, area.height - 1);
-        let below = match mode {
-            Mode::Share => self.share.render(&mut self.doc, list, buf),
+        let list = Rect::new(area.x, area.y, area.width, area.height - 2);
+        let (below, placed) = match mode {
+            Mode::Share => {
+                let width = self.doc.width;
+                let drawn = self.share.render(&mut self.doc, list, buf);
+                // (The text is wrapped at another width now, so heights the feed knew are hints.)
+                if self.doc.width != width {
+                    self.feed.feed_mut().set_geometry();
+                }
+                drawn
+            }
             Mode::Feed | Mode::Gap => {
                 self.feed.render(list, buf, &mut self.doc);
                 let feed = self.feed.feed();
                 let viewport = u64::from(list.height);
                 let seen = feed.offset(u32::from(list.height)) + viewport;
-                usize::try_from(feed.extent().total.saturating_sub(seen)).unwrap_or(0)
+                let below = usize::try_from(feed.extent().total.saturating_sub(seen)).unwrap_or(0);
+                let placed = self
+                    .feed
+                    .placement()
+                    .items
+                    .iter()
+                    .filter_map(|p| Some((*feed.key(p.item)?, p.y)))
+                    .collect();
+                (below, placed)
             }
         };
         let following = match mode {
             Mode::Share => self.share.anchor.is_none(),
             Mode::Feed | Mode::Gap => self.feed.feed().is_following(),
         };
+        let height = i64::from(list.height);
+        let mut rows = Vec::new();
+        for &(key, top) in &placed {
+            for (i, row) in self.doc.rows(key).iter().enumerate() {
+                let y = top + i64::try_from(i).unwrap_or(i64::MAX);
+                if (0..height).contains(&y) && row.line != 0 {
+                    rows.push(Seen {
+                        key,
+                        line: row.line,
+                        byte: row.byte,
+                        y,
+                    });
+                }
+            }
+        }
+        // Where a row of the last frame is now. `None` when its text no longer shows, and
+        // `Some(None)` when it's off the screen.
+        let now_at = |doc: &mut Doc, seen: &Seen| -> Option<Option<i64>> {
+            let i = i64::try_from(doc.row_of(seen.key, seen.line, seen.byte)?).ok()?;
+            Some(
+                placed
+                    .iter()
+                    .find(|(k, _)| *k == seen.key)
+                    .map(|(_, top)| top + i),
+            )
+        };
+        let last = watch.last.take();
+        if let Some(last) = last
+            && !watch.input
+            && last.area == list
+            && last.mode == mode
+        {
+            let mut moved = Vec::new();
+            if last.following && following {
+                // Following, a row that moves down moved under the reader.
+                for seen in &last.rows {
+                    if let Some(Some(y)) = now_at(&mut self.doc, seen)
+                        && y > seen.y
+                    {
+                        moved.push(*seen);
+                    }
+                }
+            } else if !last.following
+                && let Some(top) = last.rows.first()
+                && now_at(&mut self.doc, top).is_some_and(|y| y != Some(top.y))
+            {
+                // Scrolled up, the text at the top moved, and so did every row with it.
+                for seen in &last.rows {
+                    if now_at(&mut self.doc, seen).is_some_and(|y| y != Some(seen.y)) {
+                        moved.push(*seen);
+                    }
+                }
+            }
+            if !moved.is_empty() {
+                watch.moved[mode.index()] += 1;
+                let until = status.now + FLASH;
+                watch
+                    .flashes
+                    .extend(moved.into_iter().map(|seen| (seen, until)));
+            }
+        }
+        watch.input = false;
+        watch.last = Some(Shown {
+            area: list,
+            mode,
+            following,
+            rows,
+        });
+        watch.flashes.retain(|(_, until)| *until > status.now);
+        let flash = Style::new().bg(Color::Indexed(238));
+        for (seen, _) in &watch.flashes {
+            if let Some(Some(y)) = now_at(&mut self.doc, seen)
+                && let Ok(y) = u16::try_from(y)
+                && y < list.height
+            {
+                buf.set_style(Rect::new(list.x, list.y + y, list.width, 1), flash);
+            }
+        }
+
+        // The hint.
+        let hint_y = area.bottom() - 2;
+        let dim = Style::new().fg(Color::Gray);
+        let keys = "  + − speed  space pause  r reset";
+        buf.set_stringn(area.x, hint_y, mode.hint(), usize::from(area.width), dim);
+        let hint_width = u16::try_from(mode.hint().chars().count()).unwrap_or(u16::MAX);
+        let keys_width = u16::try_from(keys.chars().count()).unwrap_or(u16::MAX);
+        if hint_width.saturating_add(keys_width) <= area.width {
+            buf.set_string(
+                area.right() - keys_width,
+                hint_y,
+                keys,
+                Style::new().fg(Color::DarkGray),
+            );
+        }
+
+        // The status line.
         let y = area.bottom() - 1;
         let bar = Style::new().fg(Color::Black).bg(Color::Gray);
         buf.set_style(Rect::new(area.x, y, area.width, 1), bar);
         let mut x = area.x;
         for (key, name, this) in [
-            ("1", "Arko 0.20 rule", Mode::Share),
+            ("1", "Arko 0.20", Mode::Share),
             ("2", "feed", Mode::Feed),
-            ("3", "feed, blank rows", Mode::Gap),
+            ("3", "feed + blank rows", Mode::Gap),
         ] {
             let style = if this == mode {
                 Style::new()
@@ -821,18 +1102,53 @@ impl Session {
             let (next, _) = buf.set_stringn(x, y, &label, usize::from(area.right() - x), style);
             x = next.saturating_add(1);
         }
-        let place = if following {
+        let seconds = watch.ticks[mode.index()] * TICK_MS / 1_000;
+        let mut parts = vec![format!(
+            "moved under you: {} in {seconds} s",
+            watch.moved[mode.index()]
+        )];
+        parts.push(if following {
             "following".to_owned()
         } else {
             format!("{below} rows below")
-        };
-        let right = format!("{place}   q quits ");
-        let width = u16::try_from(right.chars().count()).unwrap_or(0);
-        if x + width <= area.right() {
+        });
+        if status.paused {
+            parts.push("paused".to_owned());
+        } else if status.speed != "1×" {
+            parts.push(status.speed.to_owned());
+        }
+        parts.push("q quits".to_owned());
+        // (What doesn't fit goes, from the end.)
+        let room = usize::from(area.right().saturating_sub(x));
+        while parts.len() > 1 && parts.join("   ").chars().count() + 1 > room {
+            parts.pop();
+        }
+        let right = format!("{} ", parts.join("   "));
+        let width = u16::try_from(right.chars().count()).unwrap_or(u16::MAX);
+        if x.saturating_add(width) <= area.right() {
             buf.set_string(area.right() - width, y, right, bar);
         }
     }
 }
+
+/// What the status line says besides the counts.
+struct Status {
+    now: std::time::Instant,
+    paused: bool,
+    speed: &'static str,
+}
+
+/// A tick at normal speed, as replies stream at a frame every 33 ms.
+const TICK_MS: u64 = 33;
+
+/// The speeds, as ticks of how many milliseconds, and their names.
+const SPEEDS: [(u64, &str); 5] = [
+    (264, "⅛×"),
+    (132, "¼×"),
+    (66, "½×"),
+    (TICK_MS, "1×"),
+    (16, "2×"),
+];
 
 #[cfg(any(unix, windows))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -842,46 +1158,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Drawn, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind, Options, Terminal,
     };
 
-    // (Replies stream at a frame every 33 ms.)
-    const TICK: Duration = Duration::from_millis(33);
-
     let args: Vec<String> = std::env::args().skip(1).collect();
     let seed = match args.as_slice() {
         [] => 1,
         [flag, seed] if flag == "--seed" => seed.parse()?,
         _ => return Err("the arguments are none, or --seed and a number".into()),
     };
+    let mut terminal = Terminal::open(Options::default())?;
+    let size = terminal.size();
     let mut session = Session::new(seed);
+    session.doc.set_width(size.width);
     for _ in 0..HISTORY {
         session.step();
     }
-    let mut terminal = Terminal::open(Options::default())?;
+    // (It opens in the middle of a long reply, two screens of it shown, which the first thing to
+    // try needs.)
+    let screens = usize::from(size.height) * 2;
+    for _ in 0..200_000 {
+        if session.long_reply_streaming(screens) {
+            break;
+        }
+        session.step();
+    }
     let mut events = terminal.events();
     let mut mode = Mode::Share;
+    let mut watch = Watch::default();
+    let mut speed = 3;
+    let mut paused = false;
     let mut next_tick = Instant::now();
     let mut dirty = true;
     loop {
         let now = Instant::now();
-        if now >= next_tick {
+        let tick = Duration::from_millis(SPEEDS[speed].0);
+        if paused {
+            next_tick = now + tick;
+        } else if now >= next_tick {
             session.step();
             // Idle time measures items not yet measured, for the count of rows below.
             session.feed.feed_mut().sweep(64, &mut session.doc);
-            next_tick = (next_tick + TICK).max(now);
+            watch.ticks[mode.index()] += 1;
+            next_tick = (next_tick + tick).max(now);
+            dirty = true;
+        }
+        if watch.next_flash_end().is_some_and(|end| end <= now) {
             dirty = true;
         }
         if dirty {
-            let drawn = terminal.draw(|frame| session.draw(mode, frame.buffer_mut()))?;
+            let status = Status {
+                now,
+                paused,
+                speed: SPEEDS[speed].1,
+            };
+            let drawn = terminal.draw(|frame| {
+                session.draw(mode, &mut watch, &status, frame.buffer_mut());
+            })?;
             dirty = matches!(drawn, Drawn::Held);
+        }
+        let mut wake = if paused {
+            now + Duration::from_secs(1)
+        } else {
+            next_tick
+        };
+        if let Some(end) = watch.next_flash_end() {
+            wake = wake.min(end);
         }
         let wait = if dirty {
             Duration::from_millis(5)
         } else {
-            next_tick.saturating_duration_since(Instant::now())
+            wake.saturating_duration_since(Instant::now())
         };
         let Some(event) = events.next_timeout(wait)? else {
             continue;
         };
-        let page = i64::from(terminal.size().height.saturating_sub(3).max(1));
+        let page = i64::from(terminal.size().height.saturating_sub(4).max(1));
         match event {
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -896,22 +1245,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
                         session.switch(mode, to);
                         mode = to;
+                        watch.input = true;
                     }
-                    KeyCode::Up => session.scroll_by(mode, -1),
-                    KeyCode::Down => session.scroll_by(mode, 1),
-                    KeyCode::PageUp => session.scroll_by(mode, -page),
-                    KeyCode::PageDown => session.scroll_by(mode, page),
-                    KeyCode::Home => session.go_to_start(mode),
-                    KeyCode::End => session.follow(mode),
-                    _ => continue,
+                    KeyCode::Char(' ') => paused = !paused,
+                    KeyCode::Char('+' | '=') => speed = (speed + 1).min(SPEEDS.len() - 1),
+                    KeyCode::Char('-' | '_') => speed = speed.saturating_sub(1),
+                    KeyCode::Char('r') => watch.reset(),
+                    code => {
+                        match code {
+                            KeyCode::Up => session.scroll_by(mode, -1),
+                            KeyCode::Down => session.scroll_by(mode, 1),
+                            KeyCode::PageUp => session.scroll_by(mode, -page),
+                            KeyCode::PageDown => session.scroll_by(mode, page),
+                            KeyCode::Home => session.go_to_start(mode),
+                            KeyCode::End => session.follow(mode),
+                            _ => continue,
+                        }
+                        watch.input = true;
+                    }
                 }
             }
-            Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollUp => session.scroll_by(mode, -3),
-                MouseEventKind::ScrollDown => session.scroll_by(mode, 3),
-                _ => continue,
-            },
-            Event::Resize(_) | Event::Resumed => {}
+            Event::Mouse(mouse) => {
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => session.scroll_by(mode, -3),
+                    MouseEventKind::ScrollDown => session.scroll_by(mode, 3),
+                    _ => continue,
+                }
+                watch.input = true;
+            }
+            Event::Resize(_) | Event::Resumed => watch.input = true,
             _ => continue,
         }
         dirty = true;
