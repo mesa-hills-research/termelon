@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-11-14)
+
+This release is `termelon` 0.2.1. `termelon-vt` stays at 0.1.0.
 
 - A scroll down no longer moves rows down. It stops where the end reaches the last row, and moves
   nothing where the end is above it already, as after a fold closed near the end. Before,
