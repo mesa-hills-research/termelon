@@ -1553,3 +1553,45 @@ fn staying_keeps_the_rows_of_the_last_frame() {
     feed.stay();
     assert!(feed.is_following());
 }
+
+#[test]
+fn a_shorter_viewport_while_following_moves_no_row_up_further_than_it_must() {
+    // A status line of two rows gives way to a row of output in the frame the viewport loses a
+    // row, as when something docks below the feed. The rows from the top one down lose a row
+    // each way, so nothing needs to move.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..40 {
+        world.push(&mut feed, 1, 1);
+    }
+    let top = world.push(&mut feed, 1, 1);
+    let status = world.push(&mut feed, 2, 2);
+    world.push(&mut feed, 3, 3);
+    let before = feed.layout(6, &mut world);
+    assert_eq!(
+        (key_of(&feed, &before.items[0]), before.items[0].y),
+        (top, 0)
+    );
+    world.heights.insert(status, 1);
+    feed.changed(world.id(status), Change::Reflowed);
+    let frame = feed.layout(5, &mut world);
+    assert_exact(&feed, &frame, &world, 5);
+    assert_eq!((key_of(&feed, &frame.items[0]), frame.items[0].y), (top, 0));
+    assert_eq!(frame.gap, 0);
+    // Shorter by two while the end loses three rows, so one blank row keeps the rows still.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..40 {
+        world.push(&mut feed, 1, 1);
+    }
+    let reply = world.push(&mut feed, 6, 6);
+    let before = feed.layout(8, &mut world);
+    world.heights.insert(reply, 3);
+    feed.changed(world.id(reply), Change::Reflowed);
+    let frame = feed.layout(6, &mut world);
+    assert_exact(&feed, &frame, &world, 6);
+    assert_eq!(frame.items[..2], before.items[..2]);
+    assert_eq!(frame.gap, 1);
+}

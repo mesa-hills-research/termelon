@@ -886,8 +886,8 @@ impl<K> Feed<K> {
     }
 
     /// What shows while following, the feed's end on the viewport's last row, or higher by the
-    /// blank rows it takes to keep the reader's row from moving down further than the
-    /// viewport's bottom did, up to the gap limit.
+    /// blank rows it takes to keep the reader's row from moving down on screen by more than a
+    /// taller viewport's bottom did, up to the gap limit.
     fn place_following(
         &mut self,
         last: Cur,
@@ -926,7 +926,10 @@ impl<K> Feed<K> {
             y += self.exact(here, m, measured);
             at = self.index.next(here);
         };
-        let down = row.saturating_sub(place.following(viewport).row);
+        // (A taller viewport lets the rows move down with its bottom, and a shorter one lets
+        // them move up, but not down.)
+        let taller = (v - i64::from(place.seen.unwrap_or(viewport))).max(0);
+        let down = row.saturating_sub(place.row).saturating_sub(taller);
         let gap = end
             .end
             .map_or(0, |end| (v - end).max(0))
