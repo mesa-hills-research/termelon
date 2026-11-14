@@ -657,6 +657,8 @@ impl<K> Feed<K> {
             outcome = Outcome::Approximate;
         }
 
+        // The reader's mark, while they don't move, and the row it named.
+        let mut kept = None;
         let placed = match self.anchor {
             Anchor::Follow => self.place_following(last, v, m, &mut measured),
             Anchor::At {
@@ -675,6 +677,11 @@ impl<K> Feed<K> {
                     offset = found;
                 }
                 let offset = i64::from(offset).min((height - 1).max(0));
+                if delta == 0
+                    && let Some(mark) = mark
+                {
+                    kept = Some((item, rows_above(-offset), mark));
+                }
                 // The item's top, moved by the scroll.
                 let top = (row - offset).saturating_sub(delta);
                 let (first, top, clamped) = self.fill_up(cur, top, m, &mut measured);
@@ -753,7 +760,12 @@ impl<K> Feed<K> {
         } else {
             self.held = None;
             self.gap = 0;
-            let mark = m.mark_at(self.index.key(placed.first), offset);
+            // (Taken again only when the reader's row moved, so widths one after another keep
+            // the text it named rather than the start of each width's row.)
+            let mark = match kept {
+                Some((at, row, mark)) if (at, row) == (item, offset) => Some(mark),
+                _ => m.mark_at(self.index.key(placed.first), offset),
+            };
             self.anchor = Anchor::At {
                 item,
                 offset,

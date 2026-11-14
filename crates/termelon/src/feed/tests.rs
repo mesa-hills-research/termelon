@@ -734,6 +734,33 @@ fn another_width_keeps_the_text_at_the_top() {
 }
 
 #[test]
+fn widths_one_after_another_keep_the_first_text_at_the_top() {
+    for seed in 1..=40 {
+        let mut rng = Rng::new(seed);
+        let (mut feed, mut text) = text_feed(&mut rng);
+        feed.layout(40, &mut text);
+        feed.scroll_by(-(200 + rng.signed(3000)));
+        feed.layout(40, &mut text);
+        let Anchor::At { item, mark, .. } = feed.anchor() else {
+            panic!("the reader scrolled up");
+        };
+        let (key, mark) = (*feed.key(item).unwrap(), mark.unwrap());
+        // A window's edge dragged across many widths, a column at a time.
+        for width in (30..=120).rev().chain(31..=90) {
+            text.width = width;
+            feed.set_geometry();
+            let frame = feed.layout(40, &mut text);
+            assert_eq!(frame.items[0].item, item, "seed {seed}");
+            assert_eq!(
+                text.resolve(&key, mark),
+                Some(u32::try_from(-frame.items[0].y).unwrap()),
+                "seed {seed} at {width}: the first byte isn't in the top row"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_reflow_of_the_readers_item_keeps_its_text_at_the_top() {
     let mut rng = Rng::new(11);
     let (mut feed, mut text) = text_feed(&mut rng);
