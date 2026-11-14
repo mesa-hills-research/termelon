@@ -13,6 +13,16 @@
 - Following, when the top item on screen and every item after it went in one frame, rows the
   reader never saw showed above blank rows. The end now comes down to the last row, as it does
   when they go from the end up.
+- A scroll up from following, and `Feed::scroll_to_start`, stop following only where they move a
+  line. In a feed that showed from its start, a scroll up that moved its rows down left the
+  reader following, and going to the start stopped following though nothing moved.
+- A taller viewport moved a follower's rows down with its bottom. It now moves them back down by
+  what shorter viewports moved them up, and the rest of its height is blank rows, as far as the
+  gap limit allows. A shorter viewport in the frame of a scroll up takes the blank rows first, as
+  it does while following.
+- `Placement::scrolled` says how far a frame's scroll moved the lines, and `Feed::place_settled`
+  places the reader as `place` does and brings the end down where it would stand above the last
+  row.
 
 ## 0.2.0 (2026-11-14)
 

@@ -1052,8 +1052,10 @@ fn a_scroll_down_after_a_place_in_the_same_frame_reaches_the_end() {
 }
 
 #[test]
-fn following_again_in_place_as_the_viewport_gets_taller_moves_the_rows_with_its_bottom() {
-    for limit in [3, u32::MAX] {
+fn following_again_in_place_as_the_viewport_gets_taller_keeps_the_rows() {
+    // The rows gained are blank below the end, and the reader follows from there where the
+    // limit keeps them.
+    for limit in [3, 5, u32::MAX] {
         let (mut feed, mut world) = rows_of_one(60, 20);
         feed.set_gap_limit(limit);
         let before = feed.layout(20, &mut world);
@@ -1062,10 +1064,12 @@ fn following_again_in_place_as_the_viewport_gets_taller_moves_the_rows_with_its_
         feed.follow_in_place();
         let frame = feed.layout(25, &mut world);
         assert_exact(&feed, &frame, &world, 25);
-        assert!(frame.following, "limit {limit}");
-        assert_eq!(frame.gap, 0, "limit {limit}");
-        let moved = (frame.items[5].item, frame.items[5].y);
-        assert_eq!(moved, (before.items[0].item, 5), "limit {limit}");
+        assert_eq!(
+            (&frame.items, frame.gap),
+            (&before.items, 5),
+            "limit {limit}"
+        );
+        assert_eq!(frame.following, limit >= 5, "limit {limit}");
     }
 }
 
@@ -1219,16 +1223,18 @@ fn a_scroll_up_brings_back_the_rows_blank_rows_below_the_end_held_above() {
     world.remove(&mut feed, 3);
     let held = feed.layout(10, &mut world);
     assert_eq!((held.items[0], held.gap), (before.items[0], 2));
-    // A row up shows it, and the reader still follows.
+    // A row up shows it, and as a line moved the reader reads.
     feed.scroll_by(-1);
     let frame = feed.layout(10, &mut world);
     assert_eq!((frame.items[0].y, frame.gap), (0, 1));
-    assert!(frame.following);
+    assert_eq!(frame.scrolled, -1);
+    assert!(!frame.following);
     // Nothing is left above to scroll to.
     feed.scroll_by(-1);
     let again = feed.layout(10, &mut world);
     assert_eq!((&again.items, again.gap), (&frame.items, frame.gap));
-    assert!(again.following);
+    assert_eq!(again.scrolled, 0);
+    assert!(!again.following);
 }
 
 #[test]
@@ -1491,41 +1497,275 @@ fn a_scroll_up_while_following_starts_from_the_last_frame() {
         assert!(!frame.following, "grew {grew}");
         assert_moved_down(&feed, &before, &frame, 1, 10);
     }
-    // The viewport gets taller in the same frame, and the rows move down with its bottom, then
-    // by the scroll.
-    let mut world = World::default();
-    let mut feed = Feed::new();
-    for _ in 0..100 {
-        world.push(&mut feed, 1, 0);
+    // The viewport gets taller in the same frame. It first gives back what a shorter one moved
+    // the rows up, then the rows move down by the scroll.
+    for (height, by) in [(10, 1), (8, 3), (11, 1)] {
+        let mut world = World::default();
+        let mut feed = Feed::new();
+        feed.set_gap_limit(u32::MAX);
+        for _ in 0..100 {
+            world.push(&mut feed, 1, 0);
+        }
+        feed.layout(10, &mut world);
+        let before = feed.layout(height, &mut world);
+        feed.scroll_by(-1);
+        let frame = feed.layout(12, &mut world);
+        assert_moved_down(&feed, &before, &frame, by, 12);
     }
-    let before = feed.layout(10, &mut world);
-    feed.scroll_by(-1);
-    let frame = feed.layout(12, &mut world);
-    assert_moved_down(&feed, &before, &frame, 3, 12);
 }
 
 #[test]
-fn a_taller_viewport_while_following_keeps_the_end_on_the_last_row() {
-    for (height, viewports) in [(1, [20, 17, 20]), (1, [20, 18, 23]), (5, [4, 0, 4])] {
+fn a_taller_viewport_while_following_gives_back_what_shorter_ones_took() {
+    // Heights of the viewport in turn, and the blank rows below the end after each.
+    let cases: [(u32, &[u32], &[u32]); 4] = [
+        (3, &[20, 17, 20], &[0, 0, 0]),
+        (3, &[20, 18, 23], &[0, 0, 3]),
+        (u32::MAX, &[20, 26, 20], &[0, 6, 0]),
+        (u32::MAX, &[20, 15, 17, 25], &[0, 0, 0, 5]),
+    ];
+    for (limit, viewports, gaps) in cases {
         let mut world = World::default();
         let mut feed = Feed::new();
-        feed.set_gap_limit(3);
+        feed.set_gap_limit(limit);
         for _ in 0..100 {
-            world.push(&mut feed, height, 0);
+            world.push(&mut feed, 1, 0);
         }
-        for viewport in viewports {
+        let first = feed.layout(viewports[0], &mut world);
+        for (&viewport, &gap) in viewports.iter().zip(gaps) {
             let frame = feed.layout(viewport, &mut world);
             assert!(frame.following);
-            if viewport > 0 {
-                assert_exact(&feed, &frame, &world, viewport);
-                assert_eq!(frame.gap, 0, "{viewports:?} at {viewport}");
-                assert_eq!(
-                    true_top(&feed, &frame, &world),
-                    i64::try_from(world.total()).unwrap() - i64::from(viewport)
-                );
-            }
+            assert_exact(&feed, &frame, &world, viewport);
+            assert_eq!(frame.gap, gap, "{viewports:?} at {viewport}");
+        }
+        // Back at the first height, or taller, every line is on its row again.
+        let last = *viewports.last().unwrap();
+        if last >= viewports[0] {
+            let frame = feed.layout(last, &mut world);
+            assert_eq!(
+                frame.items[..first.items.len()],
+                first.items[..],
+                "{viewports:?}"
+            );
         }
     }
+    // The rows of a feed whose item is taller than the viewport, which goes to none and back.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..100 {
+        world.push(&mut feed, 5, 0);
+    }
+    for viewport in [4, 0, 4] {
+        let frame = feed.layout(viewport, &mut world);
+        assert!(frame.following);
+        if viewport > 0 {
+            assert_exact(&feed, &frame, &world, viewport);
+            assert_eq!(frame.gap, 0);
+        }
+    }
+}
+
+#[test]
+fn a_shorter_viewport_and_the_same_taller_one_put_every_line_back() {
+    // With 0, 1, 2, 3 and 6 blank rows below the end, fewer and more than a panel of 4 rows.
+    for gap in [0, 1, 2, 3, 6] {
+        let mut world = World::default();
+        let mut feed = Feed::new();
+        feed.set_gap_limit(u32::MAX);
+        for _ in 0..60 {
+            world.push(&mut feed, 1, 1);
+        }
+        let last = world.push(&mut feed, 10, 10);
+        feed.layout(20, &mut world);
+        world.heights.insert(last, 10 - gap);
+        feed.changed(world.id(last), Change::Reflowed);
+        let before = feed.layout(20, &mut world);
+        assert_eq!(before.gap, gap);
+        let open = feed.layout(16, &mut world);
+        assert_exact(&feed, &open, &world, 16);
+        assert_eq!(open.gap, gap.saturating_sub(4), "{gap} blank rows");
+        let closed = feed.layout(20, &mut world);
+        assert_eq!(
+            (&closed.items, closed.gap),
+            (&before.items, gap),
+            "{gap} blank rows"
+        );
+        assert!(closed.following);
+        // Output while the panel is open leaves no line lower than before it opened.
+        feed.layout(16, &mut world);
+        world.push(&mut feed, 3, 3);
+        feed.layout(16, &mut world);
+        let after = feed.layout(20, &mut world);
+        assert_nothing_moved_down(&feed, &before, &after, &format!("{gap} blank rows"));
+    }
+}
+
+#[test]
+fn what_a_taller_viewport_gives_back_counts_from_where_the_reader_chose_to_follow() {
+    // A panel of 4 rows opens while the reader follows, something happens, and it closes. Gives
+    // the blank rows after it closes, and how far the lines moved up from before it opened.
+    let round_trip = |between: &dyn Fn(&mut Feed<u64>, &mut World)| {
+        let (mut feed, mut world) = rows_of_one(100, 20);
+        feed.set_gap_limit(u32::MAX);
+        let before = feed.layout(20, &mut world);
+        feed.layout(16, &mut world);
+        between(&mut feed, &mut world);
+        let after = feed.layout(20, &mut world);
+        assert_exact(&feed, &after, &world, 20);
+        let moved = true_top(&feed, &after, &world) - true_top(&feed, &before, &world);
+        (after.gap, moved)
+    };
+    // End, a click and a new width leave the count, and every line comes back to its row.
+    assert_eq!(round_trip(&|feed, _| feed.follow()), (0, 0));
+    assert_eq!(
+        round_trip(&|feed, world| {
+            feed.stay();
+            feed.layout(16, world);
+            feed.follow_in_place();
+            feed.layout(16, world);
+        }),
+        (0, 0)
+    );
+    assert_eq!(
+        round_trip(&|feed, world| {
+            feed.set_geometry();
+            feed.layout(16, world);
+        }),
+        (0, 0)
+    );
+    // A scroll up and back down to the end chooses to follow again, so the count starts over and
+    // the rows the panel gives back are blank.
+    assert_eq!(
+        round_trip(&|feed, world| {
+            feed.scroll_by(-3);
+            feed.layout(16, world);
+            feed.scroll_by(3);
+            assert!(feed.layout(16, world).following);
+        }),
+        (4, 4)
+    );
+    // The panel closes while a press holds the view, which gives back the rows with nothing on
+    // screen moving, and the release follows from there.
+    let (mut feed, mut world) = rows_of_one(100, 20);
+    feed.set_gap_limit(u32::MAX);
+    feed.layout(16, &mut world);
+    feed.stay();
+    let held = feed.layout(16, &mut world);
+    let closed = feed.layout(20, &mut world);
+    assert_eq!((&closed.items, closed.gap), (&held.items, 4));
+    feed.follow_in_place();
+    let released = feed.layout(20, &mut world);
+    assert_eq!((&released.items, released.gap), (&held.items, 4));
+    assert!(released.following);
+    // Taller again moves nothing, as nothing is left to give back.
+    let taller = feed.layout(22, &mut world);
+    assert_eq!((&taller.items, taller.gap), (&held.items, 6));
+}
+
+#[test]
+fn a_frame_says_how_far_its_scroll_moved_the_lines() {
+    let (mut feed, mut world) = rows_of_one(100, 20);
+    // Following, a scroll down moves nothing.
+    feed.scroll_by(3);
+    assert_eq!(feed.layout(20, &mut world).scrolled, 0);
+    feed.scroll_by(-5);
+    assert_eq!(feed.layout(20, &mut world).scrolled, -5);
+    // The end stops a scroll down.
+    feed.scroll_by(9);
+    assert_eq!(feed.layout(20, &mut world).scrolled, 5);
+    // The start stops a scroll up.
+    feed.scroll_by(-78);
+    assert_eq!(feed.layout(20, &mut world).scrolled, -78);
+    feed.scroll_by(-9);
+    assert_eq!(feed.layout(20, &mut world).scrolled, -2);
+    feed.scroll_by(-1);
+    assert_eq!(feed.layout(20, &mut world).scrolled, 0);
+    // Held, a scroll moves the lines as it would otherwise.
+    feed.stay();
+    feed.scroll_by(4);
+    assert_eq!(feed.layout(20, &mut world).scrolled, 4);
+    // Nothing scrolled.
+    assert_eq!(feed.layout(20, &mut world).scrolled, 0);
+}
+
+#[test]
+fn a_settled_place_brings_the_end_down_where_it_would_stand_above_the_last_row() {
+    let (mut feed, mut world) = rows_of_one(100, 20);
+    feed.place_settled(world.id(world.order[95]), 0, 0);
+    let frame = feed.layout(20, &mut world);
+    assert_eq!((true_top(&feed, &frame, &world), frame.gap), (80, 0));
+    assert!(!frame.following);
+    // Away from the end, it stands.
+    feed.place_settled(world.id(world.order[50]), 0, 0);
+    let frame = feed.layout(20, &mut world);
+    assert_eq!(true_top(&feed, &frame, &world), 50);
+    // A plain place keeps the blank rows.
+    feed.place(world.id(world.order[95]), 0, 0);
+    let frame = feed.layout(20, &mut world);
+    assert_eq!((true_top(&feed, &frame, &world), frame.gap), (95, 15));
+}
+
+#[test]
+fn a_scroll_up_stops_following_exactly_where_it_moves_a_line() {
+    // The whole feed shows from its first row, so nothing moves.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(u32::MAX);
+    for _ in 0..3 {
+        world.push(&mut feed, 2, 2);
+    }
+    let fit = feed.layout(20, &mut world);
+    feed.scroll_by(-3);
+    let frame = feed.layout(20, &mut world);
+    assert_eq!((&frame.items, frame.following), (&fit.items, true));
+    // A feed that fits now, held with 2 rows above the viewport and blank rows below. A scroll
+    // up of 6 rows in one frame, or of 1 row in each of 6 frames, moves the lines down 2 and
+    // stops following.
+    for steps in [1, 6] {
+        let mut world = World::default();
+        let mut feed = Feed::new();
+        feed.set_gap_limit(u32::MAX);
+        for _ in 0..12 {
+            world.push(&mut feed, 1, 1);
+        }
+        let last = world.push(&mut feed, 10, 10);
+        feed.layout(20, &mut world);
+        world.heights.insert(last, 5);
+        feed.changed(world.id(last), Change::Reflowed);
+        let held = feed.layout(20, &mut world);
+        assert_eq!((held.items[0].y, held.gap, held.following), (0, 5, true));
+        assert_eq!(true_top(&feed, &held, &world), 2);
+        let mut frame = held.clone();
+        for _ in 0..6 / steps {
+            feed.scroll_by(-steps);
+            frame = feed.layout(20, &mut world);
+        }
+        assert_exact(&feed, &frame, &world, 20);
+        assert_eq!(true_top(&feed, &frame, &world), 0, "{steps} rows at a time");
+        assert!(!frame.following, "{steps} rows at a time");
+    }
+}
+
+#[test]
+fn going_to_the_start_stops_following_exactly_where_it_moves_a_line() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..3 {
+        world.push(&mut feed, 2, 2);
+    }
+    let fit = feed.layout(20, &mut world);
+    feed.scroll_to_start();
+    let frame = feed.layout(20, &mut world);
+    assert_eq!((&frame.items, frame.following), (&fit.items, true));
+    // With rows above the viewport, the start comes to the top row and the reader reads.
+    for _ in 0..30 {
+        world.push(&mut feed, 1, 1);
+    }
+    feed.layout(20, &mut world);
+    feed.scroll_to_start();
+    let frame = feed.layout(20, &mut world);
+    assert_eq!(true_top(&feed, &frame, &world), 0);
+    assert!(!frame.following);
 }
 
 /// A feed of 40 items of a line, one of `tall` lines, and `after` items of a line, following
