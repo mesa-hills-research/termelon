@@ -715,10 +715,9 @@ impl<K> Feed<K> {
                     settle = true;
                     outcome = Outcome::Replaced;
                 }
-                let offset = self.resolved(cur, place, height, resolve, m);
+                let (offset, mark) = self.resolved(cur, place, height, resolve, m);
                 if delta == 0
-                    && height > 0
-                    && let Some(mark) = place.mark
+                    && let Some(mark) = mark
                 {
                     kept = Some((place.item, offset, mark));
                 }
@@ -778,10 +777,9 @@ impl<K> Feed<K> {
             }
         };
 
-        // The items on screen, top to bottom, and the first that starts on screen.
+        // The items on screen, top to bottom.
         let mut cur = Some(placed.first);
         let mut y = placed.top;
-        let mut starts = None;
         while let Some(at) = cur {
             if y >= v {
                 break;
@@ -793,9 +791,6 @@ impl<K> Feed<K> {
                     y,
                     height: u32::try_from(height).unwrap_or(0),
                 });
-                if y >= 0 && starts.is_none() {
-                    starts = Some((at, y));
-                }
             }
             y += height;
             cur = self.index.next(at);
@@ -822,16 +817,6 @@ impl<K> Feed<K> {
             // No item has rows, so the reader follows the end as in an empty feed.
             self.following = true;
             None
-        } else if self.following
-            && mark.is_none()
-            && let Some((at, y)) = starts
-        {
-            // A row known by its number alone may name other text when its item changes, so
-            // following keeps the first row of the first item that starts on screen.
-            Some(Place {
-                seen: Some(viewport),
-                ..Place::at(self.index.id(at), 0, y)
-            })
         } else {
             Some(place)
         };
@@ -852,7 +837,7 @@ impl<K> Feed<K> {
     }
 
     /// The row of the item `cur`, `height` rows high, that `place` names, by its mark when the
-    /// item's rows may have changed.
+    /// item's rows may have changed, and the mark if it still names that row.
     fn resolved(
         &self,
         cur: Cur,
@@ -860,16 +845,17 @@ impl<K> Feed<K> {
         height: i64,
         resolve: bool,
         m: &mut impl Measure<K>,
-    ) -> u32 {
+    ) -> (u32, Option<u64>) {
         let mut offset = place.offset;
-        if resolve
-            && height > 0
-            && let Some(mark) = place.mark
-            && let Some(found) = m.resolve(self.index.key(cur), mark)
-        {
-            offset = found;
+        let mut mark = place.mark.filter(|_| height > 0);
+        if resolve && let Some(named) = mark {
+            // (A mark whose text went names nothing, and the row's own is taken again.)
+            match m.resolve(self.index.key(cur), named) {
+                Some(found) => offset = found,
+                None => mark = None,
+            }
         }
-        offset.min(u32::try_from(height - 1).unwrap_or(0))
+        (offset.min(u32::try_from(height - 1).unwrap_or(0)), mark)
     }
 
     /// What shows when the feed's end, the item `last`, is on the viewport's last row.
@@ -906,12 +892,8 @@ impl<K> Feed<K> {
             return end;
         };
         let height = self.exact(cur, m, measured);
-        let offset = self.resolved(cur, place, height, resolve, m);
-        if height > 0
-            && let Some(mark) = place.mark
-        {
-            *kept = Some((place.item, offset, mark));
-        }
+        let (offset, mark) = self.resolved(cur, place, height, resolve, m);
+        *kept = mark.map(|mark| (place.item, offset, mark));
         // The row the end on the last row puts the reader's on. (An item with no rows at the
         // end is on the row after the last.)
         let mut at = Some(end.first);

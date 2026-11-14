@@ -1269,42 +1269,99 @@ fn a_taller_viewport_while_following_keeps_the_end_on_the_last_row() {
     }
 }
 
-#[test]
-fn rows_lost_above_the_screen_while_following_move_nothing() {
-    // Without marks. An item of 20 rows shows its last 6 on top, with 9 items of a row below.
-    let mut world = World::default();
-    let mut feed = Feed::new();
-    feed.set_gap_limit(3);
-    for _ in 0..40 {
-        world.push(&mut feed, 1, 0);
-    }
-    let tall = world.push(&mut feed, 20, 0);
-    for _ in 0..9 {
-        world.push(&mut feed, 1, 0);
-    }
-    let before = feed.layout(15, &mut world);
-    // Two of its rows above the screen go.
-    world.heights.insert(tall, 18);
-    feed.changed(world.id(tall), Change::Reflowed);
-    let frame = feed.layout(15, &mut world);
-    assert_exact(&feed, &frame, &world, 15);
-    assert_eq!(frame.gap, 0);
-    assert_moved_down(&feed, &before, &frame, 0, 15);
-
-    // With marks, and the item is the last, as a reply taller than the screen is.
+/// A feed of 40 items of a line, one of `tall` lines, and `after` items of a line, following
+/// with a gap limit of 3, in a viewport of `viewport` rows. Gives the tall item's key and id.
+fn tall_feed(tall: u32, after: usize, viewport: u32) -> (Feed<u64>, Lines, u64, ItemId, Placement) {
     let mut lines = Lines::default();
     let mut feed = Feed::new();
     feed.set_gap_limit(3);
     for _ in 0..40 {
         lines.push(&mut feed, 1);
     }
-    let (key, reply) = lines.push(&mut feed, 30);
-    let before = feed.layout(10, &mut lines);
+    let (key, id) = lines.push(&mut feed, tall);
+    for _ in 0..after {
+        lines.push(&mut feed, 1);
+    }
+    let before = feed.layout(viewport, &mut lines);
+    (feed, lines, key, id, before)
+}
+
+#[test]
+fn rows_lost_above_the_screen_while_following_move_nothing() {
+    // An item of 20 rows shows its last 6 on top, with 9 items of a row below, and two of its
+    // rows above the screen go.
+    let (mut feed, mut lines, key, id, before) = tall_feed(20, 9, 15);
+    assert_eq!(before.items[0].y, -14);
+    lines.lines.get_mut(&key).unwrap().drain(3..5);
+    feed.changed(id, Change::Reflowed);
+    let frame = feed.layout(15, &mut lines);
+    assert_eq!((frame.items[0].y, frame.gap), (-12, 0));
+    assert_eq!(frame.items[1..], before.items[1..]);
+    // The item is the last, as a reply taller than the screen is.
+    let (mut feed, mut lines, key, id, before) = tall_feed(30, 0, 10);
     assert_eq!(before.items[0].y, -20);
     lines.lines.get_mut(&key).unwrap().drain(3..5);
-    feed.changed(reply, Change::Reflowed);
+    feed.changed(id, Change::Reflowed);
     let frame = feed.layout(10, &mut lines);
     assert_eq!((frame.items[0].y, frame.gap), (-18, 0));
+}
+
+#[test]
+fn rows_going_on_screen_while_following_leave_the_rows_above_them() {
+    // The first item that starts on screen goes, and then two rows the tall item shows, with
+    // marks and without.
+    let (mut feed, mut lines, key, id, before) = tall_feed(20, 9, 15);
+    let next = feed.next(id).unwrap();
+    feed.remove(next);
+    let frame = feed.layout(15, &mut lines);
+    assert_eq!((frame.items[0], frame.gap), (before.items[0], 1));
+    lines.lines.get_mut(&key).unwrap().drain(16..18);
+    feed.changed(id, Change::Reflowed);
+    let frame = feed.layout(15, &mut lines);
+    assert_eq!(
+        (frame.items[0].item, frame.items[0].y, frame.gap),
+        (id, -14, 3)
+    );
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..40 {
+        world.push(&mut feed, 1, 1);
+    }
+    let tall = world.push(&mut feed, 20, 20);
+    for _ in 0..9 {
+        world.push(&mut feed, 1, 1);
+    }
+    let before = feed.layout(15, &mut world);
+    world.remove(&mut feed, 41);
+    let frame = feed.layout(15, &mut world);
+    assert_eq!((frame.items[0], frame.gap), (before.items[0], 1));
+    world.heights.insert(tall, 18);
+    feed.changed(world.id(tall), Change::Reflowed);
+    let frame = feed.layout(15, &mut world);
+    assert_eq!((frame.items[0].y, frame.gap), (-14, 3));
+}
+
+#[test]
+fn a_mark_whose_text_went_is_taken_again() {
+    for following in [true, false] {
+        let (mut feed, mut lines, key, id, before) = tall_feed(30, 9, 15);
+        if !following {
+            feed.stay();
+        }
+        // The top row's line goes, and the line after it takes its row.
+        let top = usize::try_from(-before.items[0].y).unwrap();
+        lines.lines.get_mut(&key).unwrap().remove(top);
+        feed.changed(id, Change::Reflowed);
+        let frame = feed.layout(15, &mut lines);
+        let y = frame.items[0].y;
+        // Lines come above the screen in the same item, and the screen stays.
+        let more = (0..3).map(|_| lines.line()).collect::<Vec<_>>();
+        lines.lines.get_mut(&key).unwrap().splice(2..2, more);
+        feed.changed(id, Change::Reflowed);
+        let frame = feed.layout(15, &mut lines);
+        assert_eq!(frame.items[0].y, y - 3, "following {following}");
+    }
 }
 
 #[test]

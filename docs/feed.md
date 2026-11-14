@@ -135,7 +135,8 @@ impl Measure<usize> for Messages {
 ```
 
 Without marks, a new width keeps the row number at the top, which shows other text of the same
-item.
+item. A reader who follows keeps the top row by its number too, so when the top item loses rows
+above the screen, the rows move up over blank rows below the end, as far as the gap limit allows.
 
 ## Moving the reader
 
