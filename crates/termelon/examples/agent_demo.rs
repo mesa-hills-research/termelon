@@ -1,5 +1,6 @@
 //! A coding agent's screen, with Termelon's mascot. It plays a made-up session on a loop, where a
-//! request is typed and sent, a reply streams in, and two tools run. q or Ctrl+C quits.
+//! request is typed and sent, a reply streams in, and three tools run, one of them an edit shown
+//! with its diff. q or Ctrl+C quits.
 //!
 //! ```sh
 //! cargo run --example agent_demo
@@ -155,12 +156,25 @@ const SCRIPT: &[Step] = &[
         input: "src/app.rs",
         output: "86 lines",
         millis: 900,
+        diff: &[],
+    },
+    Step::Tool {
+        name: "Edit",
+        input: "src/app.rs",
+        output: "+2 -1",
+        millis: 700,
+        diff: &[
+            "- let items = Vec::new();",
+            "+ let items = store::load(\"todo.json\")?;",
+            "+ app.on_change(|items| store::save(\"todo.json\", items));",
+        ],
     },
     Step::Tool {
         name: "Run",
         input: "cargo test",
         output: "14 passed",
         millis: 4_200,
+        diff: &[],
     },
     Step::Reply("Done. The list now saves to todo.json and loads it at start."),
     Step::Pause(3_000),
@@ -183,12 +197,13 @@ enum Step {
     Ask(&'static str),
     /// The reply streams in, word by word.
     Reply(&'static str),
-    /// A tool runs for `millis` and gives its output.
+    /// A tool runs for `millis` and gives its output, and an edit its diff.
     Tool {
         name: &'static str,
         input: &'static str,
         output: &'static str,
         millis: u64,
+        diff: &'static [&'static str],
     },
 }
 
@@ -229,6 +244,7 @@ enum Entry {
         name: &'static str,
         input: &'static str,
         output: &'static str,
+        diff: &'static [&'static str],
         running: bool,
     },
 }
@@ -287,6 +303,7 @@ impl Scene {
                     input,
                     output,
                     millis,
+                    diff,
                 } => {
                     let running = into < millis;
                     if running {
@@ -297,6 +314,7 @@ impl Scene {
                         name,
                         input,
                         output,
+                        diff,
                         running,
                     });
                 }
@@ -329,6 +347,8 @@ struct Theme {
     reply: &'static str,
     done: &'static str,
     separator: &'static str,
+    /// Beside the lines of a diff.
+    gutter: &'static str,
     flesh: Color,
     rind: Color,
 }
@@ -346,6 +366,7 @@ impl Theme {
                 reply: "*",
                 done: "+",
                 separator: "-",
+                gutter: "|",
                 flesh,
                 rind,
             },
@@ -356,6 +377,7 @@ impl Theme {
                 reply: "●",
                 done: "✓",
                 separator: "·",
+                gutter: "│",
                 flesh,
                 rind,
             },
@@ -451,6 +473,7 @@ fn draw_transcript(
                 input,
                 output,
                 running,
+                ..
             } => {
                 let (marker, result) = if running {
                     let spinner = theme.spinner[scene.motion.spinner % theme.spinner.len()];
@@ -485,6 +508,34 @@ fn draw_transcript(
             text,
             running: matches!(entry, Entry::Tool { running: true, .. }),
         });
+        // (An edit's diff follows it once it's done, removed lines in the flesh's red and added
+        // ones in the rind's green.)
+        if let Entry::Tool {
+            diff,
+            running: false,
+            ..
+        } = *entry
+        {
+            for line in diff {
+                let colour = if line.starts_with('+') {
+                    theme.rind
+                } else {
+                    theme.flesh
+                };
+                let text = Line::from(vec![
+                    Span::styled(format!("{} ", theme.gutter), DIM),
+                    Span::styled(*line, Style::new().fg(colour)),
+                ]);
+                let rows = text::wrap(&text, text_width, true).len().max(1);
+                items.push(Item {
+                    gap: 0,
+                    marker: Span::raw(""),
+                    rows: u16::try_from(rows).unwrap_or(u16::MAX),
+                    text,
+                    running: false,
+                });
+            }
+        }
     }
     // (Rows count from the transcript's top, and a transcript longer than its area loses its first
     // rows.)
