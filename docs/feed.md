@@ -153,7 +153,8 @@ above the screen, the rows move up over blank rows below the end, as far as the 
 
 Only the reader's own scroll to the end turns following on. A reader a few rows above the end
 stays there when the end gets shorter, with blank rows below it. A scroll up from following starts
-from the rows the last frame showed, also when the end grew since.
+from the rows the last frame showed, also when the end grew since. It stops following even where
+the end stays in sight, so the rows the reader went back to stay where they are as more comes.
 
 A fold that opens or closes under the pointer keeps the clicked line where it is. Find the item
 and its row under the pointer with `view.item_at(position)`, change the item, report it, and
@@ -171,9 +172,9 @@ the last row, and `u32::MAX` brings it down only where no row would show.
 
 A scroll down and `follow_in_place` leave every row where it is while blank rows show below the
 end, and the reader follows from there. Where the blank rows are more than the limit, as after a
-fold closed under the pointer, following would bring the end down, so the reader stays above the
-end until content fills them or `follow` is called. Going to the end with `follow` and a new width
-close the blank rows.
+fold closed under the pointer, following would bring the end down, so the reader doesn't follow.
+They stay above the end, and a scroll down follows once content has filled the blank rows to
+within the limit. Going to the end with `follow` and a new width close the blank rows.
 
 ## The scrollbar and counts
 

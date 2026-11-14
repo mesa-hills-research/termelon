@@ -7,8 +7,14 @@
   end reaches the last row and moves nothing where the end is above it, and the reader follows
   from there.
 - `Feed::follow_in_place` brought the end down to the last row when more blank rows showed below
-  it than the gap limit. Now the rows stay where they are, and the reader stays above the end
-  without following until content fills the blank rows or `follow` is called.
+  it than the gap limit. Now the rows stay where they are and the reader doesn't follow. A scroll
+  down follows once content has filled the blank rows to within the limit. `is_following` says
+  no from the call until the next layout decides.
+- A place and a scroll down in one frame scroll on from where the feed's start puts the place,
+  and reach the end as before.
+- Following, when the top item on screen and every item after it went in one frame, rows the
+  reader never saw showed above blank rows. The end now comes down to the last row, as it does
+  when they go from the end up.
 
 ## 0.2.0 (2026-11-14)
 

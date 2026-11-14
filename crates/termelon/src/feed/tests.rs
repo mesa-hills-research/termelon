@@ -1028,6 +1028,97 @@ fn a_scroll_down_at_the_end_moves_no_row() {
     }
 }
 
+/// A feed of `n` items of a row each, laid out on a viewport of `viewport` rows.
+fn rows_of_one(n: usize, viewport: u32) -> (Feed<u64>, World) {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..n {
+        world.push(&mut feed, 1, 1);
+    }
+    feed.layout(viewport, &mut world);
+    (feed, world)
+}
+
+#[test]
+fn a_scroll_down_after_a_place_in_the_same_frame_reaches_the_end() {
+    // The feed's start overrides the row the place asks for, and the scroll goes on from there.
+    let (mut feed, mut world) = rows_of_one(22, 20);
+    feed.place(world.id(world.order[0]), 0, 5);
+    feed.scroll_by(10);
+    let frame = feed.layout(20, &mut world);
+    assert_exact(&feed, &frame, &world, 20);
+    assert_eq!((true_top(&feed, &frame, &world), frame.gap), (2, 0));
+    assert!(frame.following);
+}
+
+#[test]
+fn following_again_in_place_as_the_viewport_gets_taller_moves_the_rows_with_its_bottom() {
+    for limit in [3, u32::MAX] {
+        let (mut feed, mut world) = rows_of_one(60, 20);
+        feed.set_gap_limit(limit);
+        let before = feed.layout(20, &mut world);
+        feed.stay();
+        feed.layout(20, &mut world);
+        feed.follow_in_place();
+        let frame = feed.layout(25, &mut world);
+        assert_exact(&feed, &frame, &world, 25);
+        assert!(frame.following, "limit {limit}");
+        assert_eq!(frame.gap, 0, "limit {limit}");
+        let moved = (frame.items[5].item, frame.items[5].y);
+        assert_eq!(moved, (before.items[0].item, 5), "limit {limit}");
+    }
+}
+
+#[test]
+fn every_row_on_screen_going_while_following_brings_the_end_down() {
+    // Two items of 5 rows fill the viewport, and both go in one frame, either way round.
+    for top_down in [true, false] {
+        let mut world = World::default();
+        let mut feed = Feed::new();
+        feed.set_gap_limit(u32::MAX);
+        for _ in 0..50 {
+            world.push(&mut feed, 1, 1);
+        }
+        let a = world.push(&mut feed, 5, 5);
+        let b = world.push(&mut feed, 5, 5);
+        feed.layout(10, &mut world);
+        let order = if top_down { [a, b] } else { [b, a] };
+        for key in order {
+            let at = world.order.iter().position(|k| *k == key).unwrap();
+            world.remove(&mut feed, at);
+        }
+        let frame = feed.layout(10, &mut world);
+        assert_exact(&feed, &frame, &world, 10);
+        assert_eq!(frame.gap, 0, "top down {top_down}");
+        assert!(frame.following);
+    }
+}
+
+#[test]
+fn a_new_width_before_following_again_in_place_keeps_the_rows() {
+    // The reader holds the view, the end gets shorter by more than the limit, and the button
+    // comes up in the frame the width changes.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..40 {
+        world.push(&mut feed, 3, 3);
+    }
+    let last = world.push(&mut feed, 10, 10);
+    feed.layout(20, &mut world);
+    feed.stay();
+    world.heights.insert(last, 4);
+    feed.changed(world.id(last), Change::Reflowed);
+    let held = feed.layout(20, &mut world);
+    assert_eq!((held.gap, held.following), (6, false));
+    feed.follow_in_place();
+    assert!(!feed.is_following(), "the next layout decides");
+    feed.set_geometry();
+    let frame = feed.layout(20, &mut world);
+    assert_eq!((&frame.items, frame.gap), (&held.items, 6));
+    assert!(!frame.following);
+}
+
 #[test]
 fn a_scroll_down_never_moves_a_row_down() {
     for seed in 1..=200 {
