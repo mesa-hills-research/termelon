@@ -2,26 +2,25 @@
 
 ## Unreleased
 
-- A scroll down with blank rows below the end, as after a fold closed near the end, moved every
-  row down by those rows as the reader went back to following. A scroll down now stops where the
-  end reaches the last row and moves nothing where the end is above it, and the reader follows
-  from there.
-- `Feed::follow_in_place` brought the end down to the last row when more blank rows showed below
-  it than the gap limit. Now the rows stay where they are and the reader doesn't follow. A scroll
-  down follows once content has filled the blank rows to within the limit. `is_following` says
-  no from the call until the next layout decides.
+- A scroll down no longer moves rows down. It stops where the end reaches the last row, and moves
+  nothing where the end is above it already, as after a fold closed near the end. Before,
+  reaching the end moved every row down by the blank rows below it.
+- `Feed::follow_in_place` keeps the rows where they are, with any blank rows below the end. Where
+  those are more than the gap limit, the reader doesn't follow until content fills them to within
+  it, rather than having the end brought down. `Feed::is_following` says no until the next layout
+  decides. With `Feed::set_gap_limit(u32::MAX)`, no line moves down while following, except to give
+  back what a shorter viewport took, after a new width, or where no row would show.
+- A scroll up from following, and `Feed::scroll_to_start`, stop following exactly where they move
+  a line, also with the end still in sight. One that moves nothing, as in a feed that shows from
+  its start, leaves the reader following.
+- A viewport that gets shorter while following takes the blank rows first, then moves the rows up.
+  One that gets taller moves them back down by what shorter ones took since the reader last chose
+  to follow, and the rest of its height is blank rows, as far as the gap limit allows. A menu that
+  opens and closes under the feed leaves every row where it was.
 - Following, when the top item on screen and every item after it went in one frame, rows the
-  reader never saw showed above blank rows. The end now comes down to the last row, as it does
-  when they go from the end up.
-- A scroll up from following, and `Feed::scroll_to_start`, stop following only where they move a
-  line. In a feed that showed from its start, a scroll up that moved its rows down left the
-  reader following, and going to the start stopped following though nothing moved.
-- A taller viewport moved a follower's rows down with its bottom. It now moves them back down by
-  what shorter viewports moved them up, and the rest of its height is blank rows, as far as the
-  gap limit allows. A shorter viewport in the frame of a scroll up takes the blank rows first, as
-  it does while following.
-- `Placement::scrolled` says how far a frame's scroll moved the lines, and `Feed::place_settled`
-  places the reader as `place` does and brings the end down where it would stand above the last
+  reader never saw showed above blank rows. The end now comes down to the last row.
+- `Placement::scrolled` says how far the frame's scroll moved the lines. `Feed::place_settled`
+  places the reader as `place` does, and brings the end down where it would stand above the last
   row.
 
 ## 0.2.0 (2026-11-14)
