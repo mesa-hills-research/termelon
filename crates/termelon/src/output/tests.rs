@@ -673,7 +673,7 @@ fn streaming_one_row_up_writes_one_row_of_text() {
     let got = packet(&mut encoder, &before, &after, None, &caps);
     assert_eq!(
         got,
-        "␛[?2026h␛[1;12r␛[M␛[r␛[12Hline 12 of a long reply␛[?2026l"
+        "␛[?2026h␛[1;12r␛[H␛[M␛[r␛[12Hline 12 of a long reply␛[?2026l"
     );
     feed(&mut term, &got);
     check_screen(&term, &after, None, &caps).unwrap();
@@ -724,6 +724,59 @@ fn a_noted_scroll_moves_the_rows_and_writes_those_that_came_in() {
     assert!(got.contains("␛[2;11r␛[2H␛[2L␛[r"), "{got}");
     feed(&mut term, &got);
     check_screen(&term, &up, None, &caps).unwrap();
+}
+
+/// The final byte of each escape sequence in `shown`, in order, with whether text follows it.
+fn sequences(shown: &str) -> Vec<(char, bool)> {
+    shown
+        .split('␛')
+        .skip(1)
+        .filter_map(|seq| {
+            let params = seq.strip_prefix('[')?;
+            let end = params.find(|c: char| !c.is_ascii_digit() && c != ';' && c != '?')?;
+            let last = params[end..].chars().next()?;
+            Some((last, params.len() > end + last.len_utf8()))
+        })
+        .collect()
+}
+
+#[test]
+fn a_noted_scroll_places_the_cursor_after_setting_and_resetting_the_region() {
+    // The list starts on the screen's first row, where homing would put the cursor anyway.
+    let mut caps = full_caps();
+    caps.scroll_regions = Support::Yes;
+    let area = Rect::new(0, 0, 30, 12);
+    let list = Rect::new(0, 0, 30, 11);
+    let screen = |first: usize| {
+        let mut buffer = list_screen(area, first);
+        buffer.set_string(0, 0, format!("row {first:02} top"), Style::new());
+        buffer
+    };
+    let before = screen(0);
+    let mut term = emulator(WidthProfile::default(), area, true);
+    let mut encoder = Encoder::new();
+    feed(
+        &mut term,
+        &packet(&mut encoder, &Buffer::empty(area), &before, None, &caps),
+    );
+    let mut prev = before;
+    for (first, by) in [(3, 3), (1, -2), (4, 3)] {
+        let mut next = screen(first);
+        next.note_scroll(list, by);
+        let got = packet(&mut encoder, &prev, &next, None, &caps);
+        assert!(got.contains("␛[1;11r"), "{got}");
+        // After the region is set and after it's reset, the cursor moves before anything
+        // else but a change of pen.
+        let seqs = sequences(&got);
+        for (i, seq) in seqs.iter().enumerate().filter(|(_, seq)| seq.0 == 'r') {
+            assert!(!seq.1, "{got}");
+            let after = seqs[i + 1..].iter().find(|seq| seq.0 != 'm' || seq.1);
+            assert_eq!(after.map(|seq| seq.0), Some('H'), "{got}");
+        }
+        feed(&mut term, &got);
+        check_screen(&term, &next, None, &caps).unwrap();
+        prev = next;
+    }
 }
 
 #[test]

@@ -226,8 +226,9 @@ impl Scroll {
     }
 }
 
-/// The bytes scrolling takes, for the region, the scroll and the region's reset.
-const SCROLL_COST: usize = 16;
+/// The bytes scrolling takes, for the region, the cursor's move into it, the scroll, the region's
+/// reset and the cursor's move after it.
+const SCROLL_COST: usize = 22;
 
 /// The rows a scroll region needs, since terminals ignore a region of one row.
 const MIN_REGION: usize = 2;
