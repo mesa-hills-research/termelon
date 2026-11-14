@@ -2,16 +2,17 @@
 //! happens off screen moves what the reader sees.
 //!
 //! A [`Feed`] is an ordered list of items, each with a whole-number height in rows. The reader's
-//! place is an item, a row of it and the viewport row that row is on, or the end, which it then
-//! follows. It's never a distance from the start, so items that come, go or grow above or below
-//! the screen leave it where it is.
+//! place is an item, a row of it and the viewport row that row is on. It's never a distance from
+//! the start, so items that come, go or grow above or below the screen leave it where it is. A
+//! reader who follows the end keeps the place the last frame showed too, which a scroll up starts
+//! from.
 //!
 //! A height is exact once the item was measured at the current geometry (a width, a font), and a
 //! hint until then. [`Feed::layout`] places what the viewport shows, measuring the items it
-//! crosses and no others, so a hint never decides where anything on screen goes. Hints only size
-//! a scrollbar, and [`Feed::sweep`] makes them exact in idle time. A new width makes every
-//! height a hint again without visiting the items, and the reader's row keeps its text through
-//! a mark, a name for that row's content that [`Measure`] gives.
+//! crosses and no others. Hints decide only where a seek or a scroll longer than the exact limit
+//! lands, and the size of a scrollbar, and [`Feed::sweep`] makes them exact in idle time. A new
+//! width makes every height a hint again without visiting the items, and the reader's row keeps
+//! its text through a mark, a name for that row's content that [`Measure`] gives.
 //!
 //! The application reports what happens to its items. [`Change::Appended`] says rows came at an
 //! item's end, [`Change::Reflowed`] that they changed some other way, and
@@ -201,29 +202,60 @@ impl Point {
     }
 }
 
-/// The row at the top of the last frame while following, which a shorter end may not move
-/// down.
+/// The reader's place, the row `offset` of the item on the viewport's row `row`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Held {
+struct Place {
     item: ItemId,
     offset: u32,
     row: i64,
+    /// The row's mark, which keeps its text when the item's rows change.
+    mark: Option<u64>,
+    /// The viewport's height the place was laid out at, `None` for a place a call gave.
+    seen: Option<u32>,
+}
+
+impl Place {
+    /// The place a call gives, with no mark.
+    fn at(item: ItemId, offset: u32, row: i64) -> Self {
+        Self {
+            item,
+            offset,
+            row,
+            mark: None,
+            seen: None,
+        }
+    }
+
+    /// The place on a viewport of `viewport` rows of a reader who follows, whose rows move
+    /// with the viewport's bottom.
+    fn following(self, viewport: u32) -> Self {
+        let moved = i64::from(viewport) - i64::from(self.seen.unwrap_or(viewport));
+        Self {
+            row: self.row.saturating_add(moved),
+            seen: None,
+            ..self
+        }
+    }
 }
 
 /// An ordered list of items, their heights, and the reader's place in them. `K` is the
 /// application's own key for an item, which [`Measure`] gets.
 pub struct Feed<K> {
     index: Index<K>,
-    anchor: Anchor,
+    /// The reader's place, the top row of the last frame or where a call put it. `None` while
+    /// following puts the end on the viewport's last row.
+    place: Option<Place>,
+    /// Whether the reader follows the end, from `place` when there is one.
+    following: bool,
     /// The scroll asked for since the last layout, down when positive.
     pending: i64,
     /// The reader's item was removed since the last layout.
     replaced: bool,
-    /// The anchor's rows may have changed since the last layout, so its mark is resolved.
+    /// The reader's place came from a jump since the last layout, a removal or a seek, so the
+    /// end comes down to the viewport's last row if it's above it.
+    settle: bool,
+    /// The place's rows may have changed since the last layout, so its mark is resolved.
     resolve: bool,
-    held: Option<Held>,
-    /// Blank rows below the end in the last frame, while following.
-    gap: u32,
     /// The most rows a scroll measures its way across.
     exact_limit: Option<u64>,
     /// The most blank rows kept below the end while following.
@@ -234,7 +266,7 @@ impl<K> fmt::Debug for Feed<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Feed")
             .field("len", &self.len())
-            .field("anchor", &self.anchor)
+            .field("anchor", &self.anchor())
             .field("extent", &self.extent())
             .finish_non_exhaustive()
     }
@@ -248,7 +280,7 @@ impl<K> Default for Feed<K> {
 
 /// The rows from an item's top on `top`, at or above the viewport's first row, to that row.
 fn rows_above(top: i64) -> u32 {
-    u32::try_from(-top).unwrap_or(0)
+    u32::try_from(top.saturating_neg()).unwrap_or(0)
 }
 
 impl<K> Feed<K> {
@@ -256,12 +288,12 @@ impl<K> Feed<K> {
     pub fn new() -> Self {
         Self {
             index: Index::new(),
-            anchor: Anchor::Follow,
+            place: None,
+            following: true,
             pending: 0,
             replaced: false,
+            settle: false,
             resolve: false,
-            held: None,
-            gap: 0,
             exact_limit: None,
             gap_limit: 0,
         }
@@ -331,58 +363,47 @@ impl<K> Feed<K> {
     }
 
     /// Removes an item and gives its key back. When the reader's row was in it, the item after
-    /// it starts where it started, or on the viewport's first row if that was higher, and with
-    /// no item after it, the end comes down to the viewport's last row. The next layout says
-    /// [`Outcome::Replaced`].
+    /// it takes its place. For a reader above the end, it starts where the removed one started,
+    /// or on the viewport's first row if that was higher, and with no item after it, the end
+    /// comes down to the viewport's last row. The next layout says [`Outcome::Replaced`]. For a
+    /// reader who follows, the item after it stays where it was.
     pub fn remove(&mut self, item: ItemId) -> Option<K> {
         let cur = self.index.locate(item)?;
-        if let Anchor::At {
-            item: at,
-            offset,
-            row,
-            ..
-        } = self.anchor
-            && at == item
+        if let Some(place) = self.place
+            && place.item == item
         {
-            let top = row - i64::from(offset);
-            self.anchor = if let Some(next) = self.index.next(cur) {
-                Anchor::At {
-                    item: self.index.id(next),
-                    offset: 0,
-                    row: top.max(0),
-                    mark: None,
-                }
-            } else if let Some(prev) = self.index.prev(cur) {
-                Anchor::At {
-                    item: self.index.id(prev),
-                    offset: u32::MAX,
-                    row: top - 1,
-                    mark: None,
-                }
+            let height = self.index.height(cur);
+            let offset = place.offset.min(height.saturating_sub(1));
+            let top = place.row.saturating_sub(i64::from(offset));
+            let neighbour = if let Some(next) = self.index.next(cur) {
+                let row = if self.following {
+                    top.saturating_add(i64::from(height))
+                } else {
+                    top.max(0)
+                };
+                Some((next, 0, row))
             } else {
-                Anchor::Follow
+                // The item before it that has rows, its last row just above where it started.
+                let mut prev = self.index.prev(cur);
+                while let Some(at) = prev
+                    && self.index.is_fresh(at)
+                    && self.index.height(at) == 0
+                {
+                    prev = self.index.prev(at);
+                }
+                prev.map(|prev| (prev, u32::MAX, top.saturating_sub(1)))
             };
-            self.replaced = true;
+            self.place = neighbour.map(|(next, offset, row)| Place {
+                seen: place.seen,
+                ..Place::at(self.index.id(next), offset, row)
+            });
+            if self.place.is_none() {
+                self.following = true;
+            } else if !self.following {
+                self.replaced = true;
+                self.settle = true;
+            }
             self.resolve = false;
-        }
-        if let Some(held) = self.held
-            && held.item == item
-        {
-            // The row its neighbour had last frame is the one it keeps.
-            let top = held.row - i64::from(held.offset);
-            self.held = if let Some(next) = self.index.next(cur) {
-                Some(Held {
-                    item: self.index.id(next),
-                    offset: 0,
-                    row: top + i64::from(self.index.height(cur)),
-                })
-            } else {
-                self.index.prev(cur).map(|prev| Held {
-                    item: self.index.id(prev),
-                    offset: u32::MAX,
-                    row: top - 1,
-                })
-            };
         }
         Some(self.index.remove(cur))
     }
@@ -396,9 +417,7 @@ impl<K> Feed<K> {
         self.index.invalidate(cur);
         // (Rows that came at the end leave the rows before them as they were, so the reader's
         // row number still holds.)
-        if change == Change::Reflowed
-            && matches!(self.anchor, Anchor::At { item: at, .. } if at == item)
-        {
+        if change == Change::Reflowed && self.place.is_some_and(|place| place.item == item) {
             self.resolve = true;
         }
     }
@@ -424,9 +443,10 @@ impl<K> Feed<K> {
     /// leaves, one for 64 items. Following, the end comes back to the viewport's last row.
     pub fn set_geometry(&mut self) {
         self.index.bump_epoch();
-        self.held = None;
-        self.gap = 0;
-        self.resolve = matches!(self.anchor, Anchor::At { .. });
+        if self.following {
+            self.place = None;
+        }
+        self.resolve = self.place.is_some();
     }
 
     /// Scrolls by `rows` at the next layout, down when positive.
@@ -436,10 +456,8 @@ impl<K> Feed<K> {
 
     /// Goes to the end and follows it.
     pub fn follow(&mut self) {
-        self.anchor = Anchor::Follow;
-        self.pending = 0;
-        self.held = None;
-        self.gap = 0;
+        self.follow_in_place();
+        self.place = None;
         self.resolve = false;
     }
 
@@ -449,14 +467,19 @@ impl<K> Feed<K> {
     /// [`follow`](Self::follow) does. An application that holds the view still while the mouse is
     /// down calls it when the button comes up.
     pub fn follow_in_place(&mut self) {
-        let held = match self.anchor {
-            Anchor::At {
-                item, offset, row, ..
-            } => Some(Held { item, offset, row }),
-            Anchor::Follow => self.held,
-        };
-        self.follow();
-        self.held = held;
+        self.following = true;
+        self.pending = 0;
+        self.replaced = false;
+        self.settle = false;
+    }
+
+    /// Stops following, with the rows where the last layout put them, as a press that holds
+    /// the view still does. Before the first layout, and after [`follow`](Self::follow) or a new
+    /// geometry, there's no such layout, and the reader follows on.
+    pub fn stay(&mut self) {
+        if self.place.is_some() {
+            self.following = false;
+        }
     }
 
     /// Goes to the start.
@@ -468,27 +491,28 @@ impl<K> Feed<K> {
 
     /// Puts the row `offset` of the item on the viewport's row `row` at the next layout, in
     /// place of any scroll asked for. A fold that opens under the pointer uses it with the row
-    /// the pointer is on, so the line clicked stays there.
+    /// the pointer is on, so the line clicked stays there. A row below the viewport counts as
+    /// the row just below it.
     pub fn place(&mut self, item: ItemId, offset: u32, row: i64) {
         if !self.contains(item) {
             return;
         }
-        self.anchor = Anchor::At {
-            item,
-            offset,
-            row,
-            mark: None,
-        };
+        self.place = Some(Place::at(item, offset, row));
+        self.following = false;
         self.pending = 0;
         self.replaced = false;
+        self.settle = false;
         self.resolve = false;
-        self.held = None;
-        self.gap = 0;
     }
 
     /// Goes to the share `fraction` of the feed's height, by the heights known so far, as a
-    /// drag of a scrollbar's thumb does.
+    /// drag of a scrollbar's thumb does. Where hints that were too high put the end above the
+    /// viewport's last row, the end comes down to it, and a share of 1 follows the end.
     pub fn seek(&mut self, fraction: f64, viewport: u32) {
+        if fraction >= 1. {
+            self.follow();
+            return;
+        }
         let range = self.index.total().saturating_sub(u64::from(viewport));
         #[expect(
             clippy::cast_precision_loss,
@@ -500,6 +524,7 @@ impl<K> Feed<K> {
         if let Some((cur, within)) = self.index.find(target) {
             let item = self.index.id(cur);
             self.place(item, within, 0);
+            self.settle = true;
         }
     }
 
@@ -520,12 +545,20 @@ impl<K> Feed<K> {
 
     /// Whether the reader follows the end.
     pub fn is_following(&self) -> bool {
-        self.anchor == Anchor::Follow
+        self.anchor() == Anchor::Follow
     }
 
     /// Where the reader is.
     pub fn anchor(&self) -> Anchor {
-        self.anchor
+        match self.place {
+            Some(place) if !self.following => Anchor::At {
+                item: place.item,
+                offset: place.offset,
+                row: place.row,
+                mark: place.mark,
+            },
+            _ => Anchor::Follow,
+        }
     }
 
     /// The feed's height by the heights known so far.
@@ -539,22 +572,19 @@ impl<K> Feed<K> {
     /// How far the viewport's top is from the feed's start, by the heights known so far, for a
     /// scrollbar. It's exact once [`extent`](Self::extent) is.
     pub fn offset(&self, viewport: u32) -> u64 {
-        match self.anchor {
-            Anchor::Follow => self
-                .index
-                .total()
-                .saturating_sub(u64::from(viewport.saturating_sub(self.gap))),
-            Anchor::At {
-                item, offset, row, ..
-            } => {
-                let Some(cur) = self.index.locate(item) else {
-                    return 0;
-                };
-                let top =
-                    i128::from(self.index.offset_of(cur)) + i128::from(offset) - i128::from(row);
-                u64::try_from(top.max(0)).unwrap_or(u64::MAX)
-            }
+        let place = self
+            .place
+            .and_then(|place| Some((place, self.index.locate(place.item)?)));
+        let Some((mut place, cur)) = place else {
+            return self.index.total().saturating_sub(u64::from(viewport));
+        };
+        if self.following {
+            place = place.following(viewport);
         }
+        let offset = place.offset.min(self.index.height(cur).saturating_sub(1));
+        let top =
+            i128::from(self.index.offset_of(cur)) + i128::from(offset) - i128::from(place.row);
+        u64::try_from(top.max(0)).unwrap_or(u64::MAX)
     }
 
     /// The item's place in the order, for comparing the ends of a selection.
@@ -585,9 +615,9 @@ impl<K> Feed<K> {
     /// reader first, which only makes [`extent`](Self::extent) exact. It returns how many it
     /// measured, which is less than `max` once every item is exact.
     pub fn sweep(&mut self, max: usize, m: &mut impl Measure<K>) -> usize {
-        let near = match self.anchor {
+        let near = match self.anchor() {
             Anchor::At { item, .. } => self.index.locate(item),
-            Anchor::Follow => self.index.last(),
+            _ => self.index.last(),
         };
         let Some(near) = near else {
             return 0;
@@ -620,10 +650,10 @@ impl<K> Feed<K> {
         let resolve = core::mem::take(&mut self.resolve);
         let mut delta = core::mem::take(&mut self.pending);
         let replaced = core::mem::take(&mut self.replaced);
+        let mut settle = core::mem::take(&mut self.settle);
         let Some(last) = self.index.last() else {
-            self.anchor = Anchor::Follow;
-            self.held = None;
-            self.gap = viewport;
+            self.place = None;
+            self.following = true;
             out.gap = viewport;
             out.following = true;
             out.measured = 0;
@@ -635,28 +665,30 @@ impl<K> Feed<K> {
         } else {
             Outcome::Kept
         };
-        let down = delta > 0;
 
-        // A reader who follows the end and scrolls up reads from the row at the top of what
-        // following shows. Scrolling down changes nothing.
+        // A reader who follows the end and scrolls up reads from the rows of the last frame,
+        // which move with the viewport's bottom. Scrolling down changes nothing.
         let mut left_follow = false;
-        if self.anchor == Anchor::Follow {
+        if self.anchor() == Anchor::Follow {
             if delta < 0 {
-                let placed = self.place_following(last, v, m, &mut measured);
-                self.anchor = Anchor::At {
-                    item: self.index.id(placed.first),
-                    offset: rows_above(placed.top),
-                    row: 0,
-                    mark: None,
+                let place = if let Some(place) = self.place {
+                    place.following(viewport)
+                } else {
+                    let end = self.place_end(last, v, m, &mut measured);
+                    Place::at(self.index.id(end.first), rows_above(end.top), 0)
                 };
+                self.place = Some(place);
+                self.following = false;
                 left_follow = true;
             } else {
                 delta = 0;
             }
         }
+        let down = delta > 0;
 
         // A scroll too long to measure across lands by the known heights.
-        if let (Some(limit), Anchor::At { .. }) = (self.exact_limit, self.anchor)
+        if let Some(limit) = self.exact_limit
+            && !self.following
             && delta.unsigned_abs() > limit
         {
             let from = i128::from(self.offset(viewport));
@@ -664,49 +696,46 @@ impl<K> Feed<K> {
             let target = (from + i128::from(delta)).clamp(0, range);
             if let Some((cur, within)) = self.index.find(u64::try_from(target).unwrap_or(u64::MAX))
             {
-                self.anchor = Anchor::At {
-                    item: self.index.id(cur),
-                    offset: within,
-                    row: 0,
-                    mark: None,
-                };
+                self.place = Some(Place::at(self.index.id(cur), within, 0));
             }
             delta = 0;
             outcome = Outcome::Approximate;
+            settle = true;
         }
 
-        // The reader's mark, while they don't move, and the row it named.
+        // The reader's mark, while their row doesn't move, and the row it named.
         let mut kept = None;
-        let placed = match self.anchor {
-            Anchor::Follow => self.place_following(last, v, m, &mut measured),
-            Anchor::At {
-                item,
-                offset,
-                row,
-                mark,
-            } => {
-                let cur = self.index.locate(item).unwrap_or(last);
+        let placed = match self.place {
+            Some(place) if !self.following => {
+                let cur = self.index.locate(place.item).unwrap_or(last);
                 let height = self.exact(cur, m, &mut measured);
-                let mut offset = offset;
-                if resolve
-                    && let Some(mark) = mark
-                    && let Some(found) = m.resolve(self.index.key(cur), mark)
-                {
-                    offset = found;
+                if height == 0 {
+                    // An item with no rows has no place on screen, so the reader leaves it as
+                    // they would leave one that went.
+                    settle = true;
+                    outcome = Outcome::Replaced;
                 }
-                let offset = i64::from(offset).min((height - 1).max(0));
+                let offset = self.resolved(cur, place, height, resolve, m);
                 if delta == 0
-                    && let Some(mark) = mark
+                    && height > 0
+                    && let Some(mark) = place.mark
                 {
-                    kept = Some((item, rows_above(-offset), mark));
+                    kept = Some((place.item, offset, mark));
                 }
-                // The item's top, moved by the scroll.
-                let top = (row - offset).saturating_sub(delta);
+                // The item's top, moved by the scroll. (A row below the viewport counts as the
+                // row just below it, so the walk up crosses a viewport at most.)
+                let top = place
+                    .row
+                    .min(v)
+                    .saturating_sub(i64::from(offset))
+                    .saturating_sub(delta);
                 let (first, top, clamped) = self.fill_up(cur, top, m, &mut measured);
                 if clamped {
                     outcome = Outcome::ClampedStart;
                 }
                 let placed = self.skip_down(first, top, v, m, &mut measured);
+                // (Their place is past the end, so none of their rows is left to keep.)
+                settle |= placed.past;
                 let above = placed.top < 0 || self.index.prev(placed.first).is_some();
                 match placed.end {
                     // The reader scrolled down to the end, and follows it.
@@ -714,19 +743,19 @@ impl<K> Feed<K> {
                         if end < v && above {
                             outcome = Outcome::ClampedEnd;
                         }
-                        self.follow();
-                        self.place_following(last, v, m, &mut measured)
+                        self.following = true;
+                        self.place = None;
+                        self.place_end(last, v, m, &mut measured)
                     }
                     // They scrolled up in a feed that fits the viewport, so they follow it still,
                     // from its start. (Rows that blank rows below the end held above the
                     // viewport come back into it.)
                     Some(_) if left_follow && !above => {
-                        self.anchor = Anchor::Follow;
-                        self.held = None;
-                        self.place_following(last, v, m, &mut measured)
+                        self.following = true;
+                        placed
                     }
-                    // Their item went, so the end comes down to fill.
-                    Some(end) if end < v && above && replaced => {
+                    // Their place came from a jump, so the end comes down to fill.
+                    Some(end) if end < v && above && settle => {
                         outcome = Outcome::ClampedEnd;
                         let (first, top, _) =
                             self.fill_up(placed.first, placed.top + (v - end), m, &mut measured);
@@ -743,21 +772,31 @@ impl<K> Feed<K> {
                     None => placed,
                 }
             }
+            _ => {
+                self.following = true;
+                self.place_following(last, viewport, resolve, m, &mut measured, &mut kept)
+            }
         };
 
-        // The items on screen, top to bottom.
+        // The items on screen, top to bottom, and the first that starts on screen.
         let mut cur = Some(placed.first);
         let mut y = placed.top;
+        let mut starts = None;
         while let Some(at) = cur {
             if y >= v {
                 break;
             }
             let height = self.exact(at, m, &mut measured);
-            out.items.push(Placed {
-                item: self.index.id(at),
-                y,
-                height: u32::try_from(height).unwrap_or(0),
-            });
+            if height > 0 {
+                out.items.push(Placed {
+                    item: self.index.id(at),
+                    y,
+                    height: u32::try_from(height).unwrap_or(0),
+                });
+                if y >= 0 && starts.is_none() {
+                    starts = Some((at, y));
+                }
+            }
             y += height;
             cur = self.index.next(at);
         }
@@ -767,32 +806,37 @@ impl<K> Feed<K> {
         let gap = placed
             .end
             .map_or(0, |end| u32::try_from((v - end).max(0)).unwrap_or(0));
-        let following = self.anchor == Anchor::Follow;
-        if following {
-            self.held = Some(Held {
-                item,
-                offset,
-                row: 0,
-            });
-            self.gap = gap;
+        // (Taken again only when the reader's row moved, so widths one after another keep the
+        // text it named rather than the start of each width's row.)
+        let mark = match kept {
+            _ if self.index.height(placed.first) == 0 => None,
+            Some((at, row, mark)) if (at, row) == (item, offset) => Some(mark),
+            _ => m.mark_at(self.index.key(placed.first), offset),
+        };
+        let place = Place {
+            mark,
+            seen: Some(viewport),
+            ..Place::at(item, offset, 0)
+        };
+        self.place = if self.index.height(placed.first) == 0 {
+            // No item has rows, so the reader follows the end as in an empty feed.
+            self.following = true;
+            None
+        } else if self.following
+            && mark.is_none()
+            && let Some((at, y)) = starts
+        {
+            // A row known by its number alone may name other text when its item changes, so
+            // following keeps the first row of the first item that starts on screen.
+            Some(Place {
+                seen: Some(viewport),
+                ..Place::at(self.index.id(at), 0, y)
+            })
         } else {
-            self.held = None;
-            self.gap = 0;
-            // (Taken again only when the reader's row moved, so widths one after another keep
-            // the text it named rather than the start of each width's row.)
-            let mark = match kept {
-                Some((at, row, mark)) if (at, row) == (item, offset) => Some(mark),
-                _ => m.mark_at(self.index.key(placed.first), offset),
-            };
-            self.anchor = Anchor::At {
-                item,
-                offset,
-                row: 0,
-                mark,
-            };
-        }
+            Some(place)
+        };
         out.gap = gap;
-        out.following = following;
+        out.following = self.following;
         out.measured = measured;
         out.outcome = outcome;
     }
@@ -807,10 +851,29 @@ impl<K> Feed<K> {
         i64::from(self.index.height(cur))
     }
 
-    /// What shows when the feed's end, the item `last`, is on the viewport's last row, or
-    /// higher by the blank rows it takes to keep the row held from the last frame from moving
-    /// down.
-    fn place_following(
+    /// The row of the item `cur`, `height` rows high, that `place` names, by its mark when the
+    /// item's rows may have changed.
+    fn resolved(
+        &self,
+        cur: Cur,
+        place: Place,
+        height: i64,
+        resolve: bool,
+        m: &mut impl Measure<K>,
+    ) -> u32 {
+        let mut offset = place.offset;
+        if resolve
+            && height > 0
+            && let Some(mark) = place.mark
+            && let Some(found) = m.resolve(self.index.key(cur), mark)
+        {
+            offset = found;
+        }
+        offset.min(u32::try_from(height - 1).unwrap_or(0))
+    }
+
+    /// What shows when the feed's end, the item `last`, is on the viewport's last row.
+    fn place_end(
         &mut self,
         last: Cur,
         v: i64,
@@ -819,33 +882,60 @@ impl<K> Feed<K> {
     ) -> Laid {
         let height = self.exact(last, m, measured);
         let (first, top, _) = self.fill_up(last, v - height, m, measured);
-        let placed = self.skip_down(first, top, v, m, measured);
-        let Some(held) = self.held else {
-            return placed;
+        self.skip_down(first, top, v, m, measured)
+    }
+
+    /// What shows while following, the feed's end on the viewport's last row, or higher by the
+    /// blank rows it takes to keep the reader's row from moving down further than the
+    /// viewport's bottom did, up to the gap limit.
+    fn place_following(
+        &mut self,
+        last: Cur,
+        viewport: u32,
+        resolve: bool,
+        m: &mut impl Measure<K>,
+        measured: &mut u32,
+        kept: &mut Option<(ItemId, u32, u64)>,
+    ) -> Laid {
+        let v = i64::from(viewport);
+        let end = self.place_end(last, v, m, measured);
+        let Some((place, cur)) = self
+            .place
+            .and_then(|place| Some((place, self.index.locate(place.item)?)))
+        else {
+            return end;
         };
-        let Some(held_cur) = self.index.locate(held.item) else {
-            return placed;
-        };
-        // The row the held one would be on.
-        let mut cur = Some(placed.first);
-        let mut y = placed.top;
-        while let Some(at) = cur {
-            if y >= v {
-                break;
-            }
-            let height = self.exact(at, m, measured);
-            if at == held_cur {
-                let row = y + i64::from(held.offset).min((height - 1).max(0));
-                let down = row - held.row;
-                if down > 0 && down <= i64::from(self.gap_limit) {
-                    return self.skip_down(placed.first, placed.top - down, v, m, measured);
-                }
-                break;
-            }
-            y += height;
-            cur = self.index.next(at);
+        let height = self.exact(cur, m, measured);
+        let offset = self.resolved(cur, place, height, resolve, m);
+        if height > 0
+            && let Some(mark) = place.mark
+        {
+            *kept = Some((place.item, offset, mark));
         }
-        placed
+        // The row the end on the last row puts the reader's on. (An item with no rows at the
+        // end is on the row after the last.)
+        let mut at = Some(end.first);
+        let mut y = end.top;
+        let row = loop {
+            let Some(here) = at.filter(|_| y <= v) else {
+                return end;
+            };
+            if here == cur {
+                break y + i64::from(offset);
+            }
+            y += self.exact(here, m, measured);
+            at = self.index.next(here);
+        };
+        let down = row.saturating_sub(place.following(viewport).row);
+        let gap = end
+            .end
+            .map_or(0, |end| (v - end).max(0))
+            .saturating_add(down);
+        if down > 0 && gap <= i64::from(self.gap_limit) && gap < v {
+            self.skip_down(end.first, end.top.saturating_sub(down), v, m, measured)
+        } else {
+            end
+        }
     }
 
     /// Walks up from the item `cur`, whose top is on row `top`, to the item that covers the
@@ -880,17 +970,25 @@ impl<K> Feed<K> {
         m: &mut impl Measure<K>,
         measured: &mut u32,
     ) -> Laid {
+        let mut past = false;
         loop {
-            let height = self.exact(cur, m, measured);
-            if top + height > 0 {
+            let mut height = self.exact(cur, m, measured);
+            if top.saturating_add(height) > 0 {
                 break;
             }
             if let Some(next) = self.index.next(cur) {
                 top += height;
                 cur = next;
             } else {
-                // Everything is above the viewport, so the last item's last row goes on the
-                // first row.
+                // Everything is above the viewport, so the last row of the last item that has
+                // rows goes on the first row.
+                past = true;
+                while height == 0
+                    && let Some(prev) = self.index.prev(cur)
+                {
+                    cur = prev;
+                    height = self.exact(cur, m, measured);
+                }
                 top = (1 - height).min(0);
                 break;
             }
@@ -911,6 +1009,7 @@ impl<K> Feed<K> {
             first: cur,
             top,
             end,
+            past,
         }
     }
 }
@@ -922,4 +1021,6 @@ struct Laid {
     first: Cur,
     top: i64,
     end: Option<i64>,
+    /// Whether the walk started past the feed's end, so its last row went on the first row.
+    past: bool,
 }

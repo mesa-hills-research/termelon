@@ -133,10 +133,15 @@ fn true_top(feed: &Feed<u64>, frame: &Placement, world: &World) -> i64 {
     i64::try_from(world.top_of(key_of(feed, first))).unwrap() - first.y
 }
 
-/// The frame's items are the world's, in order, at their true heights, each under the one
-/// before, and they cover the viewport or end with the feed.
+/// The frame's items are the world's that have rows, in order, at their true heights, each
+/// under the one before, and they cover the viewport or end with the feed.
 fn assert_exact(feed: &Feed<u64>, frame: &Placement, world: &World, viewport: u32) {
     let v = i64::from(viewport);
+    if frame.items.is_empty() {
+        assert!(world.order.iter().all(|key| world.heights[key] == 0));
+        assert_eq!(frame.gap, viewport);
+        return;
+    }
     let first = &frame.items[0];
     assert!(first.y <= 0, "the first item starts at or above row 0");
     let first_key = key_of(feed, first);
@@ -145,17 +150,25 @@ fn assert_exact(feed: &Feed<u64>, frame: &Placement, world: &World, viewport: u3
         .iter()
         .position(|key| *key == first_key)
         .unwrap();
+    let rest: Vec<u64> = world.order[at..]
+        .iter()
+        .copied()
+        .filter(|key| world.heights[key] > 0)
+        .collect();
     let mut y = first.y;
-    for (placed, key) in frame.items.iter().zip(&world.order[at..]) {
+    for (placed, key) in frame.items.iter().zip(&rest) {
         assert_eq!(key_of(feed, placed), *key);
         assert_eq!(placed.height, world.heights[key]);
         assert_eq!(placed.y, y);
         assert!(placed.y < v);
         y += i64::from(placed.height);
     }
-    let shown = at + frame.items.len();
     if y < v {
-        assert_eq!(shown, world.order.len(), "rows are blank only past the end");
+        assert_eq!(
+            frame.items.len(),
+            rest.len(),
+            "rows are blank only past the end"
+        );
         assert_eq!(i64::from(frame.gap), v - y);
     } else {
         assert_eq!(frame.gap, 0);
@@ -1147,4 +1160,396 @@ fn any_session_lays_out_exactly() {
             assert_exact(&feed, &frame, &world, viewport);
         }
     }
+}
+
+/// Items of one-row lines, each line with an id that is its row's mark, so a mark names its
+/// line wherever lines come or go.
+#[derive(Default)]
+struct Lines {
+    lines: HashMap<u64, Vec<u64>>,
+    next_line: u64,
+}
+
+impl Lines {
+    fn push(&mut self, feed: &mut Feed<u64>, rows: u32) -> (u64, ItemId) {
+        let key = u64::try_from(self.lines.len()).unwrap();
+        let ids = (0..rows).map(|_| self.line()).collect();
+        self.lines.insert(key, ids);
+        (key, feed.push(key, 1))
+    }
+
+    fn line(&mut self) -> u64 {
+        self.next_line += 1;
+        self.next_line
+    }
+}
+
+impl Measure<u64> for Lines {
+    fn height(&mut self, key: &u64) -> u32 {
+        u32::try_from(self.lines[key].len()).unwrap()
+    }
+
+    fn mark_at(&mut self, key: &u64, row: u32) -> Option<u64> {
+        self.lines[key].get(usize::try_from(row).unwrap()).copied()
+    }
+
+    fn resolve(&mut self, key: &u64, mark: u64) -> Option<u32> {
+        let row = self.lines[key].iter().position(|line| *line == mark)?;
+        u32::try_from(row).ok()
+    }
+}
+
+/// Every item that started on screen in `before` and is still on it is lower by `by` rows in
+/// `after`.
+fn assert_moved_down(feed: &Feed<u64>, before: &Placement, after: &Placement, by: i64, v: i64) {
+    for was in &before.items {
+        if was.y < 0 || was.y + by >= v {
+            continue;
+        }
+        let now = after.items.iter().find(|p| p.item == was.item).map(|p| p.y);
+        assert_eq!(now, Some(was.y + by), "item {}", key_of(feed, was));
+    }
+}
+
+#[test]
+fn a_scroll_up_while_following_starts_from_the_last_frame() {
+    // The end grows in the frame the wheel turns up in, by fewer rows than the scroll, as many,
+    // and more.
+    for (grew, limit) in [(0, 0), (1, 0), (3, 0), (5, 0), (3, 3)] {
+        let mut world = World::default();
+        let mut feed = Feed::new();
+        feed.set_gap_limit(limit);
+        for _ in 0..100 {
+            world.push(&mut feed, 1, 0);
+        }
+        let before = feed.layout(10, &mut world);
+        let last = *world.order.last().unwrap();
+        *world.heights.get_mut(&last).unwrap() += grew;
+        feed.changed(world.id(last), Change::Appended);
+        feed.scroll_by(-1);
+        let frame = feed.layout(10, &mut world);
+        assert_exact(&feed, &frame, &world, 10);
+        assert!(!frame.following, "grew {grew}");
+        assert_moved_down(&feed, &before, &frame, 1, 10);
+    }
+    // The viewport gets taller in the same frame, and the rows move down with its bottom, then
+    // by the scroll.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..100 {
+        world.push(&mut feed, 1, 0);
+    }
+    let before = feed.layout(10, &mut world);
+    feed.scroll_by(-1);
+    let frame = feed.layout(12, &mut world);
+    assert_moved_down(&feed, &before, &frame, 3, 12);
+}
+
+#[test]
+fn a_taller_viewport_while_following_keeps_the_end_on_the_last_row() {
+    for (height, viewports) in [(1, [20, 17, 20]), (1, [20, 18, 23]), (5, [4, 0, 4])] {
+        let mut world = World::default();
+        let mut feed = Feed::new();
+        feed.set_gap_limit(3);
+        for _ in 0..100 {
+            world.push(&mut feed, height, 0);
+        }
+        for viewport in viewports {
+            let frame = feed.layout(viewport, &mut world);
+            assert!(frame.following);
+            if viewport > 0 {
+                assert_exact(&feed, &frame, &world, viewport);
+                assert_eq!(frame.gap, 0, "{viewports:?} at {viewport}");
+                assert_eq!(
+                    true_top(&feed, &frame, &world),
+                    i64::try_from(world.total()).unwrap() - i64::from(viewport)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn rows_lost_above_the_screen_while_following_move_nothing() {
+    // Without marks. An item of 20 rows shows its last 6 on top, with 9 items of a row below.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..40 {
+        world.push(&mut feed, 1, 0);
+    }
+    let tall = world.push(&mut feed, 20, 0);
+    for _ in 0..9 {
+        world.push(&mut feed, 1, 0);
+    }
+    let before = feed.layout(15, &mut world);
+    // Two of its rows above the screen go.
+    world.heights.insert(tall, 18);
+    feed.changed(world.id(tall), Change::Reflowed);
+    let frame = feed.layout(15, &mut world);
+    assert_exact(&feed, &frame, &world, 15);
+    assert_eq!(frame.gap, 0);
+    assert_moved_down(&feed, &before, &frame, 0, 15);
+
+    // With marks, and the item is the last, as a reply taller than the screen is.
+    let mut lines = Lines::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..40 {
+        lines.push(&mut feed, 1);
+    }
+    let (key, reply) = lines.push(&mut feed, 30);
+    let before = feed.layout(10, &mut lines);
+    assert_eq!(before.items[0].y, -20);
+    lines.lines.get_mut(&key).unwrap().drain(3..5);
+    feed.changed(reply, Change::Reflowed);
+    let frame = feed.layout(10, &mut lines);
+    assert_eq!((frame.items[0].y, frame.gap), (-18, 0));
+}
+
+#[test]
+fn following_with_a_gap_as_tall_as_the_viewport_brings_the_end_down() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(3);
+    for _ in 0..30 {
+        world.push(&mut feed, 1, 0);
+    }
+    // A status line as tall as the viewport goes, and no row the reader saw is left.
+    world.push(&mut feed, 3, 0);
+    feed.layout(3, &mut world);
+    world.remove(&mut feed, 30);
+    let frame = feed.layout(3, &mut world);
+    assert_exact(&feed, &frame, &world, 3);
+    assert_eq!(frame.gap, 0);
+}
+
+#[test]
+fn following_again_in_place_keeps_the_offset() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..41 {
+        world.push(&mut feed, 3, 3);
+    }
+    feed.set_gap_limit(3);
+    let before = feed.layout(20, &mut world);
+    let top = before.items[0];
+    feed.place(top.item, rows_above(top.y), 0);
+    world.remove(&mut feed, world.order.len() - 1);
+    let held = feed.layout(20, &mut world);
+    assert_eq!(held.gap, 3);
+    let offset = feed.offset(20);
+    feed.follow_in_place();
+    assert_eq!(feed.offset(20), offset);
+    feed.layout(20, &mut world);
+    assert_eq!(feed.offset(20), offset);
+}
+
+#[test]
+fn an_item_with_no_rows_never_holds_the_reader() {
+    // The reader is on the last item, which loses every row.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for height in [10, 10, 10, 5] {
+        world.push(&mut feed, height, 0);
+    }
+    feed.layout(5, &mut world);
+    feed.place(world.id(3), 0, 0);
+    feed.layout(5, &mut world);
+    world.heights.insert(3, 0);
+    feed.changed(world.id(3), Change::Reflowed);
+    let frame = feed.layout(5, &mut world);
+    assert_eq!(frame.gap, 0);
+    assert_eq!(frame.outcome, Outcome::ClampedEnd);
+    assert!(frame.items.iter().all(|p| p.height > 0), "{frame:?}");
+    assert_eq!(true_top(&feed, &frame, &world), 25);
+    // The reader is placed on a last item that has no rows.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for height in [10, 10, 0] {
+        world.push(&mut feed, height, 0);
+    }
+    feed.place(world.id(2), 0, 0);
+    let frame = feed.layout(5, &mut world);
+    assert_eq!(frame.gap, 0);
+    assert!(frame.items.iter().all(|p| p.height > 0), "{frame:?}");
+    assert_eq!(true_top(&feed, &frame, &world), 15);
+}
+
+#[test]
+fn a_frame_lists_no_item_without_rows() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    world.push(&mut feed, 5, 0);
+    for _ in 0..2_000 {
+        world.push(&mut feed, 0, 0);
+    }
+    world.push(&mut feed, 5, 0);
+    for _ in 0..2 {
+        let frame = feed.layout(40, &mut world);
+        assert_eq!(frame.items.len(), 2);
+        assert_eq!((frame.items[0].y, frame.items[1].y, frame.gap), (0, 5, 30));
+    }
+    // A feed of items with no rows shows nothing, and follows.
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..5 {
+        world.push(&mut feed, 0, 3);
+    }
+    feed.scroll_by(-2);
+    let frame = feed.layout(10, &mut world);
+    assert_eq!(
+        (frame.items.len(), frame.gap, frame.following),
+        (0, 10, true)
+    );
+}
+
+/// Heights by key, which records each mark asked for a row its item doesn't have.
+struct Counted {
+    heights: Vec<u32>,
+    past: Vec<(usize, u32)>,
+}
+
+impl Measure<usize> for Counted {
+    fn height(&mut self, key: &usize) -> u32 {
+        self.heights[*key]
+    }
+
+    fn mark_at(&mut self, key: &usize, row: u32) -> Option<u64> {
+        if row >= self.heights[*key] {
+            self.past.push((*key, row));
+        }
+        Some(u64::from(row))
+    }
+
+    fn resolve(&mut self, _key: &usize, mark: u64) -> Option<u32> {
+        u32::try_from(mark).ok()
+    }
+}
+
+#[test]
+fn no_mark_is_asked_for_a_row_an_item_lacks() {
+    // The reader's item loses its rows, the item after the reader's has none when the
+    // reader's goes, and the reader is placed on one with none.
+    for case in 0..3 {
+        let mut m = Counted {
+            heights: vec![10, 10, 10, 5, 0],
+            past: Vec::new(),
+        };
+        let mut feed = Feed::new();
+        let ids: Vec<_> = (0..5).map(|key| feed.push(key, 1)).collect();
+        feed.place(ids[3], 0, 0);
+        feed.layout(5, &mut m);
+        match case {
+            0 => {
+                m.heights[3] = 0;
+                feed.changed(ids[3], Change::Reflowed);
+            }
+            1 => {
+                feed.remove(ids[3]);
+            }
+            _ => feed.place(ids[4], 0, 0),
+        }
+        let frame = feed.layout(5, &mut m);
+        assert_eq!(m.past, [], "case {case}");
+        assert_eq!(frame.gap, 0, "case {case}");
+    }
+}
+
+#[test]
+fn a_seek_over_hints_that_are_too_high_shows_no_blank_rows_above_the_end() {
+    for fraction in [0.95, 1.0] {
+        let mut world = World::default();
+        let mut feed = Feed::new();
+        for _ in 0..50 {
+            world.push(&mut feed, 1, 100);
+        }
+        feed.seek(fraction, 10);
+        let frame = feed.layout(10, &mut world);
+        assert_exact(&feed, &frame, &world, 10);
+        assert_eq!(frame.gap, 0, "seek({fraction})");
+    }
+}
+
+#[test]
+fn a_seek_to_the_end_follows_it() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..50 {
+        world.push(&mut feed, 1, 1);
+    }
+    feed.layout(10, &mut world);
+    feed.scroll_by(-20);
+    feed.layout(10, &mut world);
+    feed.seek(1.0, 10);
+    assert!(feed.layout(10, &mut world).following);
+    world.push(&mut feed, 1, 1);
+    let frame = feed.layout(10, &mut world);
+    assert!(frame.following);
+    assert_eq!(true_top(&feed, &frame, &world), 41);
+}
+
+#[test]
+fn a_place_on_any_row_lays_out_without_overflow() {
+    for row in [i64::MIN, i64::MIN + 1, i64::MAX, i64::MAX - 1] {
+        let (mut feed, mut world) = (Feed::new(), World::default());
+        for _ in 0..10 {
+            world.push(&mut feed, 3, 1);
+        }
+        feed.set_gap_limit(3);
+        feed.place(world.id(5), 2, row);
+        feed.offset(5);
+        let frame = feed.layout(5, &mut world);
+        assert_exact(&feed, &frame, &world, 5);
+        feed.place(world.id(9), 2, row);
+        world.remove(&mut feed, 9);
+        feed.offset(5);
+        let frame = feed.layout(5, &mut world);
+        assert_exact(&feed, &frame, &world, 5);
+        feed.place(world.id(8), 2, row);
+        feed.follow_in_place();
+        feed.offset(5);
+        world.remove(&mut feed, 8);
+        feed.offset(5);
+        let frame = feed.layout(5, &mut world);
+        assert_exact(&feed, &frame, &world, 5);
+    }
+}
+
+#[test]
+fn a_place_far_below_the_viewport_measures_about_a_screen() {
+    let (mut feed, mut world) = (Feed::new(), World::default());
+    for _ in 0..100_000 {
+        world.push(&mut feed, 2, 1);
+    }
+    feed.layout(40, &mut world);
+    feed.place(world.id(99_990), 0, 1_000_000_000);
+    let frame = feed.layout(40, &mut world);
+    assert!(frame.measured <= 80, "{}", frame.measured);
+}
+
+#[test]
+fn staying_keeps_the_rows_of_the_last_frame() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.stay();
+    assert!(feed.is_following(), "no frame to keep yet");
+    for _ in 0..100 {
+        world.push(&mut feed, 1, 1);
+    }
+    let before = feed.layout(10, &mut world);
+    // A press holds the view while the reply streams on.
+    feed.stay();
+    assert!(!feed.is_following());
+    let last = *world.order.last().unwrap();
+    *world.heights.get_mut(&last).unwrap() += 4;
+    feed.changed(world.id(last), Change::Appended);
+    world.push(&mut feed, 2, 2);
+    let frame = feed.layout(10, &mut world);
+    assert!(!frame.following);
+    assert_eq!(frame.items[..9], before.items[..9]);
+    // After going to the end there's no frame to keep until the next layout.
+    feed.follow();
+    feed.stay();
+    assert!(feed.is_following());
 }
