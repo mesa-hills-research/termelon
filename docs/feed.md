@@ -142,18 +142,22 @@ above the screen, the rows move up over blank rows below the end, as far as the 
 
 | Call | Does |
 |---|---|
-| `scroll_by(rows)` | Scrolls, down when positive, as far as the start or the end. Scrolling down to the end follows it, with the end on the last row |
+| `scroll_by(rows)` | Scrolls, down when positive, as far as the start or the end on the last row. With the end above the last row already, a scroll down moves nothing. Scrolling down to the end follows it from there. `Placement::scrolled` says how far the lines moved |
 | `follow` | Goes to the end and follows it, as End does |
-| `follow_in_place` | Follows the end from where the reader is, keeping the rows where they are while the end is in sight, as after a press that held the view still |
+| `follow_in_place` | Follows the end from where the reader is, keeping the rows where they are while the end is in sight, as after a press that held the view still or a fold toggled near the end |
 | `stay` | Stops following, with the rows where the last frame showed them, as a press that holds the view still does |
 | `scroll_to_start` | Goes to the start, as Home does |
 | `place(id, row, screen_row)` | Puts a row of an item on a screen row, for a fold toggled under the pointer |
+| `place_settled(id, row, screen_row)` | The same, and where the end would stand above the last row with rows hidden above, it comes down, as for another view that starts at the reader's block |
 | `seek(fraction, viewport)` | Goes to a share of the height, for a scrollbar's thumb. A share of 1 follows the end |
 | `set_exact_limit(Some(rows))` | Scrolls further than `rows` land by the heights known so far, and say `Outcome::Approximate` |
 
 Only the reader's own scroll to the end turns following on. A reader a few rows above the end
 stays there when the end gets shorter, with blank rows below it. A scroll up from following starts
-from the rows the last frame showed, also when the end grew since.
+from the rows the last frame showed, also when the end grew since. It stops following where it
+moves a line, even with the end still in sight, so the rows the reader went back to stay where
+they are as more comes. A scroll up or `scroll_to_start` that moves nothing, as in a feed that
+shows from its start, leaves the reader following.
 
 A fold that opens or closes under the pointer keeps the clicked line where it is. Find the item
 and its row under the pointer with `view.item_at(position)`, change the item, report it, and
@@ -161,14 +165,24 @@ and its row under the pointer with `view.item_at(position)`, change the item, re
 
 ## Following and blank rows
 
-While following, the end sits on the last row, and the rows move with the viewport's bottom when
-its height changes. When the end gets shorter, as when a status line goes or a closing marker
-re-wraps a paragraph, the rows above move down to keep it there.
+While following, the end sits on the last row. When the end gets shorter, as when a status line
+goes or a closing marker re-wraps a paragraph, the rows above move down to keep it there.
 
 `feed.set_gap_limit(rows)` keeps them still instead. Up to `rows` blank rows show below the end
 until content fills them, and past that the end comes back down. The default, 0, keeps the end on
-the last row. Going to the end with `follow` and a new width close the blank rows, and
-`follow_in_place` keeps them.
+the last row, and `u32::MAX` brings it down only where no row would show.
+
+A scroll down and `follow_in_place` leave every row where it is while blank rows show below the
+end, and the reader follows from there. Where the blank rows are more than the limit, as after a
+fold closed under the pointer, following would bring the end down, so the reader doesn't follow.
+They stay above the end, and a scroll down follows once content has filled the blank rows to
+within the limit. Going to the end with `follow` and a new width close the blank rows.
+
+A shorter viewport, as when a menu opens under the feed, takes the blank rows first and moves a
+follower's rows up by the rest. A taller one moves them back down by what shorter ones took, and
+the rest of its height is blank rows at the bottom, so a menu that opens and closes leaves every
+row where it was. The count starts over when the reader chooses to follow, by a scroll down to the
+end or `follow`. Past the gap limit, the rows move down with the viewport's bottom instead.
 
 ## The scrollbar and counts
 

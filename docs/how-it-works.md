@@ -190,8 +190,8 @@ differs.
 | DA1, DA2, cursor report | itself | itself | itself | itself | the terminal |
 | DECRQM, `CSI 18 t` | nobody | itself | the terminal | itself | the terminal |
 | kitty `CSI ? u` | nobody | nobody | the terminal | the terminal | the terminal |
-| XTVERSION | nobody | nobody | the terminal, whose reply it drops | the terminal | the terminal |
-| OSC 11 | nobody | nobody | the terminal, whose reply it drops | nobody | the terminal |
+| XTVERSION | nobody | nobody | the terminal (it drops the reply) | the terminal | the terminal |
+| OSC 11 | nobody | nobody | the terminal (it drops the reply) | nobody | the terminal |
 
 conhost answers DA1 with `CSI ? 1 ; 0 c` on Server 2022 and `CSI ? 61 ; 1 ; 6 ; 7 ; 21 ; 22 ; 23 ;
 24 ; 28 ; 32 ; 42 c` on 2025. On 2025 it answers DECRQM for 2026 with "not recognised", so behind

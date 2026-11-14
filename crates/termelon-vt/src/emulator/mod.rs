@@ -419,7 +419,7 @@ impl Emulator {
         self.modify_other_keys
     }
 
-    /// The scroll region, its top and bottom rows (inclusive).
+    /// The scroll region's top and bottom rows (inclusive).
     pub fn scroll_region(&self) -> (u16, u16) {
         (self.top, self.bottom)
     }

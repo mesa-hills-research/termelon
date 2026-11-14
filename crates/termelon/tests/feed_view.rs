@@ -605,9 +605,69 @@ fn a_reader_above_the_end_stays_when_the_end_gets_shorter() {
     // The rows above the status line are where they were.
     let status = before.iter().position(|r| r.contains("Working")).unwrap();
     assert_eq!(after[..status - 1], before[..status - 1]);
-    // Scrolling down to the end follows it again.
+    // A scroll down moves nothing, since the end is in sight. Following would bring the end
+    // down to the last row, so the reader stays.
     s.scroll(100);
+    assert_eq!(s.rows(), after);
+    assert!(!s.view.feed().is_following());
+    // Where the gap limit keeps the blank rows, a scroll down follows from there.
+    s.view.feed_mut().set_gap_limit(u32::MAX);
+    s.scroll(3);
+    assert_eq!(s.rows(), after);
     assert!(s.view.feed().is_following());
+}
+
+/// A fold near the end that closes under the pointer leaves blank rows below the end, and a
+/// scroll down after it moves no line, with 0 to 3 blank rows and more.
+#[test]
+fn a_scroll_down_after_a_fold_closed_at_the_end_moves_no_line() {
+    for limit in [3, u32::MAX] {
+        for closed in [0, 1, 2, 3, 5, 9] {
+            for step in [1, 3] {
+                let at = format!("limit {limit}, {closed} lines closed, a scroll of {step}");
+                let mut rng = Rng::new(23);
+                let mut s = Session::with_items(60, 20, 100, &mut rng);
+                s.view.feed_mut().set_gap_limit(limit);
+                let key = s.next_key;
+                let mut lines = vec![format!("▾ fold of i{key}")];
+                lines.extend((0..9).map(|n| words(key, 100 + n * 10, 4)));
+                s.push(lines);
+                let reply = s.next_key;
+                s.push(vec![words(reply, 0, 4)]);
+                s.draw();
+                let row = s
+                    .rows()
+                    .iter()
+                    .position(|r| r.contains(&format!("fold of i{key}")))
+                    .unwrap();
+                let y = u16::try_from(row).unwrap();
+                let (item, line) = s.view.item_at(Position::new(3, y)).unwrap();
+                s.change(key, Change::Reflowed, |lines| {
+                    lines.drain(1..=closed);
+                });
+                s.view.feed_mut().place(item, line, i64::from(y));
+                s.draw();
+                // The frame shows the end, so the view follows from there.
+                let shown = s.view.placement().items.last().unwrap();
+                assert_eq!(Some(shown.item), s.view.feed().last(), "{at}");
+                s.view.feed_mut().follow_in_place();
+                s.draw();
+                let closed_rows = s.rows();
+                assert!(closed_rows[row].contains("fold of"), "{at}");
+                let gap = u32::try_from(closed).unwrap();
+                assert_eq!(s.view.placement().gap, gap, "{at}");
+                for _ in 0..2 {
+                    s.scroll(step);
+                    assert_eq!(s.rows(), closed_rows, "{at}");
+                    assert_eq!(s.view.feed().is_following(), gap <= limit, "{at}");
+                }
+                // End closes them.
+                s.view.feed_mut().follow();
+                s.draw();
+                assert_eq!(s.rows()[19], s.last_row(), "{at}");
+            }
+        }
+    }
 }
 
 /// A fold toggled under the pointer keeps the clicked line on its row, opening and closing, with

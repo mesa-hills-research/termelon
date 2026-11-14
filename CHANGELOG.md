@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- A scroll down no longer moves rows down. It stops where the end reaches the last row, and moves
+  nothing where the end is above it already, as after a fold closed near the end. Before,
+  reaching the end moved every row down by the blank rows below it.
+- `Feed::follow_in_place` keeps the rows where they are, with any blank rows below the end. Where
+  those are more than the gap limit, the reader stays above the end rather than having it brought
+  down, and a scroll down follows again once content has filled them to within the limit.
+  `Feed::is_following` says no until the next layout decides. With
+  `Feed::set_gap_limit(u32::MAX)`, following moves no line down, except the lines below output
+  that grows on screen (into the blank rows), to give back what a shorter viewport took, after a
+  new width, or where no row would show.
+- A scroll up from following, and `Feed::scroll_to_start`, stop following exactly where they move
+  a line, also with the end still in sight. One that moves nothing, as in a feed that shows from
+  its start, leaves the reader following.
+- A viewport that gets shorter while following takes the blank rows first, then moves the rows up.
+  One that gets taller moves them back down by what shorter ones took since the reader last chose
+  to follow, and the rest of its height is blank rows, as far as the gap limit allows. A menu that
+  opens and closes under the feed leaves every row where it was.
+- Following, when the top item on screen and every item after it went in one frame, rows the
+  reader never saw showed above blank rows. The end now comes down to the last row.
+- `Placement::scrolled` says how far the frame's scroll moved the lines. `Feed::place_settled`
+  places the reader as `place` does, and brings the end down where it would stand above the last
+  row.
+
 ## 0.2.0 (2026-11-14)
 
 This release is `termelon` 0.2.0. `termelon-vt` hasn't changed and stays at 0.1.0.
