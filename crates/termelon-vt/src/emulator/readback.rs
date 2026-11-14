@@ -25,7 +25,7 @@ impl Emulator {
         (0..self.rows).filter_map(|y| self.row_text(y)).collect()
     }
 
-    /// The screen's text, its rows joined with `\n`.
+    /// The screen's text, with its rows joined by `\n`.
     pub fn text(&self) -> String {
         self.rows().join("\n")
     }
