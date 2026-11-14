@@ -823,6 +823,88 @@ fn a_shorter_end_leaves_blank_rows_up_to_the_limit() {
 }
 
 #[test]
+fn following_again_in_place_keeps_the_rows_where_they_are() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..40 {
+        world.push(&mut feed, 3, 0);
+    }
+    // A status line of three rows at the end.
+    world.push(&mut feed, 3, 0);
+    feed.set_gap_limit(3);
+    let before = feed.layout(20, &mut world);
+    // The view holds still while the mouse is down, so the reader is placed where they are.
+    let top = before.items[0];
+    feed.place(top.item, rows_above(top.y), 0);
+    // The status line goes meanwhile, and the rows stay with blank rows below the end.
+    world.remove(&mut feed, world.order.len() - 1);
+    let frame = feed.layout(20, &mut world);
+    assert!(!frame.following);
+    assert_eq!((frame.items[0], frame.gap), (top, 3));
+    // The button comes up. The reader follows again, and nothing moves.
+    feed.follow_in_place();
+    let frame = feed.layout(20, &mut world);
+    assert!(frame.following);
+    assert_eq!((frame.items[0], frame.gap), (top, 3));
+    // Text comes, filling the blank rows before it scrolls.
+    let text = world.push(&mut feed, 2, 0);
+    let frame = feed.layout(20, &mut world);
+    assert_eq!((frame.items[0], frame.gap), (top, 1));
+    world.heights.insert(text, 6);
+    feed.changed(world.id(text), Change::Appended);
+    let frame = feed.layout(20, &mut world);
+    assert_exact(&feed, &frame, &world, 20);
+    assert_eq!(frame.gap, 0);
+    // `follow` from such a place brings the end down to the last row instead.
+    world.push(&mut feed, 2, 0);
+    let frame = feed.layout(20, &mut world);
+    let top = frame.items[0];
+    feed.place(top.item, rows_above(top.y), 0);
+    world.remove(&mut feed, world.order.len() - 1);
+    assert_eq!(feed.layout(20, &mut world).gap, 2);
+    feed.follow();
+    let frame = feed.layout(20, &mut world);
+    assert_eq!(frame.gap, 0);
+    assert_ne!(frame.items[0], top);
+    assert_exact(&feed, &frame, &world, 20);
+}
+
+#[test]
+fn following_again_in_place_goes_to_the_end_when_it_is_out_of_sight() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..40 {
+        world.push(&mut feed, 3, 0);
+    }
+    feed.set_gap_limit(3);
+    feed.layout(20, &mut world);
+    // Far above the end.
+    feed.scroll_by(-60);
+    let up = feed.layout(20, &mut world);
+    assert!(!up.following);
+    feed.follow_in_place();
+    let frame = feed.layout(20, &mut world);
+    assert!(frame.following);
+    assert_eq!(frame.gap, 0);
+    assert_eq!(
+        true_top(&feed, &frame, &world),
+        i64::try_from(world.total()).unwrap() - 20
+    );
+    // With more blank rows below the end than the limit, the end comes down too.
+    let top = frame.items[0];
+    feed.place(top.item, rows_above(top.y), 0);
+    for _ in 0..2 {
+        world.remove(&mut feed, world.order.len() - 1);
+    }
+    let held = feed.layout(20, &mut world);
+    assert_eq!(held.gap, 6);
+    feed.follow_in_place();
+    let frame = feed.layout(20, &mut world);
+    assert_eq!(frame.gap, 0);
+    assert_exact(&feed, &frame, &world, 20);
+}
+
+#[test]
 fn the_held_row_survives_its_item_going() {
     let mut world = World::default();
     let mut feed = Feed::new();

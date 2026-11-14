@@ -134,6 +134,7 @@ item.
 |---|---|
 | `scroll_by(rows)` | Scrolls, down when positive. Scrolling down to the end follows it |
 | `follow` | Goes to the end and follows it, as End does |
+| `follow_in_place` | Follows the end from where the reader is, keeping the rows where they are while the end is in sight, as after a press that held the view still |
 | `scroll_to_start` | Goes to the start, as Home does |
 | `place(id, row, screen_row)` | Puts a row of an item on a screen row, for a fold toggled under the pointer |
 | `seek(fraction, viewport)` | Goes to a share of the height, for a scrollbar's thumb |
@@ -153,7 +154,8 @@ goes or a closing marker re-wraps a paragraph, the rows above move down to keep 
 
 `feed.set_gap_limit(rows)` keeps them still instead. Up to `rows` blank rows show below the end
 until content fills them, and past that the end comes back down. The default, 0, keeps the end on
-the last row. Going to the end with `follow` and a new width close the blank rows.
+the last row. Going to the end with `follow` and a new width close the blank rows, and
+`follow_in_place` keeps them.
 
 ## The scrollbar and counts
 

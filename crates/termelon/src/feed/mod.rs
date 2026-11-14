@@ -425,6 +425,22 @@ impl<K> Feed<K> {
         self.resolve = false;
     }
 
+    /// Follows the end from the reader's place, as if they had followed it all along. Where the
+    /// end is in the viewport and the rows above it stay within the gap limit, they stay where
+    /// they are, with blank rows below the end. Otherwise it goes to the end, as
+    /// [`follow`](Self::follow) does. An application that holds the view still while the mouse is
+    /// down calls it when the button comes up.
+    pub fn follow_in_place(&mut self) {
+        let held = match self.anchor {
+            Anchor::At {
+                item, offset, row, ..
+            } => Some(Held { item, offset, row }),
+            Anchor::Follow => self.held,
+        };
+        self.follow();
+        self.held = held;
+    }
+
     /// Goes to the start.
     pub fn scroll_to_start(&mut self) {
         if let Some(first) = self.first() {
