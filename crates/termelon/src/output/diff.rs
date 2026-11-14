@@ -226,15 +226,17 @@ impl Scroll {
     }
 }
 
-/// The bytes scrolling takes, for the region, the scroll and the region's reset.
-const SCROLL_COST: usize = 16;
+/// The bytes scrolling takes, for the region, the cursor's move into it, the scroll, the region's
+/// reset and the cursor's move after it.
+const SCROLL_COST: usize = 22;
 
 /// The rows a scroll region needs, since terminals ignore a region of one row.
 const MIN_REGION: usize = 2;
 
-/// Reused memory for [`detect_scroll`].
+/// Reused memory for [`detect_scroll`] and [`noted_scroll`].
 #[derive(Debug, Default)]
 pub(crate) struct ScrollScratch {
+    runs: Vec<Run>,
     prev: Vec<u64>,
     next: Vec<u64>,
     /// Prefix sums over the rows of the cost of each row that changed, without scrolling.
@@ -346,6 +348,61 @@ fn matching_runs<'a>(a: &'a [u64], b: &'a [u64]) -> impl Iterator<Item = (usize,
         Some((start, y))
     })
 }
+
+/// Of the scrolls widgets noted in `next` ([`Buffer::note_scroll`]), the one that saves the most
+/// bytes, if any does.
+///
+/// A row's cost is what the diff would write for it, the cells of its runs and a move for each,
+/// against the same row of `prev` without a scroll, and against the row the scroll brings there,
+/// or a blank one, with it. So a note that's wrong, or right for only some of its rows, is taken
+/// only when it still saves bytes.
+pub(crate) fn noted_scroll(
+    prev: &Buffer,
+    next: &Buffer,
+    scratch: &mut ScrollScratch,
+) -> Option<Scroll> {
+    let notes = next.noted_scrolls();
+    if notes.is_empty() || prev.area() != next.area() {
+        return None;
+    }
+    let height = usize::from(next.area().height);
+    let width = usize::from(next.area().width);
+    let runs = &mut scratch.runs;
+    let mut cost_of = |before: Before<'_>, y: usize| {
+        runs.clear();
+        diff_row(before, next, y, &[(0, width)], runs);
+        runs.iter()
+            .map(|run| run.end - run.start + MOVE_COST)
+            .sum::<usize>()
+    };
+    let plain: usize = (0..height).map(|y| cost_of(Before::Row(prev, y), y)).sum();
+    let mut best: Option<(usize, Scroll)> = None;
+    for note in notes {
+        let by = usize::try_from(note.rows.unsigned_abs()).unwrap_or(usize::MAX);
+        let size = note.bottom.saturating_sub(note.top);
+        if note.bottom > height || size < MIN_REGION || by == 0 || by >= size {
+            continue;
+        }
+        let scroll = Scroll {
+            top: note.top,
+            bottom: note.bottom,
+            by,
+            up: note.rows > 0,
+        };
+        let cost = SCROLL_COST
+            + (0..height)
+                .map(|y| cost_of(scroll.before(prev, y), y))
+                .sum::<usize>();
+        if best.is_none_or(|(c, _)| cost < c) {
+            best = Some((cost, scroll));
+        }
+    }
+    let (cost, scroll) = best?;
+    (cost < plain).then_some(scroll)
+}
+
+/// The bytes a move to a run is counted as.
+const MOVE_COST: usize = 4;
 
 /// An estimate of the bytes row `y` of `next` takes to write, from its cells that aren't blank and
 /// a move.

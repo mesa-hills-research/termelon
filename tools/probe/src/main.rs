@@ -8,7 +8,7 @@
 //!
 //! It opens the terminal with the framework, which asks what the terminal supports and measures
 //! its widths, and checks the size is the one asked for. It draws the scene as a frame, which ends
-//! with `probe-done:NAME` on the last row. Then it holds the screen, recording every event, until
+//! with `probe-done:NAME` on the last row, after the frames some scenes draw first. Then it holds the screen, recording every event, until
 //! its input ends, `q` is pressed, or `--hold` seconds pass (300 by default). It saves to
 //! `--record` every byte the framework wrote, for the harness to compute the screen the terminal
 //! should show, and writes its report as JSON, both once the frame is drawn and again at the end.
@@ -26,7 +26,7 @@ use std::io::{self, Write as _};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use termelon::{Drawn, Event, KeyCode, Options, Size, Terminal};
+use termelon::{Drawn, Event, Frame, KeyCode, Options, Size, Terminal};
 
 use crate::report::Report;
 
@@ -89,15 +89,22 @@ fn parse(args: &[String]) -> Option<Args> {
     })
 }
 
-/// Draws the scene as a frame, drawing again while the terminal holds the last one.
+/// Draws the scene's frames, the last with its marker, drawing each again while the terminal
+/// holds the one before.
 fn draw(terminal: &mut Terminal, scene: &scenes::Scene) -> Result<(), String> {
+    for before in scene.before {
+        draw_frame(terminal, |frame| before(frame.buffer_mut()))?;
+    }
+    draw_frame(terminal, |frame| {
+        scenes::draw(scene, frame.buffer_mut());
+        frame.set_cursor(scene.cursor);
+    })
+}
+
+/// Draws a frame, again while the terminal holds the last one.
+fn draw_frame(terminal: &mut Terminal, render: impl Fn(&mut Frame<'_>)) -> Result<(), String> {
     for _ in 0..500 {
-        let drawn = terminal
-            .draw(|frame| {
-                scenes::draw(scene, frame.buffer_mut());
-                frame.set_cursor(scene.cursor);
-            })
-            .map_err(|error| error.to_string())?;
+        let drawn = terminal.draw(&render).map_err(|error| error.to_string())?;
         if matches!(drawn, Drawn::Written(_)) {
             return Ok(());
         }

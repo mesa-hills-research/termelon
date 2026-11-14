@@ -67,6 +67,8 @@ struct Allowed {
     cursor_shape: bool,
     /// Erasing fills with the pen's background.
     bce: bool,
+    /// Rows a widget said moved may be scrolled in a region.
+    scroll_regions: bool,
 }
 
 impl Allowed {
@@ -80,6 +82,7 @@ impl Allowed {
             sync: caps.synchronized_output != Support::No,
             cursor_shape: caps.cursor_shape != Support::No,
             bce: caps.bce == Support::Yes,
+            scroll_regions: caps.scroll_regions == Support::Yes,
         }
     }
 }
@@ -224,7 +227,10 @@ impl Encoder {
                 }
             }
         } else {
-            if self.scroll_detection {
+            if allowed.scroll_regions {
+                scroll = diff::noted_scroll(prev, next, &mut self.scroll);
+            }
+            if scroll.is_none() && self.scroll_detection {
                 scroll = diff::detect_scroll(prev, next, &mut self.scroll);
             }
             for y in 0..height {
@@ -352,11 +358,12 @@ impl Encoder {
         out.push(b';');
         push_number(out, bottom);
         out.push(b'r');
-        // Setting the region puts the cursor home. Deleting or inserting lines at the region's
-        // top moves the rows below within the region, which every VT102 descendant does, the
-        // Linux console too, which has no CSI S or T.
-        self.row = Some(0);
-        self.col = Some(0);
+        // Setting the region and resetting it put the cursor home in a VT100, but the encoder
+        // doesn't count on it, so it places the cursor itself after each. Deleting or inserting
+        // lines at the region's top moves the rows below within the region, which every VT102
+        // descendant does, the Linux console too, which has no CSI S or T.
+        self.row = None;
+        self.col = None;
         self.move_to(0, u16::try_from(top).unwrap_or(u16::MAX), false, out);
         out.extend_from_slice(b"\x1b[");
         if scroll.by > 1 {
@@ -364,8 +371,8 @@ impl Encoder {
         }
         out.push(if scroll.up { b'M' } else { b'L' });
         out.extend_from_slice(b"\x1b[r");
-        self.row = Some(0);
-        self.col = Some(0);
+        self.row = None;
+        self.col = None;
     }
 
     /// Writes one run, or erases with `CSI K` its part in the row's `tail` of spaces that can be

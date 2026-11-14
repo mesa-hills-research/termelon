@@ -185,6 +185,10 @@ pub struct FrameStats {
   any wide character, in either buffer, that crosses a region's edge.
 - `redraw` makes the next `encode` a full redraw, which clears the screen, ignores `prev`, writes
   every cell that isn't blank and sends the cursor's state and the pen again.
+- Rows a widget noted as moved (`Buffer::note_scroll`) are scrolled the same way where
+  `Capabilities::scroll_regions` is `Yes`, when that writes fewer bytes than the plain diff. Each
+  row is costed by the runs `diff_row` gives for it, against the row it's compared with with and
+  without the scroll.
 - `set_scroll_detection` turns on looking for rows that moved when more than half of a frame's
   rows changed. When scrolling a region of rows saves bytes, the terminal scrolls them itself
   (`DECSTBM`, then delete or insert lines with `CSI n M` or `CSI n L` at the region's top, which

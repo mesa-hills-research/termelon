@@ -19,7 +19,9 @@ target/debug/harness run tmux --probe target/debug/probe --out harness-out
 
 `smoke` starts the terminal with `echo` and reads it back, which tells a broken setup from a
 failure of the program under test. `run` runs every scene the probe lists (or those named with
-`--scene`) at 80 by 24 (or `--size`). For each scene it writes the probe's bytes and report, the
+`--scene`) at 80 by 24 (or `--size`). The `scroll` scene draws a feed, then scrolls it three rows
+down and one back up, so a terminal whose table row says it scrolls regions does so twice. The
+table's `scroll_regions` rows come from that scene's runs. For each scene it writes the probe's bytes and report, the
 terminal's readback as the terminal gave it, a JSON report with each difference, both screens in
 the styled-text format, an HTML page with the two side by side, and a screenshot where there's a
 display. Then it holds what the terminal answered the probe (its name and version, and the

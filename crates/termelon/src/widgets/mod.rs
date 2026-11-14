@@ -3,7 +3,8 @@
 //! [`Widget`] has ratatui's shape, so a widget written for one ports to the other by changing its
 //! imports. Text is a widget (`&str`, `String`, [`Span`], [`Line`] and [`Text`]), and so are
 //! [`Clear`], [`Block`] and [`Paragraph`]. Each draws only inside its area and the buffer, and
-//! measures text with the buffer's [`WidthProfile`].
+//! measures text with the buffer's [`WidthProfile`]. [`FeedView`] draws a long, live list and keeps
+//! the reader's place in it.
 //!
 //! ```
 //! use termelon::buffer::Buffer;
@@ -26,12 +27,14 @@
 
 mod block;
 mod clear;
+mod feed_view;
 mod paragraph;
 #[cfg(test)]
 mod tests;
 
 pub use block::{Block, BorderSet, Borders, Padding, TitlePosition};
 pub use clear::Clear;
+pub use feed_view::{FeedRows, FeedView};
 pub use paragraph::{Paragraph, Wrap};
 
 use crate::buffer::Buffer;

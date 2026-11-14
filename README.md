@@ -21,7 +21,8 @@ needs, in pure Rust:
   hyperlinks
 - diffed output, written as one synchronized update per frame by a thread of its own
 - capability detection in one round trip, with fallbacks for terminals that lack a feature
-- text, a small layout, and the basic widgets
+- text, a small layout, the basic widgets, and a feed view for long, live lists that keeps the
+  reader's place
 - a test terminal backed by a terminal emulator, for goldens of what a terminal really shows
 
 It has no C dependencies, and its unsafe code is limited to the operating system calls that need it,
@@ -126,6 +127,7 @@ and Ghostty, and compares what each shows with the emulator.
 
 - [How it works](https://github.com/mesa-hills-research/termelon/blob/main/docs/how-it-works.md)
 - [Capabilities](https://github.com/mesa-hills-research/termelon/blob/main/docs/capabilities.md), what's detected and the fallbacks
+- [Feeds](https://github.com/mesa-hills-research/termelon/blob/main/docs/feed.md), for long, live lists that keep the reader's place
 - [Testing](https://github.com/mesa-hills-research/termelon/blob/main/docs/testing.md), with the test terminal and goldens
 - [Porting from ratatui and crossterm](https://github.com/mesa-hills-research/termelon/blob/main/docs/porting-from-ratatui.md)
 - [Testing in real terminals](https://github.com/mesa-hills-research/termelon/blob/main/docs/real-terminals.md)
