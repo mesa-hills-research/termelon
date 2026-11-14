@@ -142,9 +142,9 @@ above the screen, the rows move up over blank rows below the end, as far as the 
 
 | Call | Does |
 |---|---|
-| `scroll_by(rows)` | Scrolls, down when positive, as far as the start or the end. Scrolling down to the end follows it, with the end on the last row |
+| `scroll_by(rows)` | Scrolls, down when positive, as far as the start or the end on the last row. With the end above the last row already, a scroll down moves nothing. Scrolling down to the end follows it from there |
 | `follow` | Goes to the end and follows it, as End does |
-| `follow_in_place` | Follows the end from where the reader is, keeping the rows where they are while the end is in sight, as after a press that held the view still |
+| `follow_in_place` | Follows the end from where the reader is, keeping the rows where they are while the end is in sight, as after a press that held the view still or a fold toggled near the end |
 | `stay` | Stops following, with the rows where the last frame showed them, as a press that holds the view still does |
 | `scroll_to_start` | Goes to the start, as Home does |
 | `place(id, row, screen_row)` | Puts a row of an item on a screen row, for a fold toggled under the pointer |
@@ -167,8 +167,13 @@ re-wraps a paragraph, the rows above move down to keep it there.
 
 `feed.set_gap_limit(rows)` keeps them still instead. Up to `rows` blank rows show below the end
 until content fills them, and past that the end comes back down. The default, 0, keeps the end on
-the last row. Going to the end with `follow` and a new width close the blank rows, and
-`follow_in_place` keeps them.
+the last row, and `u32::MAX` brings it down only where no row would show.
+
+A scroll down and `follow_in_place` leave every row where it is while blank rows show below the
+end, and the reader follows from there. Where the blank rows are more than the limit, as after a
+fold closed under the pointer, following would bring the end down, so the reader stays above the
+end until content fills them or `follow` is called. Going to the end with `follow` and a new width
+close the blank rows.
 
 ## The scrollbar and counts
 

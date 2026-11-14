@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- A scroll down with blank rows below the end, as after a fold closed near the end, moved every
+  row down by those rows as the reader went back to following. A scroll down now stops where the
+  end reaches the last row and moves nothing where the end is above it, and the reader follows
+  from there.
+- `Feed::follow_in_place` brought the end down to the last row when more blank rows showed below
+  it than the gap limit. Now the rows stay where they are, and the reader stays above the end
+  without following until content fills the blank rows or `follow` is called.
+
 ## 0.2.0 (2026-11-14)
 
 This release is `termelon` 0.2.0. `termelon-vt` hasn't changed and stays at 0.1.0.

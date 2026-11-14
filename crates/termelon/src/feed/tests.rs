@@ -930,7 +930,8 @@ fn following_again_in_place_goes_to_the_end_when_it_is_out_of_sight() {
         true_top(&feed, &frame, &world),
         i64::try_from(world.total()).unwrap() - 20
     );
-    // With more blank rows below the end than the limit, the end comes down too.
+    // With more blank rows below the end than the limit, the rows stay where they are, and the
+    // reader stays there rather than follow, which would bring the end down.
     let top = frame.items[0];
     feed.place(top.item, rows_above(top.y), 0);
     for _ in 0..2 {
@@ -940,8 +941,175 @@ fn following_again_in_place_goes_to_the_end_when_it_is_out_of_sight() {
     assert_eq!(held.gap, 6);
     feed.follow_in_place();
     let frame = feed.layout(20, &mut world);
-    assert_eq!(frame.gap, 0);
-    assert_exact(&feed, &frame, &world, 20);
+    assert!(!frame.following);
+    assert_eq!((&frame.items, frame.gap), (&held.items, 6));
+    // Content fills them, and from within the limit the reader follows.
+    world.push(&mut feed, 4, 0);
+    let frame = feed.layout(20, &mut world);
+    assert_eq!((frame.items[0], frame.gap), (held.items[0], 2));
+    feed.follow_in_place();
+    let frame = feed.layout(20, &mut world);
+    assert!(frame.following);
+    assert_eq!((frame.items[0], frame.gap), (held.items[0], 2));
+}
+
+/// A feed of 20 rows on screen whose end is `gap` rows above the last row, reached `way`, with a
+/// gap limit of `limit`. A fold of 20 rows near the end gets shorter.
+fn blank_rows_below_the_end(limit: u32, gap: u32, way: &str) -> (Feed<u64>, World) {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    feed.set_gap_limit(limit);
+    for _ in 0..40 {
+        world.push(&mut feed, 3, 0);
+    }
+    let fold = world.push(&mut feed, 20, 0);
+    world.push(&mut feed, 6, 0);
+    let frame = feed.layout(20, &mut world);
+    let by = match way {
+        // A row up, and the end gets shorter under the reader.
+        "above the end" => {
+            feed.scroll_by(-1);
+            feed.layout(20, &mut world);
+            gap + 1
+        }
+        // The fold closes under the pointer on row 2, and the view follows from there.
+        "a fold" => {
+            let top = frame.items.iter().find(|p| p.item == world.id(fold));
+            let offset = u32::try_from(2 - top.unwrap().y).unwrap();
+            feed.place(world.id(fold), offset, 2);
+            gap
+        }
+        // The end gets shorter while the reader follows.
+        _ => gap,
+    };
+    world.heights.insert(fold, 20 - by);
+    feed.changed(world.id(fold), Change::Reflowed);
+    if way == "a fold" {
+        feed.layout(20, &mut world);
+        feed.follow_in_place();
+    }
+    (feed, world)
+}
+
+#[test]
+fn a_scroll_down_at_the_end_moves_no_row() {
+    // 0 to 3 blank rows below the end, as many as the limit keeps, and more, with a limit of 3
+    // and with none.
+    for limit in [3, u32::MAX] {
+        for gap in [0, 1, 2, 3, 5, 9] {
+            for way in ["following", "above the end", "a fold"] {
+                if way == "following" && gap > limit {
+                    continue;
+                }
+                for step in [1, 3] {
+                    let at = format!("limit {limit}, {gap} blank rows {way}, a scroll of {step}");
+                    let (mut feed, mut world) = blank_rows_below_the_end(limit, gap, way);
+                    let before = feed.layout(20, &mut world);
+                    assert_exact(&feed, &before, &world, 20);
+                    assert_eq!(before.gap, gap, "{at}");
+                    for _ in 0..2 {
+                        feed.scroll_by(step);
+                        let after = feed.layout(20, &mut world);
+                        assert_eq!(
+                            (&after.items, after.gap),
+                            (&before.items, before.gap),
+                            "{at}"
+                        );
+                        assert_eq!(after.following, gap <= limit, "{at}");
+                    }
+                    // Going to the end closes them.
+                    feed.follow();
+                    let end = feed.layout(20, &mut world);
+                    assert_exact(&feed, &end, &world, 20);
+                    assert_eq!(end.gap, 0, "{at}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_scroll_down_never_moves_a_row_down() {
+    for seed in 1..=200 {
+        let mut rng = Rng::new(seed);
+        let n = 5 + rng.index(60);
+        let viewport = 1 + rng.small(30);
+        let v = i64::from(viewport);
+        let (mut feed, mut world) = build(n, &mut rng, &mut |h| h);
+        let limit = [0, 1, 3, u32::MAX][rng.index(4)];
+        feed.set_gap_limit(limit);
+        let mut frame = feed.layout(viewport, &mut world);
+        for step in 0..400 {
+            let at = format!("seed {seed}, step {step}");
+            match rng.below(9) {
+                // A scroll down, alone in its frame.
+                0..=2 if !frame.items.is_empty() => {
+                    let by = 1 + rng.signed(8);
+                    let top = true_top(&feed, &frame, &world);
+                    let total = i64::try_from(world.total()).unwrap();
+                    let room = (total - v - top).max(0);
+                    let was_following = frame.following;
+                    feed.scroll_by(by);
+                    let after = feed.layout(viewport, &mut world);
+                    assert_exact(&feed, &after, &world, viewport);
+                    assert_eq!(true_top(&feed, &after, &world), top + by.min(room), "{at}");
+                    if by >= room {
+                        assert_eq!(after.gap, frame.gap, "{at}");
+                    }
+                    let short = total <= v;
+                    let follows = was_following
+                        || (by >= room && (short || after.gap == 0 || after.gap <= limit));
+                    assert_eq!(after.following, follows, "{at}");
+                    frame = after;
+                    continue;
+                }
+                3 => feed.scroll_by(-1 - rng.signed(8)),
+                // The end gets shorter or longer.
+                4 | 5 => {
+                    let last = *world.order.last().unwrap();
+                    let height = world.heights[&last];
+                    let height = if rng.below(2) == 0 {
+                        height.saturating_sub(1 + rng.small(6))
+                    } else {
+                        height + 1 + rng.small(4)
+                    };
+                    world.heights.insert(last, height);
+                    feed.changed(world.id(last), Change::Reflowed);
+                }
+                // A fold on screen opens or closes under the pointer, and where the frame shows
+                // the end, the view follows from there.
+                6 | 7 => {
+                    let shown: Vec<_> = frame.items.iter().filter(|p| p.y >= 0).collect();
+                    if let Some(placed) = shown.get(rng.index(shown.len().max(1))).copied() {
+                        let key = key_of(&feed, placed);
+                        let height = world.heights[&key];
+                        let height = if rng.below(2) == 0 {
+                            height.saturating_sub(rng.small(12)).max(1)
+                        } else {
+                            height + rng.small(12)
+                        };
+                        world.heights.insert(key, height);
+                        feed.changed(placed.item, Change::Reflowed);
+                        feed.place(placed.item, 0, placed.y);
+                        let clicked = feed.layout(viewport, &mut world);
+                        if clicked.items.last().is_some_and(|last| {
+                            feed.last() == Some(last.item) && last.y + i64::from(last.height) <= v
+                        }) {
+                            feed.follow_in_place();
+                            let after = feed.layout(viewport, &mut world);
+                            assert_eq!(after.items, clicked.items, "{at}");
+                        }
+                    }
+                }
+                _ => {
+                    let height = 1 + rng.small(6);
+                    world.push(&mut feed, height, height);
+                }
+            }
+            frame = feed.layout(viewport, &mut world);
+            assert_exact(&feed, &frame, &world, viewport);
+        }
+    }
 }
 
 #[test]
