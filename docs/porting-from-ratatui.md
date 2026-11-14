@@ -6,10 +6,10 @@ events and tests change more, and this page goes through them.
 
 ```toml
 [dependencies]
-termelon = "0.1"
+termelon = "0.2"
 
 [dev-dependencies]
-termelon = { version = "0.1", features = ["testing"] }
+termelon = { version = "0.2", features = ["testing"] }
 ```
 
 ## Imports

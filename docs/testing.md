@@ -9,7 +9,7 @@ The module comes with the `testing` feature.
 
 ```toml
 [dev-dependencies]
-termelon = { version = "0.1", features = ["testing"] }
+termelon = { version = "0.2", features = ["testing"] }
 ```
 
 ## A test
