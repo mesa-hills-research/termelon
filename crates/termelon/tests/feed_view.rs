@@ -797,3 +797,35 @@ fn a_view_prints_whatever_its_keys_are() {
     view.feed_mut().push(Key, 1);
     assert!(format!("{view:?}").starts_with("FeedView"));
 }
+
+/// A layout without drawing gives the frame the next render draws, and the application can act
+/// on it first, here following again because it shows the end.
+#[test]
+fn a_layout_before_a_render_shows_the_frame_it_draws() {
+    let mut rng = Rng::new(41);
+    let mut s = Session::with_items(60, 20, 300, &mut rng);
+    s.scroll(-3);
+    let shown = s.view.placement().clone();
+    let area = Rect::new(0, 0, 60, 20);
+    s.view.feed_mut().scroll_by(3);
+    let laid = s.view.layout(area, &mut s.doc).clone();
+    assert_eq!(s.view.placement(), &shown);
+    assert!(laid.following);
+    assert!(laid.items.last().unwrap().y < 20);
+    s.draw();
+    assert_eq!(s.view.placement().items, laid.items);
+    assert_eq!(s.rows()[19], s.last_row());
+    // Without a change in between, the render draws what the layout gave, a row up from the
+    // screen before.
+    s.view.feed_mut().scroll_by(-1);
+    let laid = s.view.layout(area, &mut s.doc).clone();
+    let before = s.rows();
+    s.draw();
+    assert_eq!(s.view.placement().items, laid.items);
+    assert_eq!(s.rows()[1..], before[..19]);
+    // A new width in the layout is the render's too.
+    s.term.resize(41, 20);
+    let laid = s.view.layout(Rect::new(0, 0, 41, 20), &mut s.doc).clone();
+    s.draw();
+    assert_eq!(s.view.placement().items, laid.items);
+}

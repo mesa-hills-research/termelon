@@ -30,8 +30,8 @@ pub trait FeedRows<K>: Measure<K> {
 
 /// A [`Feed`] drawn into an area, for long, live lists such as a transcript.
 ///
-/// Each frame draws the items the reader's place shows, measuring only those. Items that come,
-/// go or grow off screen leave the screen as it was, a width change keeps the text at the top,
+/// Each frame draws the items the reader's place shows, measuring only those and the ones a
+/// scroll crosses. Items that come, go or grow off screen leave the screen as it was, a width change keeps the text at the top,
 /// and following the end keeps its last row on the area's last. When the rows moved since the
 /// last frame, as they do on a scroll, the view says so with
 /// [`Buffer::note_scroll`](crate::Buffer::note_scroll), so a terminal that can scroll a region
@@ -152,7 +152,8 @@ impl<K> FeedView<K> {
     }
 
     /// Draws the feed into `area` of `buf` with `rows`, and returns what it showed. Rows below
-    /// the feed's end are left as they are, which is blank in a full frame.
+    /// the feed's end are left as they are, which is blank in a full frame. An empty area shows
+    /// no items and lays out nothing, so a scroll waits for the area to come back.
     pub fn render(
         &mut self,
         area: Rect,
@@ -165,14 +166,7 @@ impl<K> FeedView<K> {
             self.shown.items.clear();
             return &self.shown;
         }
-        let width_changed = self.width != Some(area.width);
-        if width_changed {
-            // (Heights measured before, the first frame's included, were at another width or
-            // at one the view never drew at.)
-            self.feed.set_geometry();
-            rows.set_width(area.width);
-            self.width = Some(area.width);
-        }
+        let width_changed = self.measure_at(area.width, rows);
         self.feed
             .layout_into(u32::from(area.height), rows, &mut self.next);
         let height = i64::from(area.height);
@@ -202,6 +196,35 @@ impl<K> FeedView<K> {
         self.area = Some(area);
         mem::swap(&mut self.shown, &mut self.next);
         &self.shown
+    }
+
+    /// Lays out the frame that [`render`](Self::render) into `area` would draw, without
+    /// drawing it, so the application can act on that frame first, such as following again in
+    /// place where it shows the end. [`placement`](Self::placement) and [`area`](Self::area)
+    /// stay at the frame last drawn. The render after it lays out again, which gives the same
+    /// rows unless the feed changed in between, with an outcome of its own. An empty area lays
+    /// out nothing and gives the last frame drawn.
+    pub fn layout(&mut self, area: Rect, rows: &mut impl FeedRows<K>) -> &Placement {
+        if area.is_empty() {
+            return &self.shown;
+        }
+        self.measure_at(area.width, rows);
+        self.feed
+            .layout_into(u32::from(area.height), rows, &mut self.next);
+        &self.next
+    }
+
+    /// Has `rows` measure at `width` from now on, and returns whether that's another width.
+    fn measure_at(&mut self, width: u16, rows: &mut impl FeedRows<K>) -> bool {
+        let changed = self.width != Some(width);
+        if changed {
+            // (Heights measured before, the first frame's included, were at another width or
+            // at one the view never drew at.)
+            self.feed.set_geometry();
+            rows.set_width(width);
+            self.width = Some(width);
+        }
+        changed
     }
 
     /// The widget that draws the view with `rows`, for
