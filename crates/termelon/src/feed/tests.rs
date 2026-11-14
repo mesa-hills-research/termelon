@@ -905,6 +905,34 @@ fn following_again_in_place_goes_to_the_end_when_it_is_out_of_sight() {
 }
 
 #[test]
+fn a_scroll_up_brings_back_the_rows_blank_rows_below_the_end_held_above() {
+    let mut world = World::default();
+    let mut feed = Feed::new();
+    for _ in 0..3 {
+        world.push(&mut feed, 3, 0);
+    }
+    // A status line of two rows, so the feed is a row taller than the viewport.
+    world.push(&mut feed, 2, 0);
+    feed.set_gap_limit(3);
+    let before = feed.layout(10, &mut world);
+    assert_eq!(before.items[0].y, -1);
+    // It goes. The feed fits now, and its first row stays above the viewport.
+    world.remove(&mut feed, 3);
+    let held = feed.layout(10, &mut world);
+    assert_eq!((held.items[0], held.gap), (before.items[0], 2));
+    // A row up shows it, and the reader still follows.
+    feed.scroll_by(-1);
+    let frame = feed.layout(10, &mut world);
+    assert_eq!((frame.items[0].y, frame.gap), (0, 1));
+    assert!(frame.following);
+    // Nothing is left above to scroll to.
+    feed.scroll_by(-1);
+    let again = feed.layout(10, &mut world);
+    assert_eq!((&again.items, again.gap), (&frame.items, frame.gap));
+    assert!(again.following);
+}
+
+#[test]
 fn the_held_row_survives_its_item_going() {
     let mut world = World::default();
     let mut feed = Feed::new();

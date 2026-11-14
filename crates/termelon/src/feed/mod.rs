@@ -692,10 +692,12 @@ impl<K> Feed<K> {
                         self.follow();
                         self.place_following(last, v, m, &mut measured)
                     }
-                    // They scrolled up in a feed that fits the viewport, which moved nothing,
-                    // so they follow it still.
+                    // They scrolled up in a feed that fits the viewport, so they follow it still,
+                    // from its start. (Rows that blank rows below the end held above the
+                    // viewport come back into it.)
                     Some(_) if left_follow && !above => {
                         self.anchor = Anchor::Follow;
+                        self.held = None;
                         self.place_following(last, v, m, &mut measured)
                     }
                     // Their item went, so the end comes down to fill.
