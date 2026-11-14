@@ -193,6 +193,24 @@ fn main() {
             w,
             "{n} items: push {push} ns on average, the slowest {worst} ns (each push's fastest of three)"
         );
+        // Items that come away from the end, at the start or before a status line kept last.
+        let mut front = Feed::new();
+        let start = Instant::now();
+        for key in 0..n {
+            front.push_front(key, 2);
+        }
+        let front = nanos(start) / n;
+        let mut before = Feed::new();
+        let status = before.push(u64::MAX, 1);
+        let start = Instant::now();
+        for key in 0..n {
+            before.insert_before(status, key, 2);
+        }
+        let before = nanos(start) / n;
+        let _ = writeln!(
+            w,
+            "  push_front {front} ns on average, insert_before the last item {before} ns"
+        );
         // The core alone, measuring by table lookup.
         let mut table = Table(
             (0..n)

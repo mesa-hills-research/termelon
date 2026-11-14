@@ -3,9 +3,10 @@
 ## Unreleased
 
 - `FeedView` draws a long, live list, such as a transcript, and keeps the reader's place in it.
-  Nothing off screen moves the screen, a scroll of n rows moves every row by n, a new width keeps
-  the text at the top, and a frame measures only the items it shows. `feed::Feed` is the scroll
-  core under it, for other renderers. [docs/feed.md](docs/feed.md) says how to use them.
+  Nothing off screen moves the screen, a scroll of n rows moves every row by n until the start or
+  the end stops it, a new width keeps the text at the top, and a frame measures only the items it
+  shows and those a scroll crosses. `feed::Feed` is the scroll core under it, for other renderers.
+  [docs/feed.md](docs/feed.md) says how to use them.
 - `Buffer::note_scroll` says that a widget's rows moved. Where the new
   `Capabilities::scroll_regions` is `Yes`, the encoder scrolls them in the terminal and writes
   only the rows that came in, when that saves bytes.

@@ -9,7 +9,7 @@
 //!
 //! | Key | Does |
 //! |---|---|
-//! | 1 | The place is the block at the top and a share of its height, rescaled when the block changes. Following pins the end to the last row, and reaching the bottom by any means follows again. This is the rule Arko 0.20's transcript has |
+//! | 1 | The place is the block at the top and a share of its height, rescaled when the block changes. Following pins the end to the last row, and reaching the bottom by any means follows again |
 //! | 2 | `FeedView`, following with the end on the last row |
 //! | 3 | `FeedView` with `set_gap_limit(3)`, so a shorter end leaves blank rows below it |
 //! | The wheel, ↑ and ↓, Page Up and Page Down | Scroll |
@@ -23,8 +23,7 @@
 //! rows flash for 300 ms. The row above it suggests what to try.
 //!
 //! The session is the same in every mode, and switching keeps the row at the top. Mode 1 writes
-//! every row that changed, as Arko does today, and modes 2 and 3 scroll a region of rows where the
-//! terminal can.
+//! every row that changed, and modes 2 and 3 scroll a region of rows where the terminal can.
 
 #![cfg_attr(
     not(any(unix, windows)),
@@ -1086,7 +1085,7 @@ impl Session {
         buf.set_style(Rect::new(area.x, y, area.width, 1), bar);
         let mut x = area.x;
         for (key, name, this) in [
-            ("1", "Arko 0.20", Mode::Share),
+            ("1", "block share", Mode::Share),
             ("2", "feed", Mode::Feed),
             ("3", "feed + blank rows", Mode::Gap),
         ] {

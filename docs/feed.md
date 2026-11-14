@@ -2,9 +2,10 @@
 
 `FeedView` draws a long, live list, such as an agent's transcript or a log, and keeps the reader's
 place in it. Items that come, go or grow off screen leave the screen as it is, a scroll of 3 rows
-moves every row by 3, a new width keeps the text at the top, and following the end keeps its last
-row on the bottom row. A frame measures only the items it shows, so it costs the same at a hundred
-items and at a million.
+moves every row by 3 until the feed's start or end stops it, a new width keeps the text at the top,
+and following the end keeps its last row on the bottom row. A frame measures only the items it
+shows and those a scroll crosses, so a wheel step costs the same at a hundred items and at a
+million.
 
 Under it is `termelon::feed::Feed`, the scroll core, which knows nothing of terminals and works for
 any renderer with whole-number heights.
@@ -81,6 +82,10 @@ view.feed_mut().scroll_by(-3);
 that keeps each item's rows until its text or the width changes draws a frame for the cost of
 the items on screen. The example wraps on every call to stay short.
 
+`view.layout(area, &mut messages)` lays out the frame the next render draws without drawing it,
+for an application that acts on that frame first, such as following again where it shows the
+end.
+
 ## Reporting changes
 
 Each call that adds an item gives its `ItemId`, which the application keeps with the item. Every
@@ -101,6 +106,10 @@ screen moves only the rows below it, unless the reader follows the end.
 
 A long reply that streams is best as several items, one for each paragraph or block, so a frame
 wraps only the last one and a new parse above the reader changes items the reader isn't in.
+
+An item with no rows has no place on screen, and a frame leaves it out. Each one near the screen
+is still measured and walked past in every frame, so items that a filter hides are best removed
+and added again, rather than measured at no rows.
 
 ## Marks
 
@@ -132,16 +141,18 @@ item.
 
 | Call | Does |
 |---|---|
-| `scroll_by(rows)` | Scrolls, down when positive. Scrolling down to the end follows it |
+| `scroll_by(rows)` | Scrolls, down when positive, as far as the start or the end. Scrolling down to the end follows it, with the end on the last row |
 | `follow` | Goes to the end and follows it, as End does |
 | `follow_in_place` | Follows the end from where the reader is, keeping the rows where they are while the end is in sight, as after a press that held the view still |
+| `stay` | Stops following, with the rows where the last frame showed them, as a press that holds the view still does |
 | `scroll_to_start` | Goes to the start, as Home does |
 | `place(id, row, screen_row)` | Puts a row of an item on a screen row, for a fold toggled under the pointer |
-| `seek(fraction, viewport)` | Goes to a share of the height, for a scrollbar's thumb |
+| `seek(fraction, viewport)` | Goes to a share of the height, for a scrollbar's thumb. A share of 1 follows the end |
 | `set_exact_limit(Some(rows))` | Scrolls further than `rows` land by the heights known so far, and say `Outcome::Approximate` |
 
 Only the reader's own scroll to the end turns following on. A reader a few rows above the end
-stays there when the end gets shorter, with blank rows below it.
+stays there when the end gets shorter, with blank rows below it. A scroll up from following starts
+from the rows the last frame showed, also when the end grew since.
 
 A fold that opens or closes under the pointer keeps the clicked line where it is. Find the item
 and its row under the pointer with `view.item_at(position)`, change the item, report it, and
@@ -149,8 +160,9 @@ and its row under the pointer with `view.item_at(position)`, change the item, re
 
 ## Following and blank rows
 
-While following, the end sits on the last row. When the end gets shorter, as when a status line
-goes or a closing marker re-wraps a paragraph, the rows above move down to keep it there.
+While following, the end sits on the last row, and the rows move with the viewport's bottom when
+its height changes. When the end gets shorter, as when a status line goes or a closing marker
+re-wraps a paragraph, the rows above move down to keep it there.
 
 `feed.set_gap_limit(rows)` keeps them still instead. Up to `rows` blank rows show below the end
 until content fills them, and past that the end comes back down. The default, 0, keeps the end on
@@ -200,15 +212,20 @@ On 6 cores of an i9-13980HX, release build, a 120 by 50 view of items of 1 to 55
 
 | | 100,000 items | 1,000,000 items |
 |---|---|---|
-| The core's wheel step of 3 rows, p50 / p99 | 0.24 / 0.43 µs | 0.24 / 0.42 µs |
-| The core's frame after a new width, p50 / p99 | 3.4 / 9.1 µs | 35 / 107 µs |
-| The view's wheel step, wrapping and drawing, p50 / p99 | 48 / 215 µs | 49 / 228 µs |
-| The view's frame after a new width, p50 / p99 | 251 / 366 µs | 260 / 523 µs |
-| A push, on average and at most | 60 ns, 8 µs | 63 ns, 62 µs |
+| The core's wheel step of 3 rows, p50 / p99 | 0.25 / 0.45 µs | 0.27 / 0.46 µs |
+| The core's frame after a new width, p50 / p99 | 3.3 / 8.6 µs | 33 / 93 µs |
+| The view's wheel step, wrapping and drawing, p50 / p99 | 47 / 201 µs | 53 / 240 µs |
+| The view's frame after a new width, p50 / p99 | 278 / 355 µs | 283 / 510 µs |
+| A push, on average and at most | 58 ns, 8 µs | 57 ns, 61 µs |
+| A `push_front`, on average | 0.36 µs | 5.1 µs |
+| An `insert_before` the last item, on average | 0.37 µs | 4.8 µs |
 
 The core's figures measure an item by a table lookup. The view's include wrapping the items that
 come into view with `text::wrap` and writing their cells, and the frame after a new width wraps the
-14 to 17 items on screen.
+15 to 17 items on screen.
+
+A push costs the same at any length. An item added anywhere else now and then splits a block of
+the index and rebuilds its sums, so its cost grows with the feed, as the last two rows show.
 
 ```sh
 cargo run --release -p bench --bin feed

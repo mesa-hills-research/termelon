@@ -134,8 +134,10 @@ A frame that changes no cell writes only a cursor move when the cursor moved, an
 A widget whose rows moved, such as `FeedView` on a scroll, says so with `Buffer::note_scroll`. Where
 `Capabilities::scroll_regions` is `Yes`, the encoder then sets a scroll region over those rows,
 deletes or inserts lines at its top (`CSI n M`, `CSI n L`), and writes only the rows that came in
-and any cells of the region outside the widget. It does so only when that costs fewer bytes than
-writing the rows, by the runs the diff would write either way, so a wrong note costs nothing.
+and any cells of the region outside the widget. It places the cursor itself after setting the
+region and after resetting it, rather than counting on the terminal to put it home. It does so
+only when that costs fewer bytes than writing the rows, by the runs the diff would write either
+way, so a wrong note costs nothing.
 
 Closing gives the terminal back, and so does dropping the `Terminal`, a panic (through the panic
 hook `Options::panic_hook` installs) and, where `Options::restore_on_signals` is on, a signal that
