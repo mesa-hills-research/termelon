@@ -58,7 +58,8 @@ use core::fmt;
 use index::{Cur, Index};
 
 /// An item's id. The calls that add an item give it, and every later call about the item takes
-/// it. The id of an item that was removed finds nothing.
+/// it. The id of an item that was removed finds nothing. An id belongs to the feed that gave it,
+/// and another feed may take it for one of its own items.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ItemId {
     slot: u32,
@@ -83,12 +84,15 @@ pub trait Measure<K> {
     }
 }
 
-/// Where the reader is.
+/// Where the reader is, exact after a layout. A call that moves the reader, such as removing
+/// their item, leaves a rough place until the next layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Anchor {
     /// At the end, staying there as the feed grows.
     Follow,
     /// The row `offset` of the item `item` is on the viewport's row `row`.
+    #[non_exhaustive]
     At {
         /// The item.
         item: ItemId,
@@ -172,6 +176,7 @@ pub struct Extent {
 /// One end of a selection. It names content rather than a screen row, so it keeps its text
 /// across a new layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Point {
     /// The item.
     pub item: ItemId,
@@ -181,6 +186,19 @@ pub struct Point {
     pub row: u32,
     /// The column in the row.
     pub column: u32,
+}
+
+impl Point {
+    /// The point at `column` of the item's row, which `mark` names, or `row` for an item
+    /// without marks.
+    pub fn new(item: ItemId, mark: Option<u64>, row: u32, column: u32) -> Self {
+        Self {
+            item,
+            mark,
+            row,
+            column,
+        }
+    }
 }
 
 /// The row at the top of the last frame while following, which a shorter end may not move

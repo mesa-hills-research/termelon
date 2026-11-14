@@ -788,3 +788,12 @@ fn a_screen_row_maps_to_its_item_and_row() {
     assert_eq!(s.view.item_at(Position::new(0, 12)), None);
     assert_eq!(s.view.item_at(Position::new(40, 0)), None);
 }
+
+/// A view prints in a test's failure, also when its keys don't.
+#[test]
+fn a_view_prints_whatever_its_keys_are() {
+    struct Key;
+    let mut view = FeedView::new();
+    view.feed_mut().push(Key, 1);
+    assert!(format!("{view:?}").starts_with("FeedView"));
+}

@@ -1,5 +1,6 @@
 //! The [`FeedView`] widget.
 
+use core::fmt;
 use core::mem;
 use core::ops::Range;
 
@@ -83,7 +84,6 @@ pub trait FeedRows<K>: Measure<K> {
 /// assert_eq!(row(&buffer, 0), "line 44   ");
 /// assert!(!view.feed().is_following());
 /// ```
-#[derive(Debug)]
 pub struct FeedView<K> {
     feed: Feed<K>,
     /// The width the items were measured at.
@@ -94,6 +94,17 @@ pub struct FeedView<K> {
     next: Placement,
     /// The area of the last frame.
     area: Option<Rect>,
+}
+
+impl<K> fmt::Debug for FeedView<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FeedView")
+            .field("feed", &self.feed)
+            .field("width", &self.width)
+            .field("shown", &self.shown)
+            .field("area", &self.area)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<K> Default for FeedView<K> {
@@ -195,6 +206,7 @@ impl<K> FeedView<K> {
 
     /// The widget that draws the view with `rows`, for
     /// [`Frame::render_widget`](crate::Frame::render_widget).
+    #[must_use]
     pub fn widget<'a, R: FeedRows<K>>(&'a mut self, rows: &'a mut R) -> impl Widget + 'a {
         Drawn { view: self, rows }
     }
@@ -219,12 +231,12 @@ impl<K> FeedView<K> {
         let (item, row) = self.item_at(position)?;
         let area = self.area?;
         let key = self.feed.key(item)?;
-        Some(Point {
+        Some(Point::new(
             item,
-            mark: rows.mark_at(key, row),
+            rows.mark_at(key, row),
             row,
-            column: u32::from(position.x - area.x),
-        })
+            u32::from(position.x - area.x),
+        ))
     }
 
     /// How far the rows moved up between the last frame and this one, by the first item in
