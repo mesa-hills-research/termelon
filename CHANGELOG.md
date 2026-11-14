@@ -6,10 +6,12 @@
   nothing where the end is above it already, as after a fold closed near the end. Before,
   reaching the end moved every row down by the blank rows below it.
 - `Feed::follow_in_place` keeps the rows where they are, with any blank rows below the end. Where
-  those are more than the gap limit, the reader doesn't follow until content fills them to within
-  it, rather than having the end brought down. `Feed::is_following` says no until the next layout
-  decides. With `Feed::set_gap_limit(u32::MAX)`, no line moves down while following, except to
-  give back what a shorter viewport took, after a new width, or where no row would show.
+  those are more than the gap limit, the reader stays above the end rather than having it brought
+  down, and a scroll down follows again once content has filled them to within the limit.
+  `Feed::is_following` says no until the next layout decides. With
+  `Feed::set_gap_limit(u32::MAX)`, following moves no line down, except the lines below output
+  that grows on screen (into the blank rows), to give back what a shorter viewport took, after a
+  new width, or where no row would show.
 - A scroll up from following, and `Feed::scroll_to_start`, stop following exactly where they move
   a line, also with the end still in sight. One that moves nothing, as in a feed that shows from
   its start, leaves the reader following.
