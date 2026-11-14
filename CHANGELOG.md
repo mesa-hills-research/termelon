@@ -1,12 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-14)
+
+This release is `termelon` 0.2.0. `termelon-vt` hasn't changed and stays at 0.1.0.
 
 - `FeedView` draws a long, live list, such as a transcript, and keeps the reader's place in it.
   Nothing off screen moves the screen, a scroll of n rows moves every row by n until the start or
   the end stops it, a new width keeps the text at the top, and a frame measures only the items it
   shows and those a scroll crosses. `feed::Feed` is the scroll core under it, for other renderers.
   [docs/feed.md](docs/feed.md) says how to use them.
+- While the reader follows the end, `Feed::set_gap_limit` keeps the rows still when the end gets
+  shorter, with up to that many blank rows below it. `Feed::follow_in_place` follows again without
+  closing them, and `Feed::stay` stops following where the last frame left the rows.
+- `FeedView::layout` lays out the next frame without drawing it.
 - `Buffer::note_scroll` says that a widget's rows moved. Where the new
   `Capabilities::scroll_regions` is `Yes`, the encoder scrolls them in the terminal and writes
   only the rows that came in, when that saves bytes.

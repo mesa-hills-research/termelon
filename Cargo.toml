@@ -9,14 +9,14 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mesa-hills-research/termelon"
 
 [workspace.dependencies]
-termelon = { path = "crates/termelon", version = "0.1.0" }
+termelon = { path = "crates/termelon", version = "0.2.0" }
 termelon-vt = { path = "crates/termelon-vt", version = "0.1.0" }
 unicode-width = "0.2.2"
 unicode-segmentation = "1.12.0"
