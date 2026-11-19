@@ -416,35 +416,130 @@ fn shows_background(rgb: (u8, u8, u8)) -> impl Fn(&Emulator) -> bool {
 }
 
 /// A background the program sets reaches the terminal and follows each change, and the
-/// terminal's own comes back with `None` and at close.
+/// terminal's own comes back as it was at open, with `None` and at close. Its default stays its
+/// default, and a colour a shell's theme set over it stays set.
 #[test]
 fn the_background_is_set_and_put_back() {
-    let (played, signals) = Played::new(Profile::kitty());
-    let mut terminal = open(&played, signals, &[], &Options::default());
-    let own = (0, 0, 0);
-    assert_eq!(terminal.capabilities().background, Some(Rgb::new(0, 0, 0)));
-    terminal
-        .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
-        .unwrap();
-    played.until("set", shows_background((0x13, 0x13, 0x13)));
-    terminal
-        .set_background(Some(Rgb::new(0xfa, 0xfa, 0xf0)))
-        .unwrap();
-    played.until("changed", shows_background((0xfa, 0xfa, 0xf0)));
+    for set_before in [None, Some((0x12, 0x34, 0x56))] {
+        let (played, signals) = Played::new(Profile::kitty());
+        if let Some((r, g, b)) = set_before {
+            let set = format!("\x1b]11;rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\");
+            lock(&played.emulator).feed(set.as_bytes()).unwrap();
+        }
+        let mut terminal = open(&played, signals, &[], &Options::default());
+        let own = set_before.unwrap_or((0, 0, 0));
+        let as_at_open = |emulator: &Emulator| {
+            emulator.default_background() == Some(own) && emulator.background_set() == set_before
+        };
+        let (r, g, b) = own;
+        assert_eq!(terminal.capabilities().background, Some(Rgb::new(r, g, b)));
+        terminal
+            .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
+            .unwrap();
+        played.until("set", shows_background((0x13, 0x13, 0x13)));
+        terminal
+            .set_background(Some(Rgb::new(0xfa, 0xfa, 0xf0)))
+            .unwrap();
+        played.until("changed", shows_background((0xfa, 0xfa, 0xf0)));
+        terminal.set_background(None).unwrap();
+        played.until("put back", as_at_open);
+        terminal
+            .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
+            .unwrap();
+        played.until("set again", shows_background((0x13, 0x13, 0x13)));
+        terminal.close().unwrap();
+        played.until("given back", |emulator| emulator.mode(25));
+        assert!(as_at_open(&lock(&played.emulator)), "{set_before:?}");
+        assert!(
+            lock(&played.unknown).is_empty(),
+            "{:?}",
+            lock(&played.unknown)
+        );
+    }
+}
+
+/// A background put back just before close goes back, though close drops the packet that put
+/// it back, which waited behind a frame the terminal hadn't taken.
+#[test]
+fn a_background_put_back_just_before_close_goes_back() {
+    use crate::output::writer::tests::{block_on, full_pipe};
+    use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
+    let pty = Pty::open(Size::new(80, 24));
+    let (mut read, write, _) = full_pipe();
+    let mut filler = write.try_clone().unwrap();
+    let tty = Tty {
+        input: pty.slave.try_clone().unwrap(),
+        output: write.into(),
+    };
+    let (signals, _resize, _resume) = Signals::unregistered().unwrap();
+    let options = Options {
+        capabilities: Some(Capabilities {
+            background: Some(Rgb::new(0x30, 0x0a, 0x24)),
+            ..Capabilities::default()
+        }),
+        // (Nobody answers the question the first colour asks.)
+        probe_timeout: Some(Duration::from_millis(50)),
+        ..Options::default()
+    };
+    let mut terminal = Terminal::open_on(tty, options, &Vars(&[]), signals).unwrap();
+    let mut shown = Vec::new();
+    let mut take_until = |needle: &[u8]| {
+        let started = Instant::now();
+        while find(&shown, needle).is_none() {
+            assert!(
+                started.elapsed() < LONG,
+                "{:?}",
+                String::from_utf8_lossy(&shown)
+            );
+            if matches!(wait([read.as_fd()], Some(LONG)), Ok([true])) {
+                let mut buffer = [0; 4096];
+                let count = read.read(&mut buffer).unwrap();
+                shown.extend_from_slice(&buffer[..count]);
+            }
+        }
+    };
+    let reading = std::thread::spawn(move || {
+        terminal
+            .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
+            .unwrap();
+        terminal
+    });
+    take_until(b"\x1b]11;rgb:13/13/13\x1b\\");
+    let mut terminal = reading.join().unwrap();
+    assert!(block_on(terminal.written(), LONG));
+    // The terminal takes nothing more for now, and a frame waits to be written.
+    let flags = fcntl_getfl(&filler).unwrap();
+    fcntl_setfl(&filler, flags | OFlags::NONBLOCK).unwrap();
+    while filler.write(&[b'.'; 4096]).is_ok() {}
+    fcntl_setfl(&filler, flags).unwrap();
+    let drawn = terminal.draw(|frame| {
+        frame
+            .buffer_mut()
+            .set_string(0, 0, "frame", crate::style::Style::new());
+    });
+    assert!(matches!(drawn, Ok(Drawn::Written(_))));
+    let started = Instant::now();
+    while terminal.writer_waiting().is_none() {
+        assert!(started.elapsed() < LONG, "the frame's write never started");
+        std::thread::sleep(Duration::from_millis(1));
+    }
     terminal.set_background(None).unwrap();
-    played.until("put back", shows_background(own));
-    terminal
-        .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
-        .unwrap();
-    played.until("set again", shows_background((0x13, 0x13, 0x13)));
-    terminal.close().unwrap();
-    played.until("given back", |emulator| emulator.mode(25));
-    assert!(shows_background(own)(&lock(&played.emulator)));
-    assert!(
-        lock(&played.unknown).is_empty(),
+    let closing = std::thread::spawn(move || terminal.close());
+    let back = b"\x1b]11;rgb:30/0a/24\x1b\\\x1b]111\x1b\\";
+    take_until(b"\x1b[?25h");
+    closing.join().unwrap().unwrap();
+    let after_frame = &shown[find(&shown, b"frame").unwrap()..];
+    // (Once, in the reset, since close dropped the packet that put it back.)
+    assert_eq!(
+        after_frame
+            .windows(back.len())
+            .filter(|window| window == back)
+            .count(),
+        1,
         "{:?}",
-        lock(&played.unknown)
+        String::from_utf8_lossy(after_frame)
     );
+    drop(pty);
 }
 
 /// A terminal that doesn't take the title or a copy gets neither, and one that didn't report its

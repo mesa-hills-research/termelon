@@ -18,6 +18,7 @@ use super::{
     Console, Input, InputMode, READ_RECORDS, Ready, Utf16Writer, Wake, Window, WriteUnits,
     on_console_event,
 };
+use crate::caps::Rgb;
 use crate::event::decode::{Decoder, DecoderOptions};
 use crate::event::records::{FocusRecord, InputRecord, KeyRecord, MouseRecord, WindowSizeRecord};
 use crate::event::{
@@ -25,7 +26,7 @@ use crate::event::{
 };
 use crate::layout::Size;
 use crate::output::writer::lock;
-use crate::restore::Enabled;
+use crate::restore::{Background, Enabled};
 use crate::sys::{Next, Shared};
 use crate::terminal::MouseMode;
 
@@ -723,12 +724,19 @@ fn vt_bytes_are_the_characters_of_key_downs() {
     assert_eq!(bytes, b"");
 }
 
+/// What the tests turn on, a background set over the console's own too, so each way of giving
+/// the console back shows it puts that back as it was.
 fn enabled() -> Enabled {
     Enabled {
         alternate_screen: true,
         mouse: MouseMode::ButtonsAndDrags,
         focus: true,
         bracketed_paste: true,
+        background: Some(Background {
+            set: Some(Rgb::new(0x13, 0x13, 0x13)),
+            reported: Rgb::new(0x0c, 0x0c, 0x0c),
+            over_default: true,
+        }),
         ..Enabled::default()
     }
 }

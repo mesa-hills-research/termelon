@@ -276,7 +276,7 @@ mod platform {
     use super::{Drawn, Error, Events, MouseMode, Options, Result, base64, crlf, enabled};
     use crate::caps::env::Environment;
     use crate::caps::{self, Capabilities, Rgb, Support, probe};
-    use crate::event::decode::{Decoder, DecoderOptions, Query, Reply};
+    use crate::event::decode::{ColorSlot, Decoder, DecoderOptions, Query, Reply};
     use crate::frame::{Frame, Frames};
     use crate::layout::Rect;
     use crate::layout::Size;
@@ -284,7 +284,9 @@ mod platform {
     use crate::output::{Cursor, CursorShape};
     #[cfg(unix)]
     use crate::restore::screen::Screen;
-    use crate::restore::{Background, CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
+    use crate::restore::{
+        Background, CLOSE_WAIT, Enabled, RESET_BACKGROUND, RestoreHandle, mouse_switch,
+    };
     #[cfg(unix)]
     use crate::sys::unix::{Signals, Tty, window_size};
     #[cfg(windows)]
@@ -319,6 +321,8 @@ mod platform {
         frames: Frames,
         /// The size to take when the terminal says 0x0 or nothing.
         fallback: Size,
+        /// How long a question waits for the terminal's answer, as the probe at open did.
+        probe_timeout: Duration,
     }
 
     impl std::fmt::Debug for Terminal {
@@ -501,6 +505,7 @@ mod platform {
                 caps,
                 options,
                 enabled,
+                probe_timeout,
             })
         }
 
@@ -702,30 +707,94 @@ mod platform {
         /// own on every cell sets it to that colour, so the margin matches.
         ///
         /// It goes only to a terminal that reported its background at open
-        /// ([`Capabilities::background`]), since that's the colour that goes back, and does
-        /// nothing elsewhere. Closing, a suspend, a release, a panic and a signal put it back, as
-        /// the terminal reported it and then with OSC 111, which resets it to the terminal's
-        /// default, so a profile changed meanwhile shows its new colour. A terminal can take the
-        /// colour and show it nowhere, as Ptyxis 50 does.
+        /// ([`Capabilities::background`]), and does nothing elsewhere. Closing, a stop, a release,
+        /// a panic and a signal put the terminal's back as it was at open, and so does `None`.
+        /// A colour set over the terminal's default then (with OSC 11, by a shell's theme say)
+        /// goes back as it was. The default goes back with OSC 111, which resets the background,
+        /// so a profile changed meanwhile shows its new colour.
+        ///
+        /// To tell the two apart, the first colour set resets the background, asks for it and
+        /// sets the colour, in one write, so nothing shows in between. It waits for the answer,
+        /// one round trip, at most as long as the probe at open. A terminal can take the colour
+        /// and show it nowhere, as Ptyxis 50 does.
         ///
         /// # Errors
         ///
         /// [`Error::Io`] once the terminal stopped taking output.
         pub fn set_background(&mut self, color: Option<Rgb>) -> Result<()> {
-            let background = color
-                .zip(self.caps.background)
-                .map(|(set, reported)| Background { set, reported });
-            if background == self.enabled.background {
+            let Some(reported) = self.caps.background else {
                 return Ok(());
-            }
-            let change = match (background, self.enabled.background) {
-                (Some(background), _) => background.setup(),
-                (None, Some(previous)) => previous.reset(),
-                (None, None) => Vec::new(),
             };
-            self.enabled.background = background;
+            let Some(set) = color else {
+                // (The reset keeps putting it back, since closing drops what waits.)
+                let Some(background) = self.enabled.background.filter(|set| set.set.is_some())
+                else {
+                    return Ok(());
+                };
+                let back = Background {
+                    set: None,
+                    ..background
+                };
+                self.enabled.background = Some(back);
+                self.screen.set_enabled(&self.enabled);
+                return self.send(back.reset());
+            };
+            if let Some(background) = self.enabled.background {
+                let changed = Background {
+                    set: Some(set),
+                    ..background
+                };
+                if changed == background {
+                    return Ok(());
+                }
+                self.enabled.background = Some(changed);
+                self.screen.set_enabled(&self.enabled);
+                return self.send(changed.setup());
+            }
+            // (Until the answer comes, the reset puts the default back.)
+            let mut background = Background {
+                set: Some(set),
+                reported,
+                over_default: false,
+            };
+            self.enabled.background = Some(background);
             self.screen.set_enabled(&self.enabled);
-            self.send(change)
+            let mut question = RESET_BACKGROUND.to_vec();
+            question.extend_from_slice(b"\x1b]11;?\x1b\\");
+            question.extend_from_slice(&background.setup());
+            question.extend_from_slice(b"\x1b[c");
+            let default = self
+                .ask_now(&question)?
+                .into_iter()
+                .find_map(|reply| match reply {
+                    Reply::Color {
+                        which: ColorSlot::Background,
+                        rgb,
+                    } => Some(rgb),
+                    _ => None,
+                });
+            background.over_default = default.is_some_and(|default| default != reported);
+            self.enabled.background = Some(background);
+            self.screen.set_enabled(&self.enabled);
+            Ok(())
+        }
+
+        /// Asks the terminal `question`, which ends with DA1, and returns its answers, waiting at
+        /// most as long as the probe at open. On Windows the console's input comes as bytes
+        /// meanwhile, where answers read as answers.
+        fn ask_now(&self, question: &[u8]) -> Result<Vec<Reply>> {
+            #[cfg(windows)]
+            self.screen.set_input(InputMode::Vt)?;
+            let replies = ask(&self.screen, question, 0, self.probe_timeout)?;
+            #[cfg(windows)]
+            {
+                if !replies.iter().any(probe::is_end) {
+                    // (Replies that come late decode as replies a moment longer, and go.)
+                    std::thread::sleep(LATE_REPLIES);
+                }
+                self.screen.set_input(InputMode::Records)?;
+            }
+            Ok(replies)
         }
 
         /// The terminal's size as it says now. SIGWINCH reaches only the terminal's foreground

@@ -8,12 +8,14 @@ This release is `termelon` 0.2.2 and `termelon-vt` 0.1.1.
   margin many terminals keep around the cells. A program that paints its own background on every
   cell sets it to that colour, so no frame of the terminal's colour shows around the screen. It
   goes only to a terminal that reported its background at open. Closing, a stop, a release, a panic
-  and a signal put it back, with the colour the terminal reported and then OSC 111, so a profile
-  changed meanwhile shows its new colour. `None` puts it back at once.
+  and a signal put it back as it was at open, and so does `None`. A colour a shell's theme set over
+  the default goes back as it was. The default goes back with OSC 111, so a profile changed
+  meanwhile shows its new colour. The first colour set finds out which it was, in the write that
+  sets it, and waits one round trip for the answer.
 - `termelon-vt` takes OSC 10 and 11 with a colour (`rgb:R/G/B` and `#RGB`, 1 to 4 hex digits a
   channel), and OSC 110 and 111. `Emulator::default_foreground` and `default_background` give the
-  colours as set, else the profile's, and a query answers with them. A full reset keeps them, as
-  in VTE.
+  colours as set, else the profile's, and a query answers with them. `foreground_set` and
+  `background_set` give the colours set alone. A full reset keeps them, as in VTE.
 
 ## 0.2.1 (2026-11-14)
 

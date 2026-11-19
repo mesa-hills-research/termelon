@@ -143,8 +143,8 @@ Closing gives the terminal back, and so does dropping the `Terminal`, a panic (t
 hook `Options::panic_hook` installs) and, where `Options::restore_on_signals` is on, a signal that
 ends the program. The reset packet is built at open from what was enabled, and changes as the
 program changes the mouse reports or the background. It ends any synchronized update, puts back the
-background a program set (`OSC 11` with the colour the terminal reported at open, then `OSC 111`),
-pops the kitty keyboard flags, turns off the reports that were on, resets the pen, turns autowrap
+background as it was at open if a program ever set it, pops the kitty keyboard flags, turns off the
+reports that were on, resets the pen, turns autowrap
 back on, resets the scroll region, leaves the alternate screen, shows the cursor and restores the
 title. A stop (SIGTSTP) writes the same reset and a run after it the setup again. When the writer is
 stuck mid-write, `RestoreHandle::restore_now` writes CAN, ST and the reset from a thread of its own,
@@ -154,9 +154,20 @@ once, and the writer stops within the 4 KiB chunk it was writing.
 terminals keep around the cells (a few pixels in VTE, 8 in Windows Terminal's default profile) and
 of cells with the default background. A program that paints its own background on every cell sets
 it to that colour, so the margin matches. It goes only to a terminal that reported its background
-at open, since that's the colour that goes back first, for a terminal without `OSC 111`. `OSC 111`
-then resets it to the terminal's default, so a profile changed meanwhile shows its new colour. A
-process killed with SIGKILL can't put it back, and neither can the alternate screen or the modes,
+at open.
+
+The background goes back as it was at open. That may be the terminal's default, or a colour a
+shell's theme set over it with `OSC 11`. The first colour a program sets tells them apart. One
+write resets the background (`OSC 111`), asks for it (`OSC 11 ; ?`), sets the colour and asks DA1,
+so the reset never shows. The program waits for the answer, one round trip. When the answer differs
+from the colour reported at open, that colour was set over the default and goes back with
+`OSC 11`. Otherwise the reported colour goes back, for a terminal without `OSC 111`, and then
+`OSC 111`, so the default stays the default and a profile changed meanwhile shows its new colour.
+Once a program set the background, the reset keeps putting it back, also after `set_background(None)`
+put it back, since closing drops a packet that hasn't started and putting it back twice changes
+nothing.
+
+A process killed with SIGKILL can't put it back, and neither can the alternate screen or the modes,
 so the terminal keeps the colour until `printf '\e]111\a'`, or until another program that sets it
 gives it back. Some terminals take the colour and show it nowhere. Ptyxis 50 draws its own
 background behind VTE's cells, so its margin keeps the profile's colour.

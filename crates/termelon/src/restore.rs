@@ -49,36 +49,48 @@ pub(crate) struct Enabled {
     pub(crate) hyperlinks: bool,
     /// Frames may change the cursor's shape, so the reset puts the default back.
     pub(crate) cursor_shape: bool,
-    /// The terminal's background, set with OSC 11 while the program has the terminal.
+    /// The terminal's background, from the first time the program set it with OSC 11.
     pub(crate) background: Option<Background>,
 }
 
-/// The terminal's background as a program set it, and as the terminal reported it at open.
+/// The terminal's background as a program set it, and what puts the terminal's own back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Background {
-    /// The colour set.
-    pub(crate) set: Rgb,
-    /// The colour the terminal reported, which goes back first, for a terminal without OSC 111.
+    /// The colour set, `None` once the program put the terminal's own back. The reset puts it
+    /// back all the same, since what put it back may not have reached the terminal (closing
+    /// drops what waits), and putting it back twice changes nothing.
+    pub(crate) set: Option<Rgb>,
+    /// The colour the terminal reported at open.
     pub(crate) reported: Rgb,
+    /// That colour was set over the terminal's default (with OSC 11, by a shell's theme say), so
+    /// it goes back as it was, set, rather than reset.
+    pub(crate) over_default: bool,
 }
 
 impl Background {
     /// What sets it.
     pub(crate) fn setup(self) -> Vec<u8> {
-        osc_11(self.set)
+        self.set.map(osc_11).unwrap_or_default()
     }
 
-    /// What puts the terminal's own back. The colour it reported, then OSC 111, which resets it
-    /// to the terminal's default, and so to its profile's colour now, if that changed meanwhile.
+    /// What puts the terminal's own back. A colour that was set over the default goes back as it
+    /// was. Otherwise OSC 111 resets it to the terminal's default, so a profile changed meanwhile
+    /// shows its new colour, after the colour the terminal reported, for a terminal without
+    /// OSC 111.
     pub(crate) fn reset(self) -> Vec<u8> {
         let mut out = osc_11(self.reported);
-        out.extend_from_slice(b"\x1b]111\x1b\\");
+        if !self.over_default {
+            out.extend_from_slice(RESET_BACKGROUND);
+        }
         out
     }
 }
 
+/// OSC 111, which resets the terminal's background to its default.
+pub(crate) const RESET_BACKGROUND: &[u8] = b"\x1b]111\x1b\\";
+
 /// OSC 11, which sets the terminal's background to `color`.
-fn osc_11(color: Rgb) -> Vec<u8> {
+pub(crate) fn osc_11(color: Rgb) -> Vec<u8> {
     let Rgb { r, g, b } = color;
     format!("\x1b]11;rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\").into_bytes()
 }
@@ -788,9 +800,44 @@ mod tests {
             hyperlinks: true,
             cursor_shape: true,
             background: Some(Background {
-                set: Rgb::new(0x13, 0x13, 0x13),
+                set: Some(Rgb::new(0x13, 0x13, 0x13)),
                 reported: Rgb::new(0xfa, 0xfa, 0xf0),
+                over_default: false,
             }),
+        }
+    }
+
+    /// The reset puts the terminal's background back as it was at open. One set over the default
+    /// goes back as it was, and the default with OSC 111. Once the program put it back, setting
+    /// up sets nothing and the reset still puts it back.
+    #[test]
+    fn the_reset_puts_the_terminals_background_back() {
+        let enabled = |set, over_default| Enabled {
+            background: Some(Background {
+                set,
+                reported: Rgb::new(0x30, 0x0a, 0x24),
+                over_default,
+            }),
+            ..Enabled::default()
+        };
+        let theme = Some(Rgb::new(0x13, 0x13, 0x13));
+        let reset = |enabled: Enabled| String::from_utf8(enabled.reset()).unwrap();
+        assert_eq!(
+            reset(enabled(theme, false)),
+            "\x1b[?2026l\x1b]11;rgb:30/0a/24\x1b\\\x1b]111\x1b\\\x1b[0m\x1b[?7h\x1b[r\x1b[?25h"
+        );
+        assert_eq!(
+            reset(enabled(theme, true)),
+            "\x1b[?2026l\x1b]11;rgb:30/0a/24\x1b\\\x1b[0m\x1b[?7h\x1b[r\x1b[?25h"
+        );
+        for over_default in [false, true] {
+            assert_eq!(
+                enabled(theme, over_default).setup(),
+                b"\x1b[?25l\x1b[?7l\x1b]11;rgb:13/13/13\x1b\\"
+            );
+            let back = enabled(None, over_default);
+            assert_eq!(back.setup(), b"\x1b[?25l\x1b[?7l");
+            assert_eq!(back.reset(), enabled(theme, over_default).reset());
         }
     }
 
@@ -994,9 +1041,10 @@ mod tests {
         use std::io::{self, Write};
         use std::time::Duration;
 
-        /// What the tests turn on, the background too, so each way of giving the terminal back
-        /// shows it puts the terminal's own back.
-        fn enabled() -> Enabled {
+        /// What the tests turn on, a background too, so each way of giving the terminal back shows
+        /// it puts the terminal's own back. The terminal's background at open was its default,
+        /// or one set over it with `over_default`.
+        fn enabled(over_default: bool) -> Enabled {
             Enabled {
                 alternate_screen: true,
                 mouse: MouseMode::ButtonsAndDrags,
@@ -1004,20 +1052,25 @@ mod tests {
                 bracketed_paste: true,
                 save_title: true,
                 background: Some(Background {
-                    set: Rgb::new(0x13, 0x13, 0x13),
+                    set: Some(Rgb::new(0x13, 0x13, 0x13)),
                     reported: Rgb::new(0x30, 0x0a, 0x24),
+                    over_default,
                 }),
                 ..Enabled::default()
             }
         }
 
+        /// The terminal's background at open as each test has it, its default or one set over
+        /// it, with the name a child process's case takes for it.
+        const BACKGROUNDS: [(bool, &str); 2] = [(false, ""), (true, "-over-default")];
+
         /// A screen on `pty`, with pipes that stand in for SIGWINCH and SIGCONT.
-        fn screen(pty: &Pty) -> (Screen, io::PipeWriter, io::PipeWriter) {
+        fn screen(pty: &Pty, over_default: bool) -> (Screen, io::PipeWriter, io::PipeWriter) {
             let (signals, resize, resume) = Signals::unregistered().unwrap();
             let screen =
                 Screen::open_with(pty.tty(), |_| Bytes::default(), Duration::ZERO, signals)
                     .unwrap();
-            screen.enable(&enabled()).unwrap();
+            screen.enable(&enabled(over_default)).unwrap();
             (screen, resize, resume)
         }
 
@@ -1025,69 +1078,81 @@ mod tests {
         /// and closing writes the reset, then the tail, and puts the modes back exactly.
         #[test]
         fn a_screen_takes_the_terminal_and_gives_it_back_exactly() {
-            let mut pty = Pty::open(Size::new(80, 24));
-            let before = pty.modes();
-            let (screen, _resize, _resume) = screen(&pty);
-            assert!(pty.is_raw());
-            assert_eq!(screen.shared().size(), Size::new(80, 24));
-            pty.read_until(0, &enabled().setup(), LONG);
-            pty.type_in(b"q");
-            assert_eq!(next(screen.shared()), key('q', KeyModifiers::NONE));
-            let shared = screen.shared().clone();
-            let handle = screen.restore_handle();
-            assert!(screen.close(b"[tail]", LONG));
-            let reset = pty.read_until(0, &enabled().reset(), LONG);
-            pty.read_until(reset, b"[tail]", LONG);
-            assert_eq!(pty.modes(), before);
-            assert!(handle.is_given_back());
-            assert_eq!(shared.events.next_timeout(LONG), Next::Closed);
-            // A restore handle kept after close writes nothing more.
-            assert!(handle.restore_now(LONG));
-            pty.read_ready();
-            assert_eq!(find(&pty.shown[reset..], b"\x18"), None);
-            assert_eq!(pty.modes(), before);
+            for (over_default, _) in BACKGROUNDS {
+                let mut pty = Pty::open(Size::new(80, 24));
+                let before = pty.modes();
+                let (screen, _resize, _resume) = screen(&pty, over_default);
+                assert!(pty.is_raw());
+                assert_eq!(screen.shared().size(), Size::new(80, 24));
+                pty.read_until(0, &enabled(over_default).setup(), LONG);
+                pty.type_in(b"q");
+                assert_eq!(next(screen.shared()), key('q', KeyModifiers::NONE));
+                let shared = screen.shared().clone();
+                let handle = screen.restore_handle();
+                assert!(screen.close(b"[tail]", LONG));
+                let reset = pty.read_until(0, &enabled(over_default).reset(), LONG);
+                pty.read_until(reset, b"[tail]", LONG);
+                assert_eq!(pty.modes(), before);
+                assert!(handle.is_given_back());
+                assert_eq!(shared.events.next_timeout(LONG), Next::Closed);
+                // A restore handle kept after close writes nothing more.
+                assert!(handle.restore_now(LONG));
+                pty.read_ready();
+                assert_eq!(find(&pty.shown[reset..], b"\x18"), None);
+                assert_eq!(pty.modes(), before);
+            }
         }
 
         /// After a stop that something else ended, SIGCONT puts raw mode back, sends the reset and
         /// then the setup, so the stacks the setup pushes don't grow, queues `Resumed`, and the
-        /// next frame redraws everything.
+        /// next frame redraws everything. A background the program put back is put back again
+        /// and not set.
         #[test]
         fn sigcont_takes_the_terminal_back() {
-            let mut pty = Pty::open(Size::new(80, 24));
-            let before = pty.modes();
-            let (screen, _resize, mut resume) = screen(&pty);
-            let setup = enabled().setup();
-            let first = pty.read_until(0, &setup, LONG);
-            assert!(screen.shared().take_redraw());
-            // (A shell had the terminal meanwhile, in its own modes.)
-            let raw = pty.modes();
-            {
-                let mut shell = rustix::termios::tcgetattr(&pty.slave).unwrap();
-                shell.local_modes |=
-                    rustix::termios::LocalModes::ICANON | rustix::termios::LocalModes::ECHO;
-                rustix::termios::tcsetattr(
-                    &pty.slave,
-                    rustix::termios::OptionalActions::Now,
-                    &shell,
-                )
-                .unwrap();
+            for (over_default, _) in BACKGROUNDS {
+                let mut pty = Pty::open(Size::new(80, 24));
+                let before = pty.modes();
+                let (screen, _resize, mut resume) = screen(&pty, over_default);
+                let setup = enabled(over_default).setup();
+                let first = pty.read_until(0, &setup, LONG);
+                assert!(screen.shared().take_redraw());
+                // (A shell had the terminal meanwhile, in its own modes.)
+                let raw = pty.modes();
+                {
+                    let mut shell = rustix::termios::tcgetattr(&pty.slave).unwrap();
+                    shell.local_modes |=
+                        rustix::termios::LocalModes::ICANON | rustix::termios::LocalModes::ECHO;
+                    rustix::termios::tcsetattr(
+                        &pty.slave,
+                        rustix::termios::OptionalActions::Now,
+                        &shell,
+                    )
+                    .unwrap();
+                }
+                // (The program turned the mouse off since it opened, and put the background
+                // back.)
+                let enabled = enabled(over_default);
+                let changed = Enabled {
+                    mouse: MouseMode::Off,
+                    background: enabled
+                        .background
+                        .map(|set| Background { set: None, ..set }),
+                    ..enabled
+                };
+                screen.set_enabled(&changed);
+                resume.write_all(b"X").unwrap();
+                assert_eq!(next(screen.shared()), Event::Resumed);
+                assert_eq!(pty.modes(), raw);
+                let mut again = changed.reset();
+                again.extend_from_slice(&changed.setup());
+                let resumed = pty.read_until(first + setup.len(), &again, LONG);
+                assert!(find(&changed.reset(), b"\x1b]11;rgb:30/0a/24").is_some());
+                assert_eq!(find(&changed.setup(), b"\x1b]11;"), None);
+                assert!(screen.shared().take_redraw());
+                assert!(screen.close(b"", LONG));
+                pty.read_until(resumed + again.len(), &changed.reset(), LONG);
+                assert_eq!(pty.modes(), before);
             }
-            // (The program turned the mouse off since it opened.)
-            let changed = Enabled {
-                mouse: MouseMode::Off,
-                ..enabled()
-            };
-            screen.set_enabled(&changed);
-            resume.write_all(b"X").unwrap();
-            assert_eq!(next(screen.shared()), Event::Resumed);
-            assert_eq!(pty.modes(), raw);
-            let mut again = changed.reset();
-            again.extend_from_slice(&changed.setup());
-            pty.read_until(first + setup.len(), &again, LONG);
-            assert!(screen.shared().take_redraw());
-            assert!(screen.close(b"", LONG));
-            pty.read_until(first + setup.len(), &changed.reset(), LONG);
-            assert_eq!(pty.modes(), before);
         }
 
         /// The panics of [`a_panic_gives_the_terminal_back_before_its_message`], each with what it
@@ -1105,7 +1170,13 @@ mod tests {
         fn a_panic_gives_the_terminal_back_before_its_message() {
             const TEST: &str = "a_panic_gives_the_terminal_back_before_its_message";
             for (case, message, _) in PANICS {
-                if is_child(case) {
+                let Some((over_default, _)) = BACKGROUNDS
+                    .into_iter()
+                    .find(|(_, name)| is_child(&format!("{case}{name}")))
+                else {
+                    continue;
+                };
+                {
                     install_panic_hook();
                     let screen = Screen::open_with(
                         crate::sys::unix::Tty::open().unwrap(),
@@ -1114,7 +1185,7 @@ mod tests {
                         Signals::register(false).unwrap(),
                     )
                     .unwrap();
-                    screen.enable(&enabled()).unwrap();
+                    screen.enable(&enabled(over_default)).unwrap();
                     screen.writer().send(b"<ready>".to_vec()).unwrap();
                     assert!(screen.writer().wait_idle(LONG));
                     assert!(case != "panic-opening", "{message}");
@@ -1135,11 +1206,16 @@ mod tests {
                     return;
                 }
             }
-            let reset = enabled().reset();
-            for (case, message, gives_back) in PANICS {
+            for ((case, message, gives_back), (over_default, name)) in PANICS
+                .into_iter()
+                .flat_map(|panic| BACKGROUNDS.map(|background| (panic, background)))
+            {
+                let reset = enabled(over_default).reset();
+                let opening = case == "panic-opening";
+                let case = format!("{case}{name}");
                 let mut pty = Pty::open(Size::new(80, 24));
                 let before = pty.modes();
-                let mut child = spawn_child(module_path!(), TEST, case, &pty);
+                let mut child = spawn_child(module_path!(), TEST, &case, &pty);
                 let ready = pty.read_until(0, b"<ready>", LONG);
                 let message = pty.read_until(ready, message.as_bytes(), LONG);
                 let status = child.wait().unwrap();
@@ -1148,11 +1224,7 @@ mod tests {
                 let given_back = pty.read_until(ready, &reset, LONG);
                 assert_eq!(given_back < message, gives_back, "{case}: {shown:?}");
                 // (Only the opening thread's panic fails the child's test.)
-                assert_eq!(
-                    status.success(),
-                    case != "panic-opening",
-                    "{case}: {shown:?}"
-                );
+                assert_eq!(status.success(), !opening, "{case}: {shown:?}");
                 // Once the terminal is given back, nothing the program writes reaches it.
                 let after = find(&pty.shown, b"<after>");
                 assert_eq!(after.is_some(), !gives_back, "{case}: {shown:?}");
@@ -1168,7 +1240,13 @@ mod tests {
             use rustix::process::{Pid, Signal, WaitOptions, kill_process, waitpid};
             const TEST: &str = "a_stop_gives_the_terminal_back_until_the_process_runs_again";
             for case in ["suspend", "outside"] {
-                if is_child(case) {
+                let Some((over_default, _)) = BACKGROUNDS
+                    .into_iter()
+                    .find(|(_, name)| is_child(&format!("{case}{name}")))
+                else {
+                    continue;
+                };
+                {
                     let screen = Screen::open_with(
                         crate::sys::unix::Tty::open().unwrap(),
                         |_| Bytes::default(),
@@ -1176,7 +1254,7 @@ mod tests {
                         Signals::register(false).unwrap(),
                     )
                     .unwrap();
-                    screen.enable(&enabled()).unwrap();
+                    screen.enable(&enabled(over_default)).unwrap();
                     assert!(screen.shared().take_redraw());
                     screen.writer().send(b"<ready>".to_vec()).unwrap();
                     if case == "suspend" {
@@ -1204,14 +1282,20 @@ mod tests {
                     return;
                 }
             }
-            let (setup, reset) = (enabled().setup(), enabled().reset());
-            for case in ["suspend", "outside"] {
+            for (case, (over_default, name)) in ["suspend", "outside"]
+                .into_iter()
+                .flat_map(|case| BACKGROUNDS.map(|background| (case, background)))
+            {
+                let enabled = enabled(over_default);
+                let (setup, reset) = (enabled.setup(), enabled.reset());
+                let outside = case == "outside";
+                let case = format!("{case}{name}");
                 let mut pty = Pty::open(Size::new(80, 24));
                 let before = pty.modes();
-                let mut child = spawn_child(module_path!(), TEST, case, &pty);
+                let mut child = spawn_child(module_path!(), TEST, &case, &pty);
                 let pid = Pid::from_child(&child);
                 let ready = pty.read_until(0, b"<ready>", LONG);
-                if case == "outside" {
+                if outside {
                     kill_process(pid, Signal::TSTP).unwrap();
                 }
                 let given_back = pty.read_until(ready, &reset, LONG);
@@ -1249,35 +1333,41 @@ mod tests {
             use std::os::unix::process::ExitStatusExt;
             const TEST: &str = "signals_act_as_before_once_the_terminal_closes";
             for case in ["term-open", "after-close"] {
-                if is_child(case) {
-                    let screen = Screen::open_with(
-                        crate::sys::unix::Tty::open().unwrap(),
-                        |_| Bytes::default(),
-                        Duration::ZERO,
-                        Signals::register(true).unwrap(),
-                    )
-                    .unwrap();
-                    screen.enable(&enabled()).unwrap();
-                    if case == "after-close" {
-                        assert!(screen.close(b"<closed>", LONG));
-                    } else {
-                        screen.writer().send(b"<ready>".to_vec()).unwrap();
-                    }
-                    std::thread::sleep(Duration::from_secs(10));
-                    return;
+                let Some((over_default, _)) = BACKGROUNDS
+                    .into_iter()
+                    .find(|(_, name)| is_child(&format!("{case}{name}")))
+                else {
+                    continue;
+                };
+                let screen = Screen::open_with(
+                    crate::sys::unix::Tty::open().unwrap(),
+                    |_| Bytes::default(),
+                    Duration::ZERO,
+                    Signals::register(true).unwrap(),
+                )
+                .unwrap();
+                screen.enable(&enabled(over_default)).unwrap();
+                if case == "after-close" {
+                    assert!(screen.close(b"<closed>", LONG));
+                } else {
+                    screen.writer().send(b"<ready>".to_vec()).unwrap();
                 }
+                std::thread::sleep(Duration::from_secs(10));
+                return;
             }
-            let reset = enabled().reset();
-            let mut pty = Pty::open(Size::new(80, 24));
-            let before = pty.modes();
-            let child = spawn_child(module_path!(), TEST, "term-open", &pty);
-            let ready = pty.read_until(0, b"<ready>", LONG);
-            kill_process(Pid::from_child(&child), Signal::TERM).unwrap();
-            let mut child = child;
-            let status = child.wait().unwrap();
-            assert_eq!(status.signal(), Some(Signal::TERM.as_raw()), "{status}");
-            pty.read_until(ready, &reset, LONG);
-            assert_eq!(pty.modes(), before);
+            for (over_default, name) in BACKGROUNDS {
+                let reset = enabled(over_default).reset();
+                let mut pty = Pty::open(Size::new(80, 24));
+                let before = pty.modes();
+                let child = spawn_child(module_path!(), TEST, &format!("term-open{name}"), &pty);
+                let ready = pty.read_until(0, b"<ready>", LONG);
+                kill_process(Pid::from_child(&child), Signal::TERM).unwrap();
+                let mut child = child;
+                let status = child.wait().unwrap();
+                assert_eq!(status.signal(), Some(Signal::TERM.as_raw()), "{status}");
+                pty.read_until(ready, &reset, LONG);
+                assert_eq!(pty.modes(), before);
+            }
 
             let mut pty = Pty::open(Size::new(80, 24));
             let mut child = spawn_child(module_path!(), TEST, "after-close", &pty);
