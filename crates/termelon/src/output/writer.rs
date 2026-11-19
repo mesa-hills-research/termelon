@@ -313,6 +313,12 @@ impl Writer {
         !lock(&self.shared.state).busy()
     }
 
+    /// Whether the program closed, so what waited was dropped and the reset queued.
+    #[cfg(all(test, unix))]
+    pub(crate) fn is_closed(&self) -> bool {
+        lock(&self.shared.state).phase != Phase::Open
+    }
+
     /// Why the writer writes no more, if it doesn't.
     pub(crate) fn failure(&self) -> Option<Failure> {
         lock(&self.shared.state).failed

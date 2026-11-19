@@ -538,10 +538,15 @@ fn turned_off_just_before_close(
         std::thread::sleep(Duration::from_millis(1));
     }
     turn_off(&mut terminal);
+    let writer = terminal.restore_handle().writer().unwrap();
     let closing = std::thread::spawn(move || terminal.close());
-    // (The close drops what waits before the terminal reads again, which takes it a moment to
-    // start. It waits a second for the terminal to take the reset.)
-    std::thread::sleep(Duration::from_millis(200));
+    // (The terminal reads again once the close dropped what waited. The close waits a second for
+    // it to take the reset.)
+    let started = Instant::now();
+    while !writer.is_closed() {
+        assert!(started.elapsed() < LONG, "the close never started");
+        std::thread::sleep(Duration::from_millis(1));
+    }
     take_until(b"\x1b[?25h");
     closing.join().unwrap().unwrap();
     drop(pty);

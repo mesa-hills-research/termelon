@@ -343,6 +343,12 @@ impl RestoreHandle {
             .map(|since| since.elapsed())
     }
 
+    /// The writer, while a handle on it is left, for tests that watch it.
+    #[cfg(all(test, unix))]
+    pub(crate) fn writer(&self) -> Option<Writer> {
+        self.inner.takeover.writer()
+    }
+
     /// Whether the terminal was given back, so its modes are the program's own again.
     pub(crate) fn is_given_back(&self) -> bool {
         self.inner.given_back.load(Ordering::SeqCst)
