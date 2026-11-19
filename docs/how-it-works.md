@@ -172,9 +172,10 @@ Once a program set the background, the reset keeps putting it back, also after
 back twice changes nothing.
 
 A process killed with SIGKILL can't put it back, and neither can the alternate screen or the modes,
-so the terminal keeps the colour until `printf '\e]111\a'`, or until another program that sets it
-gives it back. Some terminals take the colour and show it nowhere. Ptyxis 50 draws its own
-background behind VTE's cells, so its margin keeps the profile's colour.
+so the terminal keeps the colour until `printf '\e]111\a'` resets it. A program that sets the
+background later finds that colour set over the default, and keeps it. Some terminals take the
+colour and show it nowhere. Ptyxis 50 draws its own background behind VTE's cells, so its margin
+keeps the profile's colour.
 
 ## Input
 
