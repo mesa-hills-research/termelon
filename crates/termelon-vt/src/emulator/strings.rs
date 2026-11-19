@@ -47,12 +47,13 @@ impl Emulator {
                 }
             }
             ("10" | "11", Some("?")) => {
-                let color = if number == "10" {
-                    self.profile.foreground
+                // (A terminal that doesn't answer for its own colour doesn't for one set.)
+                let (profile, color) = if number == "10" {
+                    (self.profile.foreground, self.default_foreground())
                 } else {
-                    self.profile.background
+                    (self.profile.background, self.default_background())
                 };
-                if let Some((r, g, b)) = color {
+                if let Some((r, g, b)) = profile.and(color) {
                     let end = match terminator {
                         Terminator::Bel => "\x07",
                         Terminator::St => "\x1b\\",
@@ -65,6 +66,15 @@ impl Emulator {
                     );
                     self.reply(answer.as_bytes());
                 }
+            }
+            ("10" | "11", Some(spec)) => {
+                let Some(color) = parse_color(spec) else {
+                    return false;
+                };
+                self.colors[usize::from(number == "11")] = Some(color);
+            }
+            ("110" | "111", None | Some("")) => {
+                self.colors[usize::from(number == "111")] = None;
             }
             ("52", Some(rest)) => {
                 let Some((selection, payload)) = rest.split_once(';') else {
@@ -136,6 +146,56 @@ fn hex_encode(bytes: &[u8]) -> String {
         let _ = write!(out, "{b:02X}");
     }
     out
+}
+
+/// A colour as OSC 10 and 11 set it, in `XParseColor`'s `rgb:R/G/B` form (1 to 4 hex digits a
+/// channel, scaled) or its `#RGB` forms (1 to 4 digits a channel, the high bits). Names aren't
+/// known.
+pub(crate) fn parse_color(spec: &str) -> Option<(u8, u8, u8)> {
+    // A channel's value and its number of bits.
+    let hex = |digits: &str| -> Option<(u32, u32)> {
+        let bits = match digits.len() {
+            1 => 4,
+            2 => 8,
+            3 => 12,
+            4 => 16,
+            _ => return None,
+        };
+        if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some((u32::from_str_radix(digits, 16).ok()?, bits))
+    };
+    let channels: Vec<u8> = if let Some(rest) = spec.strip_prefix("rgb:") {
+        rest.split('/')
+            .map(|digits| {
+                let (value, bits) = hex(digits)?;
+                let max = (1 << bits) - 1;
+                u8::try_from((value * 255 + max / 2) / max).ok()
+            })
+            .collect::<Option<_>>()?
+    } else {
+        let rest = spec.strip_prefix('#')?;
+        let len = rest.len() / 3;
+        if len == 0 || rest.len() != len * 3 {
+            return None;
+        }
+        (0..3)
+            .map(|at| {
+                let (value, bits) = hex(rest.get(at * len..(at + 1) * len)?)?;
+                let high = if bits < 8 {
+                    value << (8 - bits)
+                } else {
+                    value >> (bits - 8)
+                };
+                u8::try_from(high).ok()
+            })
+            .collect::<Option<_>>()?
+    };
+    match channels[..] {
+        [r, g, b] => Some((r, g, b)),
+        _ => None,
+    }
 }
 
 /// Decodes standard base64, with or without padding. Returns `None` on any other byte.

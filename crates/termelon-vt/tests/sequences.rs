@@ -1069,6 +1069,52 @@ fn osc_colour_queries_answer_with_the_query_terminator() {
 }
 
 #[test]
+fn osc_10_and_11_set_the_default_colours_until_110_and_111() {
+    let mut term = run(5, 1, b"\x1b]11;rgb:13/13/13\x1b\\\x1b]10;#dedede\x07");
+    assert_eq!(term.default_background(), Some((0x13, 0x13, 0x13)));
+    assert_eq!(term.default_foreground(), Some((0xde, 0xde, 0xde)));
+    term.feed(b"\x1b]11;?\x1b\\").unwrap();
+    assert_eq!(term.take_output(), b"\x1b]11;rgb:1313/1313/1313\x1b\\");
+    // A full reset keeps them, as in VTE.
+    term.feed(b"\x1bc").unwrap();
+    assert_eq!(term.default_background(), Some((0x13, 0x13, 0x13)));
+    term.feed(b"\x1b]111\x1b\\").unwrap();
+    assert_eq!(term.default_background(), Some((0xff, 0xff, 0xff)));
+    assert_eq!(term.default_foreground(), Some((0xde, 0xde, 0xde)));
+    term.feed(b"\x1b]110;\x07").unwrap();
+    assert_eq!(term.default_foreground(), Some((0, 0, 0)));
+    // Every channel width XParseColor takes, scaled in `rgb:` and the high bits after `#`.
+    for (spec, color) in [
+        ("rgb:f/8/0", (0xff, 0x88, 0x00)),
+        ("rgb:3030/0a0a/2424", (0x30, 0x0a, 0x24)),
+        ("rgb:fff/000/800", (0xff, 0x00, 0x80)),
+        ("#f80", (0xf0, 0x80, 0x00)),
+        ("#300a24", (0x30, 0x0a, 0x24)),
+        ("#3000a0240", (0x30, 0x0a, 0x24)),
+        ("#30000a002400", (0x30, 0x0a, 0x24)),
+    ] {
+        let term = run(5, 1, format!("\x1b]11;{spec}\x1b\\").as_bytes());
+        assert_eq!(term.default_background(), Some(color), "{spec}");
+    }
+    assert_eq!(
+        unknown(b"\x1b]11;rgb:1/2\x07\x1b]11;red\x07\x1b]11;#12345\x07"),
+        [
+            "`\\e]11;rgb:1/2\\x07`",
+            "`\\e]11;red\\x07`",
+            "`\\e]11;#12345\\x07`"
+        ]
+    );
+}
+
+#[test]
+fn a_terminal_that_doesnt_tell_its_background_doesnt_tell_one_set() {
+    let mut term = run_as(Profile::silent(), 5, 1, b"\x1b]11;rgb:13/13/13\x1b\\");
+    assert_eq!(term.default_background(), Some((0x13, 0x13, 0x13)));
+    term.feed(b"\x1b]11;?\x1b\\").unwrap();
+    assert_eq!(term.take_output(), b"");
+}
+
+#[test]
 fn osc_52_writes_are_recorded() {
     let term = run(5, 1, b"\x1b]52;c;aGVsbG8=\x07\x1b]52;;\x07\x1b]52;c;?\x07");
     let writes = term.clipboard();

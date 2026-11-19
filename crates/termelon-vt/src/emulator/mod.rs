@@ -207,6 +207,9 @@ pub struct Emulator {
     title: String,
     icon: String,
     title_stack: Vec<(String, String)>,
+    /// The default foreground and background as OSC 10 and 11 set them, until OSC 110 and 111
+    /// reset them.
+    colors: [Option<(u8, u8, u8)>; 2],
     clipboard: Vec<ClipboardWrite>,
     events: Vec<Event>,
     output: Vec<u8>,
@@ -259,6 +262,7 @@ impl Emulator {
             title: String::new(),
             icon: String::new(),
             title_stack: Vec::new(),
+            colors: [None; 2],
             clipboard: Vec::new(),
             events: Vec::new(),
             output: Vec::new(),
@@ -422,6 +426,17 @@ impl Emulator {
     /// The scroll region's top and bottom rows (inclusive).
     pub fn scroll_region(&self) -> (u16, u16) {
         (self.top, self.bottom)
+    }
+
+    /// The default foreground, as OSC 10 set it, else the profile's.
+    pub fn default_foreground(&self) -> Option<(u8, u8, u8)> {
+        self.colors[0].or(self.profile.foreground)
+    }
+
+    /// The default background, as OSC 11 set it, else the profile's. It's the colour of the
+    /// margin a terminal keeps around its cells.
+    pub fn default_background(&self) -> Option<(u8, u8, u8)> {
+        self.colors[1].or(self.profile.background)
     }
 
     /// The window title.
@@ -811,7 +826,8 @@ impl Emulator {
         }
     }
 
-    /// RIS, a full reset. The title and what's been recorded stay.
+    /// RIS, a full reset. The title, the colours OSC 10 and 11 set (as in VTE) and what's been
+    /// recorded stay.
     fn full_reset(&mut self) {
         let fresh = Emulator::with_profile(self.profile.clone(), self.cols, self.rows);
         let keep = std::mem::replace(self, fresh);
@@ -819,6 +835,7 @@ impl Emulator {
         self.record_events = keep.record_events;
         self.title = keep.title;
         self.icon = keep.icon;
+        self.colors = keep.colors;
         self.clipboard = keep.clipboard;
         self.events = keep.events;
         self.output = keep.output;
