@@ -13,7 +13,9 @@ use termelon_vt::{Emulator, Key, Mods, Profile};
 
 use super::{Drawn, Error, MouseMode, Options, Terminal};
 use crate::caps::env::Vars;
-use crate::caps::{Capabilities, ColorDepth, GlyphSupport, KeyboardSupport, Multiplexer, Support};
+use crate::caps::{
+    Capabilities, ColorDepth, GlyphSupport, KeyboardSupport, Multiplexer, Rgb, Support,
+};
 use crate::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crate::layout::Size;
 use crate::output::writer::lock;
@@ -234,7 +236,7 @@ fn kitty_end_to_end() {
             assert_eq!(caps.keyboard, KeyboardSupport::Kitty { flags: 0b1_1111 });
             assert_eq!(caps.synchronized_output, Support::Yes);
             assert_eq!(caps.colors, ColorDepth::TrueColor);
-            assert_eq!(caps.background, Some(crate::caps::Rgb::new(0, 0, 0)));
+            assert_eq!(caps.background, Some(Rgb::new(0, 0, 0)));
             assert!(emulator.alternate_screen());
             assert_eq!(emulator.keyboard_flags(), 0b101);
             assert_eq!(emulator.modify_other_keys(), 0);
@@ -408,7 +410,45 @@ fn out_of_band_commands_reach_the_terminal() {
     );
 }
 
-/// A terminal that doesn't take the title or a copy gets neither.
+/// Whether the emulator's default background is `rgb`.
+fn shows_background(rgb: (u8, u8, u8)) -> impl Fn(&Emulator) -> bool {
+    move |emulator| emulator.default_background() == Some(rgb)
+}
+
+/// A background the program sets reaches the terminal and follows each change, and the
+/// terminal's own comes back with `None` and at close.
+#[test]
+fn the_background_is_set_and_put_back() {
+    let (played, signals) = Played::new(Profile::kitty());
+    let mut terminal = open(&played, signals, &[], &Options::default());
+    let own = (0, 0, 0);
+    assert_eq!(terminal.capabilities().background, Some(Rgb::new(0, 0, 0)));
+    terminal
+        .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
+        .unwrap();
+    played.until("set", shows_background((0x13, 0x13, 0x13)));
+    terminal
+        .set_background(Some(Rgb::new(0xfa, 0xfa, 0xf0)))
+        .unwrap();
+    played.until("changed", shows_background((0xfa, 0xfa, 0xf0)));
+    terminal.set_background(None).unwrap();
+    played.until("put back", shows_background(own));
+    terminal
+        .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
+        .unwrap();
+    played.until("set again", shows_background((0x13, 0x13, 0x13)));
+    terminal.close().unwrap();
+    played.until("given back", |emulator| emulator.mode(25));
+    assert!(shows_background(own)(&lock(&played.emulator)));
+    assert!(
+        lock(&played.unknown).is_empty(),
+        "{:?}",
+        lock(&played.unknown)
+    );
+}
+
+/// A terminal that doesn't take the title or a copy gets neither, and one that didn't report its
+/// background keeps it.
 #[test]
 fn strings_go_only_where_they_are_known() {
     let (played, signals) = Played::new(Profile::xterm());
@@ -419,6 +459,7 @@ fn strings_go_only_where_they_are_known() {
     let mut terminal = open(&played, signals, &[], &options);
     terminal.set_title("not sent").unwrap();
     assert!(!terminal.copy_to_clipboard("not sent").unwrap());
+    terminal.set_background(Some(Rgb::new(1, 2, 3))).unwrap();
     terminal.bell().unwrap();
     played.until("rung", |emulator| {
         emulator
@@ -428,6 +469,9 @@ fn strings_go_only_where_they_are_known() {
     });
     assert_eq!(lock(&played.emulator).title(), "");
     assert_eq!(lock(&played.emulator).clipboard(), []);
+    assert!(shows_background((0xff, 0xff, 0xff))(&lock(
+        &played.emulator
+    )));
     terminal.close().unwrap();
 }
 

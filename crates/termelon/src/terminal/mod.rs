@@ -257,6 +257,8 @@ pub(crate) fn enabled(options: &Options, caps: &Capabilities) -> Enabled {
         hyperlinks: caps.hyperlinks == Support::Yes,
         // (Until a frame asks for a shape.)
         cursor_shape: false,
+        // (Until the program sets one.)
+        background: None,
     }
 }
 
@@ -273,7 +275,7 @@ mod platform {
 
     use super::{Drawn, Error, Events, MouseMode, Options, Result, base64, crlf, enabled};
     use crate::caps::env::Environment;
-    use crate::caps::{self, Capabilities, Support, probe};
+    use crate::caps::{self, Capabilities, Rgb, Support, probe};
     use crate::event::decode::{Decoder, DecoderOptions, Query, Reply};
     use crate::frame::{Frame, Frames};
     use crate::layout::Rect;
@@ -282,7 +284,7 @@ mod platform {
     use crate::output::{Cursor, CursorShape};
     #[cfg(unix)]
     use crate::restore::screen::Screen;
-    use crate::restore::{CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
+    use crate::restore::{Background, CLOSE_WAIT, Enabled, RestoreHandle, mouse_switch};
     #[cfg(unix)]
     use crate::sys::unix::{Signals, Tty, window_size};
     #[cfg(windows)]
@@ -692,6 +694,38 @@ mod platform {
                 return Ok(());
             }
             self.send(switch)
+        }
+
+        /// Sets the terminal's own background to `color` with OSC 11, or puts the terminal's
+        /// back with `None`. It's the colour of the margin a terminal keeps around its cells, and
+        /// of every cell with the default background. A program that paints a background of its
+        /// own on every cell sets it to that colour, so the margin matches.
+        ///
+        /// It goes only to a terminal that reported its background at open
+        /// ([`Capabilities::background`]), since that's the colour that goes back, and does
+        /// nothing elsewhere. Closing, a suspend, a release, a panic and a signal put it back, as
+        /// the terminal reported it and then with OSC 111, which resets it to the terminal's
+        /// default, so a profile changed meanwhile shows its new colour. A terminal can take the
+        /// colour and show it nowhere, as Ptyxis 50 does.
+        ///
+        /// # Errors
+        ///
+        /// [`Error::Io`] once the terminal stopped taking output.
+        pub fn set_background(&mut self, color: Option<Rgb>) -> Result<()> {
+            let background = color
+                .zip(self.caps.background)
+                .map(|(set, reported)| Background { set, reported });
+            if background == self.enabled.background {
+                return Ok(());
+            }
+            let change = match (background, self.enabled.background) {
+                (Some(background), _) => background.setup(),
+                (None, Some(previous)) => previous.reset(),
+                (None, None) => Vec::new(),
+            };
+            self.enabled.background = background;
+            self.screen.set_enabled(&self.enabled);
+            self.send(change)
         }
 
         /// The terminal's size as it says now. SIGWINCH reaches only the terminal's foreground

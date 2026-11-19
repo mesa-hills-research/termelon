@@ -231,7 +231,8 @@ pub struct Capabilities {
     /// scrolled in the terminal rather than written again. The table says `Yes` for the terminals
     /// whose runs in the project's terminal matrix showed scrolled regions right.
     pub scroll_regions: Support,
-    /// The background colour, for choosing a dark or light theme.
+    /// The background colour, for choosing a dark or light theme. It's also what
+    /// [`Terminal::set_background`](crate::Terminal::set_background) puts back.
     pub background: Option<Rgb>,
     /// Whether its font has box drawing and braille.
     pub glyphs: GlyphSupport,

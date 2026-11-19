@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, Once};
 use std::thread::ThreadId;
 use std::time::Duration;
 
+use crate::caps::Rgb;
 use crate::output::writer::{
     self, Direct, Finish, LOCK_WAIT, Takeover, Writer, lock, try_lock_for,
 };
@@ -48,6 +49,38 @@ pub(crate) struct Enabled {
     pub(crate) hyperlinks: bool,
     /// Frames may change the cursor's shape, so the reset puts the default back.
     pub(crate) cursor_shape: bool,
+    /// The terminal's background, set with OSC 11 while the program has the terminal.
+    pub(crate) background: Option<Background>,
+}
+
+/// The terminal's background as a program set it, and as the terminal reported it at open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Background {
+    /// The colour set.
+    pub(crate) set: Rgb,
+    /// The colour the terminal reported, which goes back first, for a terminal without OSC 111.
+    pub(crate) reported: Rgb,
+}
+
+impl Background {
+    /// What sets it.
+    pub(crate) fn setup(self) -> Vec<u8> {
+        osc_11(self.set)
+    }
+
+    /// What puts the terminal's own back. The colour it reported, then OSC 111, which resets it
+    /// to the terminal's default, and so to its profile's colour now, if that changed meanwhile.
+    pub(crate) fn reset(self) -> Vec<u8> {
+        let mut out = osc_11(self.reported);
+        out.extend_from_slice(b"\x1b]111\x1b\\");
+        out
+    }
+}
+
+/// OSC 11, which sets the terminal's background to `color`.
+fn osc_11(color: Rgb) -> Vec<u8> {
+    let Rgb { r, g, b } = color;
+    format!("\x1b]11;rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\").into_bytes()
 }
 
 /// The private modes `mouse` turns on, in order.
@@ -89,7 +122,7 @@ impl Enabled {
 
     /// What takes the terminal. It saves the title, enters the alternate screen, hides the cursor
     /// until a frame shows it, turns autowrap off so the last column never scrolls, then the
-    /// reports and the keyboard flags.
+    /// reports, the keyboard flags and the background.
     pub(crate) fn setup(&self) -> Vec<u8> {
         let mut out = Vec::new();
         if self.save_title {
@@ -108,6 +141,9 @@ impl Enabled {
         if self.modify_other_keys {
             out.extend_from_slice(b"\x1b[>4;1m");
         }
+        if let Some(background) = self.background {
+            out.extend_from_slice(&background.setup());
+        }
         if self.clear {
             out.extend_from_slice(b"\x1b[H\x1b[2J");
         }
@@ -125,12 +161,15 @@ impl Enabled {
         rest.setup()
     }
 
-    /// What gives the terminal back. It ends a synchronized update a frame left open, pops the
-    /// keyboard flags, turns the reports off, resets the pen and any open hyperlink, turns
-    /// autowrap back on, leaves the alternate screen, shows the cursor with its default shape and
-    /// puts the title back.
+    /// What gives the terminal back. It ends a synchronized update a frame left open, puts the
+    /// background back, pops the keyboard flags, turns the reports off, resets the pen and any
+    /// open hyperlink, turns autowrap back on, leaves the alternate screen, shows the cursor with
+    /// its default shape and puts the title back.
     pub(crate) fn reset(&self) -> Vec<u8> {
         let mut out = b"\x1b[?2026l".to_vec();
+        if let Some(background) = self.background {
+            out.extend_from_slice(&background.reset());
+        }
         if self.keyboard.is_some() {
             out.extend_from_slice(b"\x1b[<1u");
         }
@@ -748,6 +787,10 @@ mod tests {
             save_title: true,
             hyperlinks: true,
             cursor_shape: true,
+            background: Some(Background {
+                set: Rgb::new(0x13, 0x13, 0x13),
+                reported: Rgb::new(0xfa, 0xfa, 0xf0),
+            }),
         }
     }
 
@@ -758,13 +801,13 @@ mod tests {
         assert_eq!(
             String::from_utf8(enabled.setup()).unwrap(),
             "\x1b[22;0t\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1004h\
-             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u\x1b[>4;1m"
+             \x1b[?2004h\x1b[?2027h\x1b[?2031h\x1b[>1u\x1b[>4;1m\x1b]11;rgb:13/13/13\x1b\\"
         );
         assert_eq!(
             String::from_utf8(enabled.reset()).unwrap(),
-            "\x1b[?2026l\x1b[<1u\x1b[>4;0m\x1b[?2031l\x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\
-             \x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\x1b[?7h\x1b[r\x1b[?1049l\x1b[0 q\x1b[?25h\
-             \x1b[23;0t"
+            "\x1b[?2026l\x1b]11;rgb:fa/fa/f0\x1b\\\x1b]111\x1b\\\x1b[<1u\x1b[>4;0m\x1b[?2031l\
+             \x1b[?2027l\x1b[?2004l\x1b[?1004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[0m\x1b]8;;\x1b\\\
+             \x1b[?7h\x1b[r\x1b[?1049l\x1b[0 q\x1b[?25h\x1b[23;0t"
         );
         let nothing = Enabled::default();
         assert_eq!(nothing.setup(), b"\x1b[?25l\x1b[?7l");
@@ -940,7 +983,8 @@ mod tests {
     #[cfg(unix)]
     mod unix {
         use super::super::screen::Screen;
-        use super::super::{Enabled, install_panic_hook};
+        use super::super::{Background, Enabled, install_panic_hook};
+        use crate::caps::Rgb;
         use crate::event::{Event, KeyModifiers};
         use crate::layout::Size;
         use crate::sys::Next;
@@ -950,6 +994,8 @@ mod tests {
         use std::io::{self, Write};
         use std::time::Duration;
 
+        /// What the tests turn on, the background too, so each way of giving the terminal back
+        /// shows it puts the terminal's own back.
         fn enabled() -> Enabled {
             Enabled {
                 alternate_screen: true,
@@ -957,6 +1003,10 @@ mod tests {
                 focus: true,
                 bracketed_paste: true,
                 save_title: true,
+                background: Some(Background {
+                    set: Rgb::new(0x13, 0x13, 0x13),
+                    reported: Rgb::new(0x30, 0x0a, 0x24),
+                }),
                 ..Enabled::default()
             }
         }
