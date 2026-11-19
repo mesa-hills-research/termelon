@@ -2,7 +2,7 @@
 name = "termelon-vt"
 description = "A terminal emulator library for Rust, for testing what terminal programs write."
 # Released on its own, when it changes.
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
