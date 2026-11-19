@@ -141,8 +141,10 @@ way, so a wrong note costs nothing.
 
 Closing gives the terminal back, and so does dropping the `Terminal`, a panic (through the panic
 hook `Options::panic_hook` installs) and, where `Options::restore_on_signals` is on, a signal that
-ends the program. The reset packet is built at open from what was enabled, and changes as the
-program changes the mouse reports or the background. It ends any synchronized update, puts back the
+ends the program. The reset packet is built at open from what was enabled, and grows with what the
+program turns on later, the mouse reports or the background. A mode the program turned off since
+stays in it until the end, since closing drops a packet whose write hasn't started, and turning a
+mode off twice changes nothing. It ends any synchronized update, puts back the
 background as it was at open if a program ever set it, pops the kitty keyboard flags, turns off the
 reports that were on, resets the pen, turns autowrap
 back on, resets the scroll region, leaves the alternate screen, shows the cursor and restores the

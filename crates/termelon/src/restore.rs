@@ -119,7 +119,40 @@ pub(crate) fn mouse_switch(from: MouseMode, to: MouseMode) -> Vec<u8> {
     out
 }
 
+/// Of two mouse modes, the one that turns more reports on, which turns the other's on too.
+fn widest(a: MouseMode, b: MouseMode) -> MouseMode {
+    let rank = |mode| match mode {
+        MouseMode::Off => 0,
+        MouseMode::ButtonsAndDrags => 1,
+        MouseMode::AnyMotion => 2,
+    };
+    if rank(a) >= rank(b) { a } else { b }
+}
+
 impl Enabled {
+    /// What `self` and `later` turned on between them, which the reset turns off. A mode a
+    /// program turned off since stays in it until the end, since what turned it off may never
+    /// reach the terminal (closing drops what waits), and turning it off twice changes nothing.
+    /// The background a program set is `later`'s. The stacks, the keyboard flags and the title,
+    /// are pushed once at open and stay as they were then.
+    pub(crate) fn union(&self, later: &Enabled) -> Enabled {
+        Enabled {
+            alternate_screen: self.alternate_screen || later.alternate_screen,
+            clear: self.clear || later.clear,
+            mouse: widest(self.mouse, later.mouse),
+            focus: self.focus || later.focus,
+            bracketed_paste: self.bracketed_paste || later.bracketed_paste,
+            grapheme_clusters: self.grapheme_clusters || later.grapheme_clusters,
+            theme_reports: self.theme_reports || later.theme_reports,
+            keyboard: later.keyboard.or(self.keyboard),
+            modify_other_keys: self.modify_other_keys || later.modify_other_keys,
+            save_title: self.save_title || later.save_title,
+            hyperlinks: self.hyperlinks || later.hyperlinks,
+            cursor_shape: self.cursor_shape || later.cursor_shape,
+            background: later.background.or(self.background),
+        }
+    }
+
     /// The private modes it turns on after the alternate screen, in order.
     fn modes(&self) -> Vec<u16> {
         let mut modes = mouse_modes(self.mouse).to_vec();
@@ -489,6 +522,9 @@ pub(crate) mod screen {
         modes: Arc<Modes>,
         /// What takes the terminal, sent again when the program runs again after a stop.
         setup: Mutex<Vec<u8>>,
+        /// Everything turned on since the terminal was taken, which the reset turns off
+        /// ([`Enabled::union`]).
+        undo: Mutex<Enabled>,
     }
 
     impl Session {
@@ -629,6 +665,7 @@ pub(crate) mod screen {
                 restore,
                 modes,
                 setup: Mutex::new(Vec::new()),
+                undo: Mutex::new(Enabled::default()),
             });
             let decoder = decoder(session.modes.erase());
             let reader = Reader::spawn(
@@ -705,10 +742,15 @@ pub(crate) mod screen {
             Ok(())
         }
 
-        /// Makes `enabled` what the reset undoes and what a resume turns on again. The program
-        /// sends what turns the change on.
+        /// Makes `enabled` what a resume turns on again, and adds it to what the reset undoes,
+        /// which keeps what was turned off since. The program sends what turns the change on.
         pub(crate) fn set_enabled(&self, enabled: &Enabled) {
-            self.session.writer.set_reset(enabled.reset());
+            let reset = {
+                let mut undo = lock(&self.session.undo);
+                *undo = undo.union(enabled);
+                undo.reset()
+            };
+            self.session.writer.set_reset(reset);
             *lock(&self.session.setup) = enabled.setup();
         }
 
@@ -806,6 +848,34 @@ mod tests {
                 over_default: false,
             }),
         }
+    }
+
+    /// What two settings turned on between them keeps every mode either turned on, the widest
+    /// mouse reports, and the later background.
+    #[test]
+    fn the_union_keeps_every_mode_either_turned_on() {
+        let everything = everything();
+        let off = Enabled {
+            mouse: MouseMode::Off,
+            background: everything
+                .background
+                .map(|set| Background { set: None, ..set }),
+            ..Enabled::default()
+        };
+        let union = everything.union(&off);
+        assert_eq!(union.reset(), everything.reset());
+        assert_eq!(union.background, off.background);
+        let buttons = Enabled {
+            mouse: MouseMode::ButtonsAndDrags,
+            ..Enabled::default()
+        };
+        let motion = Enabled {
+            mouse: MouseMode::AnyMotion,
+            ..Enabled::default()
+        };
+        assert_eq!(buttons.union(&motion).mouse, MouseMode::AnyMotion);
+        assert_eq!(motion.union(&buttons).mouse, MouseMode::AnyMotion);
+        assert_eq!(Enabled::default().union(&buttons), buttons);
     }
 
     /// The reset puts the terminal's background back as it was at open. One set over the default
@@ -1138,20 +1208,25 @@ mod tests {
                     background: enabled
                         .background
                         .map(|set| Background { set: None, ..set }),
-                    ..enabled
+                    ..enabled.clone()
                 };
                 screen.set_enabled(&changed);
                 resume.write_all(b"X").unwrap();
                 assert_eq!(next(screen.shared()), Event::Resumed);
                 assert_eq!(pty.modes(), raw);
-                let mut again = changed.reset();
+                // (The reset still turns off what the program turned off since, the mouse and
+                // the background, and the setup doesn't turn them on.)
+                let reset = enabled.union(&changed).reset();
+                assert!(find(&reset, b"\x1b[?1000l").is_some());
+                assert!(find(&reset, b"\x1b]11;rgb:30/0a/24").is_some());
+                assert_eq!(find(&changed.setup(), b"\x1b[?1000h"), None);
+                assert_eq!(find(&changed.setup(), b"\x1b]11;"), None);
+                let mut again = reset.clone();
                 again.extend_from_slice(&changed.setup());
                 let resumed = pty.read_until(first + setup.len(), &again, LONG);
-                assert!(find(&changed.reset(), b"\x1b]11;rgb:30/0a/24").is_some());
-                assert_eq!(find(&changed.setup(), b"\x1b]11;"), None);
                 assert!(screen.shared().take_redraw());
                 assert!(screen.close(b"", LONG));
-                pty.read_until(resumed + again.len(), &changed.reset(), LONG);
+                pty.read_until(resumed + again.len(), &reset, LONG);
                 assert_eq!(pty.modes(), before);
             }
         }

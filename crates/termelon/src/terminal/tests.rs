@@ -466,10 +466,15 @@ fn the_background_is_set_and_put_back() {
     }
 }
 
-/// A background put back just before close goes back, though close drops the packet that put
-/// it back, which waited behind a frame the terminal hadn't taken.
-#[test]
-fn a_background_put_back_just_before_close_goes_back() {
+/// What the terminal reads after a frame it took late. `turn_on` runs while the terminal reads,
+/// until it shows `on`, then the terminal stops reading, a frame waits to be written, `turn_off`
+/// runs, and the terminal closes, which drops what `turn_off` sent, since its write hadn't
+/// started.
+fn turned_off_just_before_close(
+    turn_on: impl FnOnce(&mut Terminal) + Send + 'static,
+    on: &[u8],
+    turn_off: impl FnOnce(&mut Terminal),
+) -> Vec<u8> {
     use crate::output::writer::tests::{block_on, full_pipe};
     use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
     let pty = Pty::open(Size::new(80, 24));
@@ -485,7 +490,7 @@ fn a_background_put_back_just_before_close_goes_back() {
             background: Some(Rgb::new(0x30, 0x0a, 0x24)),
             ..Capabilities::default()
         }),
-        // (Nobody answers the question the first colour asks.)
+        // (Nobody answers the question the first background asks.)
         probe_timeout: Some(Duration::from_millis(50)),
         ..Options::default()
     };
@@ -506,19 +511,20 @@ fn a_background_put_back_just_before_close_goes_back() {
             }
         }
     };
-    let reading = std::thread::spawn(move || {
-        terminal
-            .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
-            .unwrap();
+    let turning_on = std::thread::spawn(move || {
+        turn_on(&mut terminal);
         terminal
     });
-    take_until(b"\x1b]11;rgb:13/13/13\x1b\\");
-    let mut terminal = reading.join().unwrap();
+    take_until(on);
+    let mut terminal = turning_on.join().unwrap();
     assert!(block_on(terminal.written(), LONG));
     // The terminal takes nothing more for now, and a frame waits to be written.
     let flags = fcntl_getfl(&filler).unwrap();
     fcntl_setfl(&filler, flags | OFlags::NONBLOCK).unwrap();
-    while filler.write(&[b'.'; 4096]).is_ok() {}
+    // (Down to the last byte, since a pipe takes a small write whole or not at all.)
+    for size in [4096, 256, 16, 1] {
+        while filler.write(&vec![b'.'; size]).is_ok() {}
+    }
     fcntl_setfl(&filler, flags).unwrap();
     let drawn = terminal.draw(|frame| {
         frame
@@ -531,26 +537,59 @@ fn a_background_put_back_just_before_close_goes_back() {
         assert!(started.elapsed() < LONG, "the frame's write never started");
         std::thread::sleep(Duration::from_millis(1));
     }
-    terminal.set_background(None).unwrap();
+    turn_off(&mut terminal);
     let closing = std::thread::spawn(move || terminal.close());
-    // (Nobody answered whether the colour reported was the default, so it goes back as it was,
-    // set, without OSC 111.)
-    let back = b"\x1b]11;rgb:30/0a/24\x1b\\";
+    // (The close drops what waits before the terminal reads again, which takes it a moment to
+    // start. It waits a second for the terminal to take the reset.)
+    std::thread::sleep(Duration::from_millis(200));
     take_until(b"\x1b[?25h");
     closing.join().unwrap().unwrap();
-    let after_frame = &shown[find(&shown, b"frame").unwrap()..];
-    // (Once, in the reset, since close dropped the packet that put it back.)
-    assert_eq!(
-        after_frame
-            .windows(back.len())
-            .filter(|window| window == back)
-            .count(),
-        1,
-        "{:?}",
-        String::from_utf8_lossy(after_frame)
-    );
-    assert_eq!(find(after_frame, b"\x1b]111"), None);
     drop(pty);
+    shown.split_off(find(&shown, b"frame").unwrap())
+}
+
+/// How many times `needle` is in `haystack`.
+fn count(haystack: &[u8], needle: &[u8]) -> usize {
+    haystack
+        .windows(needle.len())
+        .filter(|window| *window == needle)
+        .count()
+}
+
+/// A background put back just before close goes back, though close dropped what put it back.
+#[test]
+fn a_background_put_back_just_before_close_goes_back() {
+    let after_frame = turned_off_just_before_close(
+        |terminal| {
+            terminal
+                .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
+                .unwrap();
+        },
+        b"\x1b]11;rgb:13/13/13\x1b\\",
+        |terminal| terminal.set_background(None).unwrap(),
+    );
+    // (Once, in the reset. Nobody answered whether the colour reported was the default, so it
+    // goes back as it was, set, without OSC 111.)
+    let back = b"\x1b]11;rgb:30/0a/24\x1b\\";
+    let shown = String::from_utf8_lossy(&after_frame);
+    assert_eq!(count(&after_frame, back), 1, "{shown:?}");
+    assert_eq!(find(&after_frame, b"\x1b]111"), None, "{shown:?}");
+}
+
+/// Mouse reports turned off just before close go off, though close dropped what turned them off.
+#[test]
+fn mouse_reports_turned_off_just_before_close_go_off() {
+    let after_frame = turned_off_just_before_close(
+        |terminal| terminal.set_mouse(MouseMode::AnyMotion).unwrap(),
+        b"\x1b[?1003h",
+        |terminal| terminal.set_mouse(MouseMode::Off).unwrap(),
+    );
+    // (Once each, in the reset.)
+    let shown = String::from_utf8_lossy(&after_frame);
+    for mode in [1003, 1006, 1002, 1000] {
+        let off = format!("\x1b[?{mode}l");
+        assert_eq!(count(&after_frame, off.as_bytes()), 1, "{mode}: {shown:?}");
+    }
 }
 
 /// While the first colour waits for the answer that tells whether the colour reported was the

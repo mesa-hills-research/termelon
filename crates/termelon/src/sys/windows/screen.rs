@@ -31,6 +31,9 @@ pub(crate) struct ScreenOn<C> {
     settings: Arc<Settings>,
     /// What the program turned on, of which the kitty keyboard flags apply only to bytes.
     enabled: Mutex<Enabled>,
+    /// Everything turned on since the console was taken, which the reset turns off
+    /// ([`Enabled::union`]).
+    undo: Mutex<Enabled>,
     /// The restore handle a console control event uses, once the program asks for that.
     console_events: Arc<RestoreHandle>,
     closed: bool,
@@ -126,6 +129,7 @@ impl<C: Console> ScreenOn<C> {
                 modes,
                 settings,
                 enabled: Mutex::new(Enabled::default()),
+                undo: Mutex::new(Enabled::default()),
                 closed: false,
             }),
             Err(error) => {
@@ -168,15 +172,19 @@ impl<C: Console> ScreenOn<C> {
         Ok(())
     }
 
-    /// Makes `enabled` what the reset undoes, takes mouse records (with quick edit off) when the
-    /// mouse is on, and passes focus records on when focus reports are. The program sends what
-    /// turns the change on. A console that refuses the input mode keeps the one it had, which
-    /// only a console gone wrong does.
+    /// Adds `enabled` to what the reset undoes, which keeps what was turned off since, takes
+    /// mouse records (with quick edit off) when the mouse is on, and passes focus records on when
+    /// focus reports are. The program sends what turns the change on. A console that refuses the
+    /// input mode keeps the one it had, which only a console gone wrong does.
     pub(crate) fn set_enabled(&self, enabled: &Enabled) {
         *lock(&self.enabled) = enabled.clone();
+        let undo = {
+            let mut undo = lock(&self.undo);
+            *undo = undo.union(enabled);
+            undo.clone()
+        };
         let mut input = self.modes.input();
-        self.writer
-            .set_reset(effective(enabled, input.mode).reset());
+        self.writer.set_reset(effective(&undo, input.mode).reset());
         self.settings.set_focus(enabled.focus);
         input.mouse = enabled.mouse != MouseMode::Off;
         let _ = self.modes.set_input(input);
@@ -191,7 +199,10 @@ impl<C: Console> ScreenOn<C> {
         if input.mode != mode
             && let Some(flags) = enabled.keyboard
         {
-            self.writer.set_reset(effective(&enabled, mode).reset());
+            // (The keyboard flags are a stack, which the reset pops exactly once, so they go by
+            // the input mode, not by what was ever turned on.)
+            let undo = lock(&self.undo).clone();
+            self.writer.set_reset(effective(&undo, mode).reset());
             let change = match mode {
                 InputMode::Vt => format!("\x1b[>{flags}u"),
                 InputMode::Records => "\x1b[<1u".to_owned(),

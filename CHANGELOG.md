@@ -13,6 +13,10 @@ This release is `termelon` 0.2.2 and `termelon-vt` 0.1.1.
   meanwhile shows its new colour. The first colour set finds out which it was, in the write that
   sets it, and waits one round trip for the answer. Until the answer shows it was the default, and
   without one, the colour goes back as it was, set.
+- Mouse reports turned off just before closing go off. Closing drops what waits to be written,
+  and the reset no longer turned off what the program had turned off since open, so the terminal
+  kept sending mouse reports. The reset now turns off everything the program turned on while it
+  had the terminal.
 - `termelon-vt` takes OSC 10 and 11 with a colour (`rgb:R/G/B` and `#RGB`, 1 to 4 hex digits a
   channel), and OSC 110 and 111. `Emulator::default_foreground` and `default_background` give the
   colours as set, else the profile's, and a query answers with them. `foreground_set` and
