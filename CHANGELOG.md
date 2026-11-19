@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.2
+## 0.2.2 (2026-11-18)
 
 This release is `termelon` 0.2.2 and `termelon-vt` 0.1.1.
 
