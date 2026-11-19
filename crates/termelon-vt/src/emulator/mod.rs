@@ -439,6 +439,16 @@ impl Emulator {
         self.colors[1].or(self.profile.background)
     }
 
+    /// The default foreground OSC 10 set, until OSC 110 reset it to the profile's.
+    pub fn foreground_set(&self) -> Option<(u8, u8, u8)> {
+        self.colors[0]
+    }
+
+    /// The default background OSC 11 set, until OSC 111 reset it to the profile's.
+    pub fn background_set(&self) -> Option<(u8, u8, u8)> {
+        self.colors[1]
+    }
+
     /// The window title.
     pub fn title(&self) -> &str {
         &self.title

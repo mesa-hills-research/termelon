@@ -1078,11 +1078,15 @@ fn osc_10_and_11_set_the_default_colours_until_110_and_111() {
     // A full reset keeps them, as in VTE.
     term.feed(b"\x1bc").unwrap();
     assert_eq!(term.default_background(), Some((0x13, 0x13, 0x13)));
+    assert_eq!(term.background_set(), Some((0x13, 0x13, 0x13)));
     term.feed(b"\x1b]111\x1b\\").unwrap();
     assert_eq!(term.default_background(), Some((0xff, 0xff, 0xff)));
+    assert_eq!(term.background_set(), None);
     assert_eq!(term.default_foreground(), Some((0xde, 0xde, 0xde)));
+    assert_eq!(term.foreground_set(), Some((0xde, 0xde, 0xde)));
     term.feed(b"\x1b]110;\x07").unwrap();
     assert_eq!(term.default_foreground(), Some((0, 0, 0)));
+    assert_eq!(term.foreground_set(), None);
     // Every channel width XParseColor takes, scaled in `rgb:` and the high bits after `#`.
     for (spec, color) in [
         ("rgb:f/8/0", (0xff, 0x88, 0x00)),
