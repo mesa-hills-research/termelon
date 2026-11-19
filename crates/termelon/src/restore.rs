@@ -62,8 +62,9 @@ pub(crate) struct Background {
     pub(crate) set: Option<Rgb>,
     /// The colour the terminal reported at open.
     pub(crate) reported: Rgb,
-    /// That colour was set over the terminal's default (with OSC 11, by a shell's theme say), so
-    /// it goes back as it was, set, rather than reset.
+    /// That colour goes back as it was, set, rather than reset. It was set over the terminal's
+    /// default (with OSC 11, by a shell's theme say), or no answer showed yet that it was the
+    /// default.
     pub(crate) over_default: bool,
 }
 

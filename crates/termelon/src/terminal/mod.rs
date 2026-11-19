@@ -715,8 +715,9 @@ mod platform {
         ///
         /// To tell the two apart, the first colour set resets the background, asks for it and
         /// sets the colour, in one write, so nothing shows in between. It waits for the answer,
-        /// one round trip, at most as long as the probe at open. A terminal can take the colour
-        /// and show it nowhere, as Ptyxis 50 does.
+        /// one round trip, at most as long as the probe at open. Until an answer shows the
+        /// colour reported was the default, and where none comes, it goes back as it was, set.
+        /// A terminal can take the colour and show it nowhere, as Ptyxis 50 does.
         ///
         /// # Errors
         ///
@@ -751,11 +752,12 @@ mod platform {
                 self.screen.set_enabled(&self.enabled);
                 return self.send(changed.setup());
             }
-            // (Until the answer comes, the reset puts the default back.)
+            // (Until an answer shows the colour reported was the default, it goes back as it
+            // was, set, so a colour set over the default is never lost.)
             let mut background = Background {
                 set: Some(set),
                 reported,
-                over_default: false,
+                over_default: true,
             };
             self.enabled.background = Some(background);
             self.screen.set_enabled(&self.enabled);
@@ -773,7 +775,7 @@ mod platform {
                     } => Some(rgb),
                     _ => None,
                 });
-            background.over_default = default.is_some_and(|default| default != reported);
+            background.over_default = default != Some(reported);
             self.enabled.background = Some(background);
             self.screen.set_enabled(&self.enabled);
             Ok(())

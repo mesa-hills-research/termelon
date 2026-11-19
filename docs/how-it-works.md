@@ -159,13 +159,17 @@ at open.
 The background goes back as it was at open. That may be the terminal's default, or a colour a
 shell's theme set over it with `OSC 11`. The first colour a program sets tells them apart. One
 write resets the background (`OSC 111`), asks for it (`OSC 11 ; ?`), sets the colour and asks DA1,
-so the reset never shows. The program waits for the answer, one round trip. When the answer differs
-from the colour reported at open, that colour was set over the default and goes back with
-`OSC 11`. Otherwise the reported colour goes back, for a terminal without `OSC 111`, and then
-`OSC 111`, so the default stays the default and a profile changed meanwhile shows its new colour.
-Once a program set the background, the reset keeps putting it back, also after `set_background(None)`
-put it back, since closing drops a packet that hasn't started and putting it back twice changes
-nothing.
+so the reset never shows. The program waits for the answer, one round trip. An answer that matches
+the colour reported at open shows that colour was the default. The reported colour then goes back,
+for a terminal without `OSC 111`, and then `OSC 111`, so the default stays the default and a
+profile changed meanwhile shows its new colour. Until that answer, and when none comes or it
+differs, the colour goes back with `OSC 11` alone, so a colour set over the default is never lost.
+One set over the default in the default's own colour can't be told apart, and goes back as the
+default.
+
+Once a program set the background, the reset keeps putting it back, also after
+`set_background(None)` put it back, since closing drops a packet that hasn't started and putting it
+back twice changes nothing.
 
 A process killed with SIGKILL can't put it back, and neither can the alternate screen or the modes,
 so the terminal keeps the colour until `printf '\e]111\a'`, or until another program that sets it

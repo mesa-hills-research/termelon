@@ -29,6 +29,8 @@ struct Played {
     emulator: Arc<Mutex<Emulator>>,
     /// The sequences the emulator didn't know, which no test expects.
     unknown: Arc<Mutex<Vec<String>>>,
+    /// The terminal answers nothing, as one behind a slow link doesn't in time.
+    silent: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     resize: PipeWriter,
@@ -40,12 +42,14 @@ impl Played {
         let pty = Pty::open(Size::new(80, 24));
         let emulator = Arc::new(Mutex::new(Emulator::with_profile(profile, 80, 24)));
         let unknown = Arc::new(Mutex::new(Vec::new()));
+        let silent = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
-            let (mut master, emulator, unknown, stop) = (
+            let (mut master, emulator, unknown, silent, stop) = (
                 pty.master.try_clone().unwrap(),
                 emulator.clone(),
                 unknown.clone(),
+                silent.clone(),
                 stop.clone(),
             );
             std::thread::spawn(move || {
@@ -67,6 +71,9 @@ impl Played {
                         }
                         emulator.take_output()
                     };
+                    if silent.load(Ordering::SeqCst) {
+                        continue;
+                    }
                     if master.write_all(&answer).is_err() {
                         return;
                     }
@@ -78,6 +85,7 @@ impl Played {
             pty,
             emulator,
             unknown,
+            silent,
             stop,
             thread: Some(thread),
             resize,
@@ -525,7 +533,9 @@ fn a_background_put_back_just_before_close_goes_back() {
     }
     terminal.set_background(None).unwrap();
     let closing = std::thread::spawn(move || terminal.close());
-    let back = b"\x1b]11;rgb:30/0a/24\x1b\\\x1b]111\x1b\\";
+    // (Nobody answered whether the colour reported was the default, so it goes back as it was,
+    // set, without OSC 111.)
+    let back = b"\x1b]11;rgb:30/0a/24\x1b\\";
     take_until(b"\x1b[?25h");
     closing.join().unwrap().unwrap();
     let after_frame = &shown[find(&shown, b"frame").unwrap()..];
@@ -539,7 +549,42 @@ fn a_background_put_back_just_before_close_goes_back() {
         "{:?}",
         String::from_utf8_lossy(after_frame)
     );
+    assert_eq!(find(after_frame, b"\x1b]111"), None);
     drop(pty);
+}
+
+/// While the first colour waits for the answer that tells whether the colour reported was the
+/// default, and when none comes, a reset puts the colour back as it was, set, so a colour a
+/// shell's theme set over the default isn't lost.
+#[test]
+fn a_background_with_no_answer_goes_back_as_it_was() {
+    let (played, signals) = Played::new(Profile::kitty());
+    let set_before = (0x12, 0x34, 0x56);
+    lock(&played.emulator)
+        .feed(b"\x1b]11;rgb:12/34/56\x1b\\")
+        .unwrap();
+    let options = Options::default().probe_timeout(Duration::from_millis(300));
+    let mut terminal = open(&played, signals, &[], &options);
+    // (The terminal stops answering, as one behind a slow link doesn't in time.)
+    played.silent.store(true, Ordering::SeqCst);
+    let terminal = std::thread::spawn(move || {
+        terminal
+            .set_background(Some(Rgb::new(0x13, 0x13, 0x13)))
+            .unwrap();
+        terminal
+    });
+    played.until("set", shows_background((0x13, 0x13, 0x13)));
+    let terminal = terminal.join().unwrap();
+    terminal.close().unwrap();
+    played.until("given back", |emulator| emulator.mode(25));
+    let emulator = lock(&played.emulator);
+    assert_eq!(emulator.background_set(), Some(set_before));
+    drop(emulator);
+    assert!(
+        lock(&played.unknown).is_empty(),
+        "{:?}",
+        lock(&played.unknown)
+    );
 }
 
 /// A terminal that doesn't take the title or a copy gets neither, and one that didn't report its
