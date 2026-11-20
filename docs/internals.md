@@ -282,13 +282,15 @@ also closes the terminal, suspends it, and lends it to another program with `rel
 Each turn of the reader's loop does these steps.
 
 1. Wait on the input, the signal pipe and the wake pipe, with no timeout, or with the escape timeout
-   while the decoder has a sequence pending.
+   while the decoder has a sequence pending. Each pipe keeps a writer while the reader waits on
+   it, since a pipe without one is ready at every wait.
 2. Read what's ready (up to 4 KiB, or up to 64 records on Windows), take the queries `expect` and
    `cancel_expected` queued and a new escape timeout, then decode.
 3. Queue the events, notifying the condvar and waking every stored waker. Put replies in the reply
    slot when it's open, and drop them otherwise.
-4. When no more input is ready, call `flush_pending` once the escape timeout has passed, and
-   `flush_held` once the input has been silent for a second with something held.
+4. When the turn read no input, whatever else woke the reader, call `flush_pending` once the
+   escape timeout has passed, and `flush_held` once the input has been silent for a second with
+   something held.
 5. On SIGWINCH or a window size record, store the new size, ask for a full redraw and queue
    `Event::Resize`. On SIGTSTP, call the `stop` hook, which gives the terminal back, stops the
    process with SIGSTOP and takes the terminal back once it runs again, then queue

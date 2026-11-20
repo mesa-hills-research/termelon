@@ -17,6 +17,11 @@ This release is `termelon` 0.2.2 and `termelon-vt` 0.1.1.
   and the reset no longer turned off what the program had turned off since open, so the terminal
   kept sending mouse reports. The reset now turns off everything the program turned on while it
   had the terminal.
+- The reader thread no longer keeps a CPU core busy. Unless the program asked for the ending
+  signals, their pipe had no writer and woke the reader at every wait. While it spun, the escape
+  timeout never ran, so Esc in a terminal without the kitty keyboard protocol arrived only with
+  the next key or click. A lone ESC now becomes Esc once the input has been silent for the escape
+  timeout, whatever else wakes the reader.
 - `termelon-vt` takes OSC 10 and 11 with a colour (`rgb:R/G/B` and `#RGB`, 1 to 4 hex digits a
   channel), and OSC 110 and 111. `Emulator::default_foreground` and `default_background` give the
   colours as set, else the profile's, and a query answers with them. `foreground_set` and

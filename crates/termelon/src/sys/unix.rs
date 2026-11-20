@@ -212,6 +212,10 @@ pub(crate) struct Signals {
     /// The ending signals, where the program asked for them, with a flag for each that says which
     /// came.
     end: PipeReader,
+    /// The end pipe's writing end, kept while the reader waits on the pipe. Where the program
+    /// leaves the ending signals alone, nothing else holds it, and a pipe with no writer is ready
+    /// at every wait.
+    end_writer: PipeWriter,
     ends: Vec<(c_int, Arc<AtomicBool>)>,
     registered: Vec<signal_hook::SigId>,
     /// The signals whose default this holds off.
@@ -236,6 +240,7 @@ impl Signals {
             resume,
             stop,
             end,
+            end_writer: end_end,
             ends: Vec::new(),
             registered: Vec::new(),
             held: Vec::new(),
@@ -262,12 +267,10 @@ impl Signals {
                     .registered
                     .push(signal_hook::flag::register(signal, came.clone())?);
                 signals.ends.push((signal, came));
-                signals
-                    .registered
-                    .push(pipe::register(signal, end_end.try_clone()?)?);
+                let writer = signals.end_writer.try_clone()?;
+                signals.registered.push(pipe::register(signal, writer)?);
             }
         }
-        drop(end_end);
         Ok(signals)
     }
 
@@ -283,10 +286,11 @@ impl Signals {
             resume,
             stop,
             end,
+            end_writer: end_end,
             ends: Vec::new(),
             registered: Vec::new(),
             held: Vec::new(),
-            _kept: vec![stop_end, end_end],
+            _kept: vec![stop_end],
         };
         Ok((signals, resize_end, resume_end))
     }
@@ -444,6 +448,9 @@ pub(crate) struct Reader {
 struct Control {
     state: Mutex<Requests>,
     changed: Condvar,
+    /// How many times the reader waited, for tests that it sleeps while nothing comes.
+    #[cfg(test)]
+    waits: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Default)]
@@ -563,6 +570,12 @@ impl Reader {
         lock(&self.control.state).stops
     }
 
+    /// How many times the reader waited.
+    #[cfg(test)]
+    pub(crate) fn waits(&self) -> u64 {
+        self.control.waits.load(Ordering::SeqCst)
+    }
+
     /// Waits until the reader handled a SIGTSTP after the `since`th, for at most `start` for it
     /// to begin, then as long as it takes, the stop included. Whether one came.
     pub(crate) fn wait_for_stop(&self, since: u64, start: Duration) -> bool {
@@ -668,6 +681,8 @@ impl<D: Decode> Loop<D> {
                 self.signals.end.as_fd(),
                 self.wake.as_fd(),
             ];
+            #[cfg(test)]
+            self.ended.control.waits.fetch_add(1, Ordering::SeqCst);
             let [input, resize, resume, stop, end, wake] = match wait(fds, timeout) {
                 Ok(ready) => ready,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -698,10 +713,12 @@ impl<D: Decode> Loop<D> {
                 self.ended.shared.request_redraw();
                 events.push(Event::Resumed);
             }
+            let mut fed = false;
             if input {
                 match (&self.input).read(&mut buffer) {
                     Ok(0) => break,
                     Ok(read) => {
+                        fed = true;
                         last_read = Instant::now();
                         self.take_requests();
                         self.decoder.feed(&buffer[..read], &mut self.decoded);
@@ -726,7 +743,9 @@ impl<D: Decode> Loop<D> {
                         break;
                     }
                 }
-            } else if !(wake || resize || resume || stop || end) {
+            }
+            // (Whatever else woke the reader, the input was silent this turn.)
+            if !fed {
                 if pending_since.is_some_and(|since| since.elapsed() >= self.escape_timeout) {
                     // (The escape timeout passed with nothing more.)
                     pending_since = None;
@@ -1039,10 +1058,18 @@ pub(crate) mod tests {
     }
 
     fn reading_with(decoder: impl Decode, escape_timeout: Duration) -> Reading {
+        reading_on(decoder, escape_timeout, Signals::unregistered().unwrap())
+    }
+
+    /// A reader with `signals` and the ends that stand in for SIGWINCH and SIGCONT.
+    fn reading_on(
+        decoder: impl Decode,
+        escape_timeout: Duration,
+        (signals, resize, resume): (Signals, PipeWriter, PipeWriter),
+    ) -> Reading {
         let pty = Pty::open(Size::new(80, 24));
         let modes = Modes::enter(pty.slave.as_fd()).unwrap();
         let shared = Arc::new(Shared::new(Size::new(80, 24)));
-        let (signals, resize, resume) = Signals::unregistered().unwrap();
         let resumed = Arc::new(Mutex::new(0));
         let counted = resumed.clone();
         let reader = Reader::spawn(
@@ -1191,6 +1218,95 @@ pub(crate) mod tests {
             Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         );
         assert!(typed.elapsed() >= timeout);
+    }
+
+    /// A lone ESC is Esc once the escape timeout passes with the input silent, also while another
+    /// of the reader's pipes is ready at every wait, as one with no writer is.
+    #[test]
+    fn a_lone_escape_times_out_while_another_pipe_is_ready() {
+        let (mut signals, resize, resume) = Signals::unregistered().unwrap();
+        // (The end pipe loses its writer.)
+        signals.end_writer = io::pipe().unwrap().1;
+        let timeout = Duration::from_millis(50);
+        let mut reading = reading_on(Bytes::default(), timeout, (signals, resize, resume));
+        let typed = Instant::now();
+        reading.pty.type_in(b"\x1b");
+        assert_eq!(
+            next(&reading.shared),
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        );
+        assert!(typed.elapsed() >= timeout);
+        reading.reader.stop();
+    }
+
+    /// With the signals a program registers, the ending ones or not, no pipe the reader waits on
+    /// is ready before a signal comes. So the reader sleeps while nothing happens, and a lone ESC
+    /// with nothing after it is Esc once the escape timeout passes.
+    #[test]
+    fn a_reader_on_registered_signals_sleeps_until_input_comes() {
+        use crate::event::decode::DecoderOptions;
+        if is_child("sleeps") {
+            for ending in [false, true] {
+                let signals = Signals::register(ending).unwrap();
+                let pipes = [
+                    signals.resize.as_fd(),
+                    signals.resume.as_fd(),
+                    signals.stop.as_fd(),
+                    signals.end.as_fd(),
+                ];
+                let ready = wait(pipes, Some(Duration::ZERO)).unwrap();
+                assert_eq!(ready, [false; 4], "ending signals {ending}");
+            }
+            let tty = Tty::open().unwrap();
+            let modes = Modes::enter(tty.input.as_fd()).unwrap();
+            let shared = Arc::new(Shared::new(Size::new(80, 24)));
+            let reader = Reader::spawn(
+                tty.input,
+                Decoder::new(DecoderOptions::default()),
+                shared.clone(),
+                Duration::from_millis(20),
+                Signals::register(false).unwrap(),
+                Hooks::none(),
+            )
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+            let before = reader.waits();
+            std::thread::sleep(Duration::from_millis(200));
+            let idle = reader.waits() - before;
+            assert!(
+                idle <= 2,
+                "the reader waited {idle} times while nothing came"
+            );
+            (&File::from(tty.output)).write_all(b"<ready>").unwrap();
+            assert_eq!(
+                next(&shared),
+                Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            );
+            assert_eq!(
+                shared.events.next_timeout(Duration::from_millis(100)),
+                Next::Empty
+            );
+            reader.stop();
+            modes.restore().unwrap();
+            return;
+        }
+        let mut pty = Pty::open(Size::new(80, 24));
+        let mut child = spawn_child(
+            module_path!(),
+            "a_reader_on_registered_signals_sleeps_until_input_comes",
+            "sleeps",
+            &pty,
+        );
+        pty.read_until(0, b"<ready>", LONG);
+        // (Nothing follows it.)
+        pty.type_in(b"\x1b");
+        let status = child.wait().unwrap();
+        pty.read_ready();
+        assert!(
+            status.success(),
+            "{status}: {}",
+            String::from_utf8_lossy(&pty.shown)
+        );
     }
 
     /// A query to expect and a new escape timeout apply to input that came before the reader ran
